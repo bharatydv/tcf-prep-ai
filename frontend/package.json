@@ -1,0 +1,46 @@
+{
+  "name": "tcf-prep-ai-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@phosphor-icons/react": "^2.1.7",
+    "axios": "^1.7.7",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.1.0",
+    "recharts": "^2.13.0",
+    "sonner": "^1.7.0",
+    "react-hook-form": "^7.54.0",
+    "zod": "^3.24.0",
+    "@hookform/resolvers": "^3.9.0",
+    "react-scripts": "5.0.1",
+    "@craco/craco": "^7.1.0"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.14",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47"
+  },
+  "scripts": {
+    "start": "craco start",
+    "build": "craco build",
+    "test": "craco test"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app"
+    ]
+  }
+}
