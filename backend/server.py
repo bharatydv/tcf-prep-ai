@@ -35,8 +35,8 @@ REFRESH_TTL_DAYS = 7
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@frenchcorrector.com").lower()
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123!")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 FREE_MONTHLY_LIMIT = 5
 FREE_MODEL_ANSWER_LIMIT = 3
 
@@ -293,21 +293,6 @@ def _strip_fences(text: str) -> str:
     text = re.sub(r"\s*```$", "", text)
     return text.strip()
 
-
-def _call_gemini_sync(model: str, user_text: str) -> str:
-    from google import genai
-    from google.genai import types
-    gclient = genai.Client(api_key=GEMINI_API_KEY)
-    resp = gclient.models.generate_content(
-        model=model,
-        contents=user_text,
-        config=types.GenerateContentConfig(
-            system_instruction=GRADER_SYSTEM, temperature=0.2
-        ),
-    )
-    return resp.text or ""
-
-
 def _call_openai_sync(model: str, user_text: str) -> str:
     from openai import OpenAI
     oclient = OpenAI(api_key=OPENAI_API_KEY)
@@ -355,32 +340,23 @@ def _validate_analysis(data: dict) -> dict:
 
 
 async def analyze_text_with_ai(text: str, topic: Optional[str] = None) -> dict:
-    """Try gemini-2.0-flash -> gpt-4o-mini -> gemini-2.5-flash, 2 attempts each."""
+    """Grade with OpenAI. Two attempts."""
     prompt = (f"Topic/consigne: {topic}\n\nText to grade:\n{text}"
               if topic else f"Text to grade:\n{text}")
-    chain = []
-    if GEMINI_API_KEY:
-        chain.append(("gemini", "gemini-2.0-flash"))
-    if OPENAI_API_KEY:
-        chain.append(("openai", "gpt-4o-mini"))
-    if GEMINI_API_KEY:
-        chain.append(("gemini", "gemini-2.5-flash"))
+    if not OPENAI_API_KEY:
+        log.warning("No OPENAI_API_KEY set")
+        return dict(FALLBACK_ANALYSIS)
     loop = asyncio.get_event_loop()
-    for provider, model in chain:
-        for attempt in range(2):
-            try:
-                if provider == "gemini":
-                    raw = await loop.run_in_executor(
-                        None, _call_gemini_sync, model, prompt)
-                else:
-                    raw = await loop.run_in_executor(
-                        None, _call_openai_sync, model, prompt)
-                data = json.loads(_strip_fences(raw))
-                return _validate_analysis(data)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("AI call failed (%s/%s attempt %s): %s",
-                            provider, model, attempt + 1, exc)
-                await asyncio.sleep(0.5)
+    for attempt in range(2):
+        try:
+            raw = await loop.run_in_executor(
+                None, _call_openai_sync, OPENAI_MODEL, prompt)
+            data = json.loads(_strip_fences(raw))
+            return _validate_analysis(data)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("AI call failed (openai/%s attempt %s): %s",
+                        OPENAI_MODEL, attempt + 1, exc)
+            await asyncio.sleep(0.5)
     return dict(FALLBACK_ANALYSIS)
 
 
@@ -403,9 +379,9 @@ async def generate_distractor(error_text: str, correction: str,
               f"alternative text, nothing else.")
     loop = asyncio.get_event_loop()
     try:
-        if GEMINI_API_KEY:
+        if OPENAI_API_KEY:
             raw = await loop.run_in_executor(
-                None, _call_gemini_sync, "gemini-2.0-flash", prompt)
+                None, _call_openai_sync, OPENAI_MODEL, prompt)
             raw = _strip_fences(raw).strip().strip('"')
             if raw and raw.lower() != correction.lower():
                 return raw[:200]
