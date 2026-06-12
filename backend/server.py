@@ -35,8 +35,10 @@ REFRESH_TTL_DAYS = 7
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@frenchcorrector.com").lower()
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123!")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+#OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+#OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5")
 FREE_MONTHLY_LIMIT = 5
 FREE_MODEL_ANSWER_LIMIT = 3
 
@@ -293,18 +295,18 @@ def _strip_fences(text: str) -> str:
     text = re.sub(r"\s*```$", "", text)
     return text.strip()
 
-def _call_openai_sync(model: str, user_text: str) -> str:
-    from openai import OpenAI
-    oclient = OpenAI(api_key=OPENAI_API_KEY)
-    resp = oclient.chat.completions.create(
+def _call_anthropic_sync(model: str, user_text: str) -> str:
+    from anthropic import Anthropic
+    aclient = Anthropic(api_key=ANTHROPIC_API_KEY)
+    resp = aclient.messages.create(
         model=model,
+        max_tokens=2000,
         temperature=0.2,
-        messages=[
-            {"role": "system", "content": GRADER_SYSTEM},
-            {"role": "user", "content": user_text},
-        ],
+        system=GRADER_SYSTEM,
+        messages=[{"role": "user", "content": user_text}],
     )
-    return resp.choices[0].message.content or ""
+    parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
+    return "".join(parts)
 
 
 def _validate_analysis(data: dict) -> dict:
@@ -343,19 +345,19 @@ async def analyze_text_with_ai(text: str, topic: Optional[str] = None) -> dict:
     """Grade with OpenAI. Two attempts."""
     prompt = (f"Topic/consigne: {topic}\n\nText to grade:\n{text}"
               if topic else f"Text to grade:\n{text}")
-    if not OPENAI_API_KEY:
-        log.warning("No OPENAI_API_KEY set")
+    if not ANTHROPIC_API_KEY:
+        log.warning("No ANTHROPIC_API_KEY set")
         return dict(FALLBACK_ANALYSIS)
     loop = asyncio.get_event_loop()
     for attempt in range(2):
         try:
             raw = await loop.run_in_executor(
-                None, _call_openai_sync, OPENAI_MODEL, prompt)
+                None, _call_anthropic_sync, ANTHROPIC_MODEL, prompt)
             data = json.loads(_strip_fences(raw))
             return _validate_analysis(data)
         except Exception as exc:  # noqa: BLE001
-            log.warning("AI call failed (openai/%s attempt %s): %s",
-                        OPENAI_MODEL, attempt + 1, exc)
+            log.warning("AI call failed (anthropic/%s attempt %s): %s",
+                        ANTHROPIC_MODEL, attempt + 1, exc)
             await asyncio.sleep(0.5)
     return dict(FALLBACK_ANALYSIS)
 
@@ -379,9 +381,9 @@ async def generate_distractor(error_text: str, correction: str,
               f"alternative text, nothing else.")
     loop = asyncio.get_event_loop()
     try:
-        if OPENAI_API_KEY:
+        if ANTHROPIC_API_KEY:
             raw = await loop.run_in_executor(
-                None, _call_openai_sync, OPENAI_MODEL, prompt)
+                None, _call_anthropic_sync, ANTHROPIC_MODEL, prompt)
             raw = _strip_fences(raw).strip().strip('"')
             if raw and raw.lower() != correction.lower():
                 return raw[:200]
