@@ -85,20 +85,14 @@ export default function Landing() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [simTopic, setSimTopic] = useState('');
+  const [simAnswer, setSimAnswer] = useState('');
   const [email, setEmail] = useState('');
   const trialTo = user ? '/dashboard' : '/register';
 
   const startSimulator = () => {
     if (!user) { toast.info('Create your free account to run the simulator — 5 free attempts included.'); return navigate('/register'); }
-    navigate('/check-writing', { state: { label: simTopic.trim() || null } });
+    navigate('/check-writing', { state: { label: simTopic.trim() || null, prefill: simAnswer.trim() || null } });
   };
-
-  const features = [
-    { icon: Microphone, title: 'AI Speaking Lab', desc: 'Real-time pronunciation & fluency feedback.', to: '/speaking' },
-    { icon: PenNib, title: 'Writing Assistant', desc: 'Advanced grammar, coherence & structure check.', to: '/practice' },
-    { icon: GraduationCap, title: 'Mock Exams', desc: 'Full-length TCF tests with AI evaluation.', to: '/exam/reading-comprehension' },
-    { icon: FolderOpen, title: 'Resources', desc: 'Real recent topics with model answers for your level.', to: '/recent-topics' },
-  ];
 
   const plans = [
     { name: 'Bronze', price: '14.99', period: '/ 5 Days', popular: false },
@@ -212,26 +206,6 @@ export default function Landing() {
             </div>
           </div>
         </div>
-
-        {/* feature strip */}
-        <div className="relative mx-auto max-w-6xl px-4 pb-10 sm:px-6">
-          <Reveal>
-            <div className="grid divide-y divide-gray-100 rounded-3xl bg-white shadow-xl shadow-violet-200/50 sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4 lg:divide-x">
-              {features.map((f, i) => (
-                <Link key={f.title} to={f.to} data-testid={`feature-${i}`}
-                  className="group flex items-start gap-4 p-6 transition hover:bg-violet-50/60">
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-primary transition group-hover:scale-110 group-hover:bg-primary group-hover:text-white">
-                    <f.icon size={22} weight="duotone" />
-                  </span>
-                  <span>
-                    <span className="block font-heading text-sm font-bold text-gray-900">{f.title}</span>
-                    <span className="mt-1 block text-xs leading-relaxed text-gray-500">{f.desc}</span>
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </Reveal>
-        </div>
       </section>
 
       {/* ============================================ AI WRITTEN SIMULATOR */}
@@ -251,6 +225,18 @@ export default function Landing() {
                   data-testid="sim-topic-input"
                 />
                 <p className="mt-2 text-xs italic text-gray-400">e.g. Impact of technology on modern education</p>
+                
+                <textarea
+                  className="input !rounded-xl text-sm mt-4 resize-none"
+                  placeholder="Write your answer here… (optional — leave blank to start fresh on the next page)"
+                  rows={5}
+                  value={simAnswer}
+                  maxLength={3000}
+                  onChange={(e) => setSimAnswer(e.target.value)}
+                  data-testid="sim-answer-input"
+                />
+                <p className="mt-1 text-right text-xs text-gray-400">{simAnswer.length} / 3000</p>
+                
                 <div className="mt-3 flex items-center justify-between gap-3">
                   <span className="rounded-lg bg-gray-50 px-3 py-1 text-xs text-gray-400">{simTopic.length} / 1000</span>
                   <button onClick={startSimulator} data-testid="start-simulator-button"
