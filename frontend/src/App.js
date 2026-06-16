@@ -17,6 +17,8 @@ import RecentTopics, { RecentTopicDetail } from "./pages/RecentTopics";
 import Speaking from "./pages/Speaking";
 import MockExam from "./pages/MockExam";
 import Admin from "./pages/Admin";
+import Combinations from './pages/Combinations';
+
 
 export default function App() {
   return (
@@ -54,6 +56,7 @@ export default function App() {
             path="/feedback/:submissionId"
             element={<ProtectedRoute><Feedback /></ProtectedRoute>}
           />
+          <Route path="/combinations" element={<Combinations />} />
           <Route
             path="/admin"
             element={<ProtectedRoute adminOnly><Admin /></ProtectedRoute>}

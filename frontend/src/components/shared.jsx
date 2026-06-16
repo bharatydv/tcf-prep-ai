@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { Link, NavLink, Navigate, useNavigate } from 'react-router-dom';
-import { PenNib, Fire, SignOut, List, X } from '@phosphor-icons/react';
+import { PenNib, Fire, SignOut, List, X, SquaresFour } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 import { ACCENTS, CATEGORY_META } from '../lib/api';
 
@@ -44,6 +44,10 @@ export function Header() {
                   <Fire size={14} weight="fill" /> {user.current_streak}
                 </span>
               )}
+              <Link to="/dashboard"
+                className="btn-outline !px-3 !py-1.5 text-sm" data-testid="header-dashboard">
+                <SquaresFour size={16} weight="fill" /> Dashboard
+              </Link>
               <Link to={user.role === 'admin' ? '/admin' : '/dashboard'}
                 className="text-sm font-semibold text-gray-700 hover:text-primary" data-testid="user-menu">
                 {user.name?.split(' ')[0]}
