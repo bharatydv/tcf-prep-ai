@@ -1,7 +1,11 @@
 """
-TCF Prep AI — FastAPI backend
+TCF Prep AI — FastAPI backend (PostgreSQL edition)
 French exam-preparation platform for TCF Canada.
 All routes are prefixed with /api.
+
+Database layer: SQLAlchemy 2.0 (async) + asyncpg.
+Business logic, API routes, AI prompts and grading are unchanged from the
+original MongoDB version — only persistence was migrated.
 """
 import os
 import re
@@ -9,7 +13,8 @@ import json
 import uuid
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone, date
 from typing import Optional, List, Dict, Any
 
 import bcrypt
@@ -18,15 +23,30 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
+
+from sqlalchemy import (
+    String, Integer, Boolean, DateTime, Text, ForeignKey, func, select,
+    update as sa_update, delete as sa_delete,
+)
+from sqlalchemy.dialects.postgresql import JSONB, ARRAY
+from sqlalchemy.ext.asyncio import (
+    AsyncSession, async_sessionmaker, create_async_engine,
+)
+from sqlalchemy.orm import (
+    DeclarativeBase, Mapped, mapped_column, relationship,
+)
 
 load_dotenv()
 
 # ----------------------------------------------------------------------------
 # Config
 # ----------------------------------------------------------------------------
-MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+RAW_DB_URL = os.environ.get(
+    "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/tcf_prep_ai")
+# Force the asyncpg driver.
+DATABASE_URL = RAW_DB_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+
 DB_NAME = os.environ.get("DB_NAME", "tcf_prep_ai")
 JWT_SECRET = os.environ.get("JWT_SECRET", "change-me-in-prod")
 JWT_ALG = "HS256"
@@ -35,8 +55,8 @@ REFRESH_TTL_DAYS = 7
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@frenchcorrector.com").lower()
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123!")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
-#OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-#OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+# OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+# OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5")
 FREE_MONTHLY_LIMIT = 5
@@ -45,20 +65,218 @@ FREE_MODEL_ANSWER_LIMIT = 3
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("tcf-prep-ai")
 
-client = AsyncIOMotorClient(MONGO_URL)
-db = client[DB_NAME]
+# ----------------------------------------------------------------------------
+# Database engine / session
+# ----------------------------------------------------------------------------
+engine = create_async_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
+SessionLocal = async_sessionmaker(engine, expire_on_commit=False,
+                                  class_=AsyncSession)
 
-app = FastAPI(title="TCF Canada Prep API")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[FRONTEND_URL],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+async def get_db() -> AsyncSession:
+    async with SessionLocal() as session:
+        yield session
+
+
+class Base(DeclarativeBase):
+    pass
+
 
 # ----------------------------------------------------------------------------
-# Helpers
+# ORM models  (one class per former Mongo collection)
+# ----------------------------------------------------------------------------
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(20), default="user")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    free_submissions_used: Mapped[int] = mapped_column(Integer, default=0)
+    subscription_status: Mapped[str] = mapped_column(String(20), default="free")
+    monthly_reset_date: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    current_streak: Mapped[int] = mapped_column(Integer, default=0)
+    longest_streak: Mapped[int] = mapped_column(Integer, default=0)
+    last_activity_date: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    xp: Mapped[int] = mapped_column(Integer, default=0)
+    badges: Mapped[List[str]] = mapped_column(ARRAY(String), default=list)
+    model_answers_read: Mapped[int] = mapped_column(Integer, default=0)
+    model_answer_topic_ids: Mapped[List[str]] = mapped_column(
+        ARRAY(String), default=list)
+
+
+class Prompt(Base):
+    __tablename__ = "prompts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    prompt_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    title: Mapped[str] = mapped_column(Text)
+    description: Mapped[str] = mapped_column(Text)
+    category: Mapped[str] = mapped_column(String(50))
+    level: Mapped[str] = mapped_column(String(8), default="C1")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Submission(Base):
+    __tablename__ = "submissions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    submission_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.user_id"), index=True)
+    prompt_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    original_text: Mapped[str] = mapped_column(Text)
+    errors: Mapped[Any] = mapped_column(JSONB, default=list)
+    overall_score: Mapped[int] = mapped_column(Integer, default=0)
+    tcf_level: Mapped[str] = mapped_column(String(8), default="A1")
+    improvement_suggestions: Mapped[Any] = mapped_column(JSONB, default=list)
+    linking_words: Mapped[Any] = mapped_column(JSONB, default=list)
+    vocabulary_suggestions: Mapped[Any] = mapped_column(JSONB, default=list)
+    word_count: Mapped[int] = mapped_column(Integer, default=0)
+    source: Mapped[str] = mapped_column(String(20), default="practice")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True)
+
+
+class Mistake(Base):
+    __tablename__ = "mistakes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    mistake_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.user_id"), index=True)
+    source: Mapped[str] = mapped_column(String(20))
+    ref_id: Mapped[str] = mapped_column(String(64))
+    category: Mapped[str] = mapped_column(String(30), index=True)
+    error_text: Mapped[str] = mapped_column(Text)
+    normalized_error: Mapped[str] = mapped_column(Text)
+    correction: Mapped[str] = mapped_column(Text)
+    explanation: Mapped[str] = mapped_column(Text)
+    distractor: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(20), default="new")
+    times_repeated: Mapped[int] = mapped_column(Integer, default=1)
+    srs_interval_index: Mapped[int] = mapped_column(Integer, default=0)
+    srs_due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    srs_consecutive_got_it: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class SimulatorPrompt(Base):
+    __tablename__ = "simulator_prompts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    sim_prompt_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    task_type: Mapped[int] = mapped_column(Integer, index=True)
+    text: Mapped[str] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ExamAttempt(Base):
+    __tablename__ = "exam_attempts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    attempt_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.user_id"), index=True)
+    task1: Mapped[Any] = mapped_column(JSONB)
+    task2: Mapped[Any] = mapped_column(JSONB)
+    task3: Mapped[Any] = mapped_column(JSONB)
+    combined_score: Mapped[float] = mapped_column(Integer)
+    tcf_level: Mapped[str] = mapped_column(String(8))
+    time_used_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ExamQuestion(Base):
+    __tablename__ = "exam_questions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    question_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    exam_type: Mapped[str] = mapped_column(String(40), index=True)
+    text: Mapped[str] = mapped_column(Text)
+    question: Mapped[str] = mapped_column(Text)
+    options: Mapped[Any] = mapped_column(JSONB)
+    correct_answer: Mapped[str] = mapped_column(String(8))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class RecentTopic(Base):
+    __tablename__ = "recent_topics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    topic_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    title: Mapped[str] = mapped_column(Text)
+    task_type: Mapped[int] = mapped_column(Integer)
+    topic_text: Mapped[str] = mapped_column(Text)
+    model_answer: Mapped[str] = mapped_column(Text)
+    target_level: Mapped[str] = mapped_column(String(8), default="B2")
+    month_label: Mapped[str] = mapped_column(String(40))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ReviewSession(Base):
+    __tablename__ = "review_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.user_id"), index=True)
+    mode: Mapped[str] = mapped_column(String(20))
+    mistake_ids: Mapped[Any] = mapped_column(JSONB, default=list)
+    results: Mapped[Any] = mapped_column(JSONB, default=list)
+    xp_earned: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True)
+
+
+# ----------------------------------------------------------------------------
+# Row -> dict helpers (replace Mongo's strip_mongo)
+# ----------------------------------------------------------------------------
+def _row_to_dict(obj: Base, drop: tuple = ()) -> dict:
+    """Serialize an ORM row to a plain dict, dropping internal/sensitive cols."""
+    out = {}
+    for col in obj.__table__.columns:
+        if col.name in drop or col.name == "id":
+            continue
+        out[col.name] = getattr(obj, col.name)
+    return out
+
+
+def strip_user(u: User) -> dict:
+    return _row_to_dict(u, drop=("password_hash",))
+
+
+def public_user(u: User) -> dict:
+    return {
+        "user_id": u.user_id,
+        "email": u.email,
+        "name": u.name,
+        "role": u.role,
+        "created_at": u.created_at,
+        "free_submissions_used": u.free_submissions_used or 0,
+        "subscription_status": u.subscription_status or "free",
+        "monthly_reset_date": u.monthly_reset_date,
+        "current_streak": u.current_streak or 0,
+        "longest_streak": u.longest_streak or 0,
+        "last_activity_date": u.last_activity_date,
+        "xp": u.xp or 0,
+        "badges": u.badges or [],
+        "model_answers_read": u.model_answers_read or 0,
+    }
+
+
+# ----------------------------------------------------------------------------
+# Generic helpers
 # ----------------------------------------------------------------------------
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -83,9 +301,7 @@ def make_token(user_id: str, kind: str, minutes: int = 0, days: int = 0) -> str:
     exp = now_utc() + timedelta(minutes=minutes, days=days)
     return jwt.encode(
         {"sub": user_id, "type": kind, "exp": exp, "iat": now_utc()},
-        JWT_SECRET,
-        algorithm=JWT_ALG,
-    )
+        JWT_SECRET, algorithm=JWT_ALG)
 
 
 def decode_token(token: str, expected: str) -> Optional[str]:
@@ -112,36 +328,22 @@ def clear_auth_cookies(resp: Response):
     resp.delete_cookie("refresh_token", path="/")
 
 
-def public_user(u: dict) -> dict:
-    return {
-        "user_id": u["user_id"],
-        "email": u["email"],
-        "name": u["name"],
-        "role": u["role"],
-        "created_at": u["created_at"],
-        "free_submissions_used": u.get("free_submissions_used", 0),
-        "subscription_status": u.get("subscription_status", "free"),
-        "monthly_reset_date": u.get("monthly_reset_date"),
-        "current_streak": u.get("current_streak", 0),
-        "longest_streak": u.get("longest_streak", 0),
-        "last_activity_date": u.get("last_activity_date"),
-        "xp": u.get("xp", 0),
-        "badges": u.get("badges", []),
-        "model_answers_read": u.get("model_answers_read", 0),
-    }
+# small DB convenience helpers --------------------------------------------------
+async def get_user_by_id(db: AsyncSession, user_id: str) -> Optional[User]:
+    res = await db.execute(select(User).where(User.user_id == user_id))
+    return res.scalar_one_or_none()
 
 
-def strip_mongo(doc: dict) -> dict:
-    doc = dict(doc)
-    doc.pop("_id", None)
-    doc.pop("password_hash", None)
-    return doc
+async def get_user_by_email(db: AsyncSession, email: str) -> Optional[User]:
+    res = await db.execute(select(User).where(User.email == email))
+    return res.scalar_one_or_none()
 
 
 # ----------------------------------------------------------------------------
 # Auth dependencies
 # ----------------------------------------------------------------------------
-async def get_current_user(request: Request) -> dict:
+async def get_current_user(request: Request,
+                           db: AsyncSession = Depends(get_db)) -> User:
     token = request.cookies.get("access_token")
     if not token:
         auth = request.headers.get("Authorization", "")
@@ -152,14 +354,14 @@ async def get_current_user(request: Request) -> dict:
     user_id = decode_token(token, "access")
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = await db.users.find_one({"user_id": user_id})
+    user = await get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return user
 
 
-async def get_admin_user(user: dict = Depends(get_current_user)) -> dict:
-    if user.get("role") != "admin":
+async def get_admin_user(user: User = Depends(get_current_user)) -> User:
+    if user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
 
@@ -167,9 +369,9 @@ async def get_admin_user(user: dict = Depends(get_current_user)) -> dict:
 # ----------------------------------------------------------------------------
 # Freemium limits & streaks
 # ----------------------------------------------------------------------------
-async def check_and_reset_monthly(user: dict) -> dict:
+async def check_and_reset_monthly(db: AsyncSession, user: User) -> User:
     """Reset the free counter if the month changed; returns the fresh user."""
-    reset = user.get("monthly_reset_date")
+    reset = user.monthly_reset_date
     now = now_utc()
     needs_reset = True
     if reset:
@@ -181,37 +383,36 @@ async def check_and_reset_monthly(user: dict) -> dict:
         if reset and reset.month == now.month and reset.year == now.year:
             needs_reset = False
     if needs_reset:
-        await db.users.update_one(
-            {"user_id": user["user_id"]},
-            {"$set": {"free_submissions_used": 0, "monthly_reset_date": now}},
-        )
-        user = await db.users.find_one({"user_id": user["user_id"]})
+        user.free_submissions_used = 0
+        user.monthly_reset_date = now
+        await db.commit()
+        await db.refresh(user)
     return user
 
 
-async def enforce_free_limit(user: dict) -> dict:
-    user = await check_and_reset_monthly(user)
-    if user.get("subscription_status") == "premium":
+async def enforce_free_limit(db: AsyncSession, user: User) -> User:
+    user = await check_and_reset_monthly(db, user)
+    if user.subscription_status == "premium":
         return user
-    if user.get("free_submissions_used", 0) >= FREE_MONTHLY_LIMIT:
+    if (user.free_submissions_used or 0) >= FREE_MONTHLY_LIMIT:
         raise HTTPException(
             status_code=402,
-            detail="Free tier limit reached. Please upgrade to continue.",
-        )
+            detail="Free tier limit reached. Please upgrade to continue.")
     return user
 
 
-async def consume_credit(user_id: str):
-    await db.users.update_one(
-        {"user_id": user_id}, {"$inc": {"free_submissions_used": 1}}
-    )
+async def consume_credit(db: AsyncSession, user_id: str):
+    await db.execute(
+        sa_update(User).where(User.user_id == user_id)
+        .values(free_submissions_used=User.free_submissions_used + 1))
+    await db.commit()
 
 
-async def update_streak(user_id: str) -> dict:
+async def update_streak(db: AsyncSession, user_id: str) -> dict:
     """A qualifying action happened today; update the streak."""
-    user = await db.users.find_one({"user_id": user_id})
+    user = await get_user_by_id(db, user_id)
     today = now_utc().date()
-    last = user.get("last_activity_date")
+    last = user.last_activity_date
     if isinstance(last, datetime):
         last = last.date()
     elif isinstance(last, str):
@@ -219,7 +420,7 @@ async def update_streak(user_id: str) -> dict:
             last = datetime.fromisoformat(last).date()
         except ValueError:
             last = None
-    current = user.get("current_streak", 0)
+    current = user.current_streak or 0
     extended = False
     if last == today:
         pass
@@ -229,22 +430,18 @@ async def update_streak(user_id: str) -> dict:
     else:
         current = 1
         extended = True
-    longest = max(user.get("longest_streak", 0), current)
-    await db.users.update_one(
-        {"user_id": user_id},
-        {"$set": {
-            "current_streak": current,
-            "longest_streak": longest,
-            "last_activity_date": datetime(today.year, today.month, today.day,
-                                           tzinfo=timezone.utc),
-        }},
-    )
+    longest = max(user.longest_streak or 0, current)
+    user.current_streak = current
+    user.longest_streak = longest
+    user.last_activity_date = datetime(today.year, today.month, today.day,
+                                       tzinfo=timezone.utc)
+    await db.commit()
     return {"current_streak": current, "longest_streak": longest,
             "extended": extended}
 
 
 # ----------------------------------------------------------------------------
-# AI grading
+# AI grading  (unchanged logic)
 # ----------------------------------------------------------------------------
 VALID_CATEGORIES = {"prepositions", "spelling", "conjugation",
                     "gender_number", "anglicism", "improvement"}
@@ -295,6 +492,7 @@ def _strip_fences(text: str) -> str:
     text = re.sub(r"\s*```$", "", text)
     return text.strip()
 
+
 def _call_anthropic_sync(model: str, user_text: str) -> str:
     from anthropic import Anthropic
     aclient = Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -342,7 +540,7 @@ def _validate_analysis(data: dict) -> dict:
 
 
 async def analyze_text_with_ai(text: str, topic: Optional[str] = None) -> dict:
-    """Grade with OpenAI. Two attempts."""
+    """Grade with Anthropic. Two attempts."""
     prompt = (f"Topic/consigne: {topic}\n\nText to grade:\n{text}"
               if topic else f"Text to grade:\n{text}")
     if not ANTHROPIC_API_KEY:
@@ -396,74 +594,81 @@ def normalize_error_text(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip().lower())
 
 
-async def record_mistakes(user_id: str, source: str, ref_id: str,
-                          analysis: dict, generate_distractors: bool = True):
-    """Write each detected error into the per-user mistakes collection."""
+async def record_mistakes(db: AsyncSession, user_id: str, source: str,
+                          ref_id: str, analysis: dict,
+                          generate_distractors: bool = True):
+    """Write each detected error into the per-user mistakes table."""
     for err in analysis.get("errors", []):
         if err["category"] == "improvement":
             continue  # improvements are not mistakes
         norm = normalize_error_text(err["error"])
-        existing = await db.mistakes.find_one(
-            {"user_id": user_id, "category": err["category"],
-             "normalized_error": norm})
+        res = await db.execute(
+            select(Mistake).where(
+                Mistake.user_id == user_id,
+                Mistake.category == err["category"],
+                Mistake.normalized_error == norm))
+        existing = res.scalar_one_or_none()
         if existing:
-            new_status = ("new" if existing.get("status") == "mastered"
-                          else existing.get("status", "new"))
-            await db.mistakes.update_one(
-                {"mistake_id": existing["mistake_id"]},
-                {"$inc": {"times_repeated": 1},
-                 "$set": {"last_seen_at": now_utc(), "status": new_status}})
+            new_status = ("new" if existing.status == "mastered"
+                          else (existing.status or "new"))
+            existing.times_repeated = (existing.times_repeated or 0) + 1
+            existing.last_seen_at = now_utc()
+            existing.status = new_status
+            await db.commit()
             continue
         distractor = STATIC_DISTRACTORS.get(err["category"],
                                             "réponse incorrecte")
         if generate_distractors:
             distractor = await generate_distractor(
                 err["error"], err["correction"], err["category"])
-        await db.mistakes.insert_one({
-            "mistake_id": new_id("mst"),
-            "user_id": user_id,
-            "source": source,
-            "ref_id": ref_id,
-            "category": err["category"],
-            "error_text": err["error"],
-            "normalized_error": norm,
-            "correction": err["correction"],
-            "explanation": err["explanation"],
-            "distractor": distractor,
-            "created_at": now_utc(),
-            "last_seen_at": now_utc(),
-            "status": "new",
-            "times_repeated": 1,
-            "srs_interval_index": 0,
-            "srs_due_at": now_utc(),
-            "srs_consecutive_got_it": 0,
-        })
+        db.add(Mistake(
+            mistake_id=new_id("mst"),
+            user_id=user_id,
+            source=source,
+            ref_id=ref_id,
+            category=err["category"],
+            error_text=err["error"],
+            normalized_error=norm,
+            correction=err["correction"],
+            explanation=err["explanation"],
+            distractor=distractor,
+            created_at=now_utc(),
+            last_seen_at=now_utc(),
+            status="new",
+            times_repeated=1,
+            srs_interval_index=0,
+            srs_due_at=now_utc(),
+            srs_consecutive_got_it=0,
+        ))
+        await db.commit()
 
 
-async def persist_submission(user: dict, text: str, prompt_id: Optional[str],
-                             analysis: dict, source: str = "practice") -> dict:
-    sub = {
-        "submission_id": new_id("sub"),
-        "user_id": user["user_id"],
-        "prompt_id": prompt_id,
-        "original_text": text,
-        "errors": analysis["errors"],
-        "overall_score": analysis["overall_score"],
-        "tcf_level": analysis["tcf_level"],
-        "improvement_suggestions": analysis["improvement_suggestions"],
-        "linking_words": analysis["linking_words"],
-        "vocabulary_suggestions": analysis["vocabulary_suggestions"],
-        "word_count": len(text.split()),
-        "source": source,
-        "created_at": now_utc(),
-    }
-    await db.submissions.insert_one(dict(sub))
-    await record_mistakes(user["user_id"], source, sub["submission_id"],
-                          analysis)
-    await consume_credit(user["user_id"])
-    streak = await update_streak(user["user_id"])
-    sub["streak"] = streak
-    return sub
+async def persist_submission(db: AsyncSession, user: User, text: str,
+                             prompt_id: Optional[str], analysis: dict,
+                             source: str = "practice") -> dict:
+    sub = Submission(
+        submission_id=new_id("sub"),
+        user_id=user.user_id,
+        prompt_id=prompt_id,
+        original_text=text,
+        errors=analysis["errors"],
+        overall_score=analysis["overall_score"],
+        tcf_level=analysis["tcf_level"],
+        improvement_suggestions=analysis["improvement_suggestions"],
+        linking_words=analysis["linking_words"],
+        vocabulary_suggestions=analysis["vocabulary_suggestions"],
+        word_count=len(text.split()),
+        source=source,
+        created_at=now_utc(),
+    )
+    db.add(sub)
+    await db.commit()
+    await record_mistakes(db, user.user_id, source, sub.submission_id, analysis)
+    await consume_credit(db, user.user_id)
+    streak = await update_streak(db, user.user_id)
+    out = _row_to_dict(sub)
+    out["streak"] = streak
+    return out
 
 
 # ----------------------------------------------------------------------------
@@ -622,58 +827,80 @@ SEED_EXAM_QUESTIONS = [
 ]
 
 
-@app.on_event("startup")
-async def startup():
-    await db.users.create_index("email", unique=True)
-    await db.users.create_index("user_id", unique=True)
-    await db.submissions.create_index("submission_id", unique=True)
-    await db.prompts.create_index("prompt_id", unique=True)
-    await db.exam_questions.create_index("question_id", unique=True)
-    await db.submissions.create_index("user_id")
-    await db.exam_questions.create_index("exam_type")
-    await db.mistakes.create_index([("user_id", 1), ("category", 1)])
-    await db.recent_topics.create_index("topic_id", unique=True)
-    await db.exam_attempts.create_index("attempt_id", unique=True)
+async def run_seeds():
+    async with SessionLocal() as db:
+        # Admin
+        admin = await get_user_by_email(db, ADMIN_EMAIL)
+        if not admin:
+            db.add(User(
+                user_id=new_id("user"),
+                email=ADMIN_EMAIL,
+                password_hash=hash_password(ADMIN_PASSWORD),
+                name="Admin",
+                role="admin",
+                created_at=now_utc(),
+                free_submissions_used=0,
+                subscription_status="premium",
+                monthly_reset_date=now_utc(),
+                current_streak=0, longest_streak=0,
+                last_activity_date=None, xp=0, badges=[],
+                model_answers_read=0, model_answer_topic_ids=[],
+            ))
+            await db.commit()
+            log.info("Seeded admin account %s", ADMIN_EMAIL)
 
-    if not await db.users.find_one({"email": ADMIN_EMAIL}):
-        await db.users.insert_one({
-            "user_id": new_id("user"),
-            "email": ADMIN_EMAIL,
-            "password_hash": hash_password(ADMIN_PASSWORD),
-            "name": "Admin",
-            "role": "admin",
-            "created_at": now_utc(),
-            "free_submissions_used": 0,
-            "subscription_status": "premium",
-            "monthly_reset_date": now_utc(),
-            "current_streak": 0, "longest_streak": 0,
-            "last_activity_date": None, "xp": 0, "badges": [],
-            "model_answers_read": 0,
-        })
-        log.info("Seeded admin account %s", ADMIN_EMAIL)
+        # Prompts
+        count = await db.scalar(select(func.count()).select_from(Prompt))
+        if not count:
+            for title, desc, cat in SEED_PROMPTS:
+                db.add(Prompt(
+                    prompt_id=new_id("prompt"), title=title, description=desc,
+                    category=cat, level="C1", is_active=True,
+                    created_at=now_utc()))
+            await db.commit()
+            log.info("Seeded %d writing prompts", len(SEED_PROMPTS))
 
-    if await db.prompts.count_documents({}) == 0:
-        for title, desc, cat in SEED_PROMPTS:
-            await db.prompts.insert_one({
-                "prompt_id": new_id("prompt"), "title": title,
-                "description": desc, "category": cat, "level": "C1",
-                "is_active": True, "created_at": now_utc(),
-            })
-        log.info("Seeded %d writing prompts", len(SEED_PROMPTS))
+        # Simulator prompts
+        count = await db.scalar(
+            select(func.count()).select_from(SimulatorPrompt))
+        if not count:
+            for task_type, text in SEED_SIM_PROMPTS:
+                db.add(SimulatorPrompt(
+                    sim_prompt_id=new_id("simp"), task_type=task_type,
+                    text=text, is_active=True, created_at=now_utc()))
+            await db.commit()
 
-    if await db.simulator_prompts.count_documents({}) == 0:
-        for task_type, text in SEED_SIM_PROMPTS:
-            await db.simulator_prompts.insert_one({
-                "sim_prompt_id": new_id("simp"), "task_type": task_type,
-                "text": text, "is_active": True, "created_at": now_utc(),
-            })
+        # Exam questions
+        count = await db.scalar(
+            select(func.count()).select_from(ExamQuestion))
+        if not count:
+            for q in SEED_EXAM_QUESTIONS:
+                db.add(ExamQuestion(
+                    question_id=new_id("q"), created_at=now_utc(),
+                    is_active=True, **q))
+            await db.commit()
 
-    if await db.exam_questions.count_documents({}) == 0:
-        for q in SEED_EXAM_QUESTIONS:
-            await db.exam_questions.insert_one({
-                "question_id": new_id("q"), **q,
-                "created_at": now_utc(), "is_active": True,
-            })
+
+# ----------------------------------------------------------------------------
+# Lifespan: create tables + seed
+# ----------------------------------------------------------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    await run_seeds()
+    yield
+    await engine.dispose()
+
+
+app = FastAPI(title="TCF Canada Prep API", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[FRONTEND_URL],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ----------------------------------------------------------------------------
@@ -693,45 +920,50 @@ async def health():
 # Auth routes
 # ----------------------------------------------------------------------------
 @app.post("/api/auth/register")
-async def register(body: RegisterIn, response: Response):
+async def register(body: RegisterIn, response: Response,
+                   db: AsyncSession = Depends(get_db)):
     email = body.email.lower()
-    if await db.users.find_one({"email": email}):
+    if await get_user_by_email(db, email):
         raise HTTPException(status_code=400, detail="Email already registered")
-    user = {
-        "user_id": new_id("user"),
-        "email": email,
-        "password_hash": hash_password(body.password),
-        "name": body.name.strip(),
-        "role": "admin" if email == ADMIN_EMAIL else "user",
-        "created_at": now_utc(),
-        "free_submissions_used": 0,
-        "subscription_status": "free",
-        "monthly_reset_date": now_utc(),
-        "current_streak": 0, "longest_streak": 0,
-        "last_activity_date": None, "xp": 0, "badges": [],
-        "model_answers_read": 0,
-    }
-    await db.users.insert_one(dict(user))
-    set_auth_cookies(response, user["user_id"])
+    user = User(
+        user_id=new_id("user"),
+        email=email,
+        password_hash=hash_password(body.password),
+        name=body.name.strip(),
+        role="admin" if email == ADMIN_EMAIL else "user",
+        created_at=now_utc(),
+        free_submissions_used=0,
+        subscription_status="free",
+        monthly_reset_date=now_utc(),
+        current_streak=0, longest_streak=0,
+        last_activity_date=None, xp=0, badges=[],
+        model_answers_read=0, model_answer_topic_ids=[],
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    set_auth_cookies(response, user.user_id)
     return {"user": public_user(user)}
 
 
 @app.post("/api/auth/login")
-async def login(body: LoginIn, response: Response):
-    user = await db.users.find_one({"email": body.email.lower()})
-    if not user or not verify_password(body.password, user["password_hash"]):
+async def login(body: LoginIn, response: Response,
+                db: AsyncSession = Depends(get_db)):
+    user = await get_user_by_email(db, body.email.lower())
+    if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    set_auth_cookies(response, user["user_id"])
+    set_auth_cookies(response, user.user_id)
     return {"user": public_user(user)}
 
 
 @app.post("/api/auth/refresh")
-async def refresh(request: Request, response: Response):
+async def refresh(request: Request, response: Response,
+                  db: AsyncSession = Depends(get_db)):
     token = request.cookies.get("refresh_token")
     user_id = decode_token(token, "refresh") if token else None
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
-    user = await db.users.find_one({"user_id": user_id})
+    user = await get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     access = make_token(user_id, "access", minutes=ACCESS_TTL_MIN)
@@ -741,8 +973,9 @@ async def refresh(request: Request, response: Response):
 
 
 @app.get("/api/auth/me")
-async def me(user: dict = Depends(get_current_user)):
-    user = await check_and_reset_monthly(user)
+async def me(user: User = Depends(get_current_user),
+             db: AsyncSession = Depends(get_db)):
+    user = await check_and_reset_monthly(db, user)
     return {"user": public_user(user)}
 
 
@@ -756,17 +989,22 @@ async def logout(response: Response):
 # Prompts (public)
 # ----------------------------------------------------------------------------
 @app.get("/api/prompts")
-async def list_prompts():
-    cur = db.prompts.find({"is_active": True}).sort("created_at", 1)
-    return {"prompts": [strip_mongo(p) async for p in cur]}
+async def list_prompts(db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(Prompt).where(Prompt.is_active == True)  # noqa: E712
+        .order_by(Prompt.created_at.asc()))
+    return {"prompts": [_row_to_dict(p) for p in res.scalars().all()]}
 
 
 @app.get("/api/prompts/{prompt_id}")
-async def get_prompt(prompt_id: str):
-    p = await db.prompts.find_one({"prompt_id": prompt_id, "is_active": True})
+async def get_prompt(prompt_id: str, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(Prompt).where(Prompt.prompt_id == prompt_id,
+                             Prompt.is_active == True))  # noqa: E712
+    p = res.scalar_one_or_none()
     if not p:
         raise HTTPException(status_code=404, detail="Prompt not found")
-    return {"prompt": strip_mongo(p)}
+    return {"prompt": _row_to_dict(p)}
 
 
 # ----------------------------------------------------------------------------
@@ -781,8 +1019,9 @@ def _sse(event: str, data: Any) -> str:
 
 @app.post("/api/analyze/stream")
 async def analyze_stream(body: AnalyzeIn,
-                         user: dict = Depends(get_current_user)):
-    user = await enforce_free_limit(user)
+                         user: User = Depends(get_current_user),
+                         db: AsyncSession = Depends(get_db)):
+    user = await enforce_free_limit(db, user)
     source = body.source if body.source in {"practice", "paste"} else "practice"
 
     async def gen():
@@ -794,8 +1033,8 @@ async def analyze_stream(body: AnalyzeIn,
                 await asyncio.sleep(0.6)
             analysis = await task
             sub = await persist_submission(
-                user, body.text, body.prompt_id, analysis, source=source)
-            yield _sse("complete", strip_mongo(sub))
+                db, user, body.text, body.prompt_id, analysis, source=source)
+            yield _sse("complete", sub)
         except HTTPException as exc:
             yield _sse("error", {"detail": exc.detail,
                                  "status": exc.status_code})
@@ -811,48 +1050,58 @@ async def analyze_stream(body: AnalyzeIn,
 
 @app.post("/api/submissions")
 async def create_submission(body: AnalyzeIn,
-                            user: dict = Depends(get_current_user)):
-    user = await enforce_free_limit(user)
+                            user: User = Depends(get_current_user),
+                            db: AsyncSession = Depends(get_db)):
+    user = await enforce_free_limit(db, user)
     source = body.source if body.source in {"practice", "paste"} else "practice"
     analysis = await analyze_text_with_ai(body.text, body.topic or body.label)
-    sub = await persist_submission(user, body.text, body.prompt_id, analysis,
-                                   source=source)
-    return strip_mongo(sub)
+    sub = await persist_submission(db, user, body.text, body.prompt_id,
+                                   analysis, source=source)
+    return sub
 
 
 @app.get("/api/submissions")
-async def list_submissions(user: dict = Depends(get_current_user)):
-    cur = db.submissions.find({"user_id": user["user_id"]}) \
-        .sort("created_at", -1).limit(100)
-    return {"submissions": [strip_mongo(s) async for s in cur]}
+async def list_submissions(user: User = Depends(get_current_user),
+                           db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(Submission).where(Submission.user_id == user.user_id)
+        .order_by(Submission.created_at.desc()).limit(100))
+    return {"submissions": [_row_to_dict(s) for s in res.scalars().all()]}
 
 
 @app.get("/api/submissions/{submission_id}")
 async def get_submission(submission_id: str,
-                         user: dict = Depends(get_current_user)):
-    sub = await db.submissions.find_one({"submission_id": submission_id})
+                         user: User = Depends(get_current_user),
+                         db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(Submission).where(Submission.submission_id == submission_id))
+    sub = res.scalar_one_or_none()
     if not sub:
         raise HTTPException(status_code=404, detail="Submission not found")
-    if sub["user_id"] != user["user_id"] and user.get("role") != "admin":
+    if sub.user_id != user.user_id and user.role != "admin":
         raise HTTPException(status_code=403, detail="Access denied")
-    return {"submission": strip_mongo(sub)}
+    return {"submission": _row_to_dict(sub)}
 
 
 # ----------------------------------------------------------------------------
 # Exam simulator
 # ----------------------------------------------------------------------------
 @app.get("/api/simulator/start")
-async def simulator_start(user: dict = Depends(get_current_user)):
+async def simulator_start(user: User = Depends(get_current_user),
+                          db: AsyncSession = Depends(get_db)):
     """Return one random active prompt per task."""
     tasks = {}
     for t in (1, 2, 3):
-        pipeline = [{"$match": {"task_type": t, "is_active": True}},
-                    {"$sample": {"size": 1}}]
-        docs = await db.simulator_prompts.aggregate(pipeline).to_list(1)
-        if not docs:
+        res = await db.execute(
+            select(SimulatorPrompt).where(
+                SimulatorPrompt.task_type == t,
+                SimulatorPrompt.is_active == True)  # noqa: E712
+            .order_by(func.random()).limit(1))
+        doc = res.scalar_one_or_none()
+        if not doc:
             raise HTTPException(status_code=503,
                                 detail=f"No simulator prompts for Tâche {t}")
-        tasks[f"task{t}"] = strip_mongo(docs[0])
+        tasks[f"task{t}"] = _row_to_dict(doc)
     return tasks
 
 
@@ -861,8 +1110,9 @@ WORD_GUIDE = {1: (60, 120), 2: (120, 150), 3: (120, 180)}
 
 @app.post("/api/simulator/submit")
 async def simulator_submit(body: SimulatorSubmitIn,
-                           user: dict = Depends(get_current_user)):
-    user = await enforce_free_limit(user)
+                           user: User = Depends(get_current_user),
+                           db: AsyncSession = Depends(get_db)):
+    user = await enforce_free_limit(db, user)
     attempt_id = new_id("att")
     tasks_out = {}
     scores = []
@@ -880,59 +1130,70 @@ async def simulator_submit(body: SimulatorSubmitIn,
         }
         scores.append(analysis["overall_score"])
         levels.append(analysis["tcf_level"])
-        await record_mistakes(user["user_id"], "simulator", attempt_id,
+        await record_mistakes(db, user.user_id, "simulator", attempt_id,
                               analysis)
     combined = round(sum(scores) / 3, 1)
     tcf_level = level_order[
         min(round(sum(level_order.index(l) for l in levels) / 3), 5)]
-    attempt = {
-        "attempt_id": attempt_id, "user_id": user["user_id"],
-        **tasks_out,
-        "combined_score": combined, "tcf_level": tcf_level,
-        "time_used_seconds": body.time_used_seconds, "created_at": now_utc(),
-    }
-    await db.exam_attempts.insert_one(dict(attempt))
-    await consume_credit(user["user_id"])  # one credit per run, not three
-    streak = await update_streak(user["user_id"])
-    attempt["streak"] = streak
-    return {"attempt": strip_mongo(attempt)}
+    attempt = ExamAttempt(
+        attempt_id=attempt_id, user_id=user.user_id,
+        task1=tasks_out["task1"], task2=tasks_out["task2"],
+        task3=tasks_out["task3"],
+        combined_score=combined, tcf_level=tcf_level,
+        time_used_seconds=body.time_used_seconds, created_at=now_utc(),
+    )
+    db.add(attempt)
+    await db.commit()
+    await consume_credit(db, user.user_id)  # one credit per run, not three
+    streak = await update_streak(db, user.user_id)
+    out = _row_to_dict(attempt)
+    out["streak"] = streak
+    return {"attempt": out}
 
 
 @app.get("/api/simulator/attempts")
-async def simulator_attempts(user: dict = Depends(get_current_user)):
-    cur = db.exam_attempts.find({"user_id": user["user_id"]}) \
-        .sort("created_at", -1).limit(50)
-    return [strip_mongo(a) async for a in cur]
+async def simulator_attempts(user: User = Depends(get_current_user),
+                             db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(ExamAttempt).where(ExamAttempt.user_id == user.user_id)
+        .order_by(ExamAttempt.created_at.desc()).limit(50))
+    return [_row_to_dict(a) for a in res.scalars().all()]
 
 
 @app.get("/api/simulator/attempts/{attempt_id}")
 async def simulator_attempt(attempt_id: str,
-                            user: dict = Depends(get_current_user)):
-    a = await db.exam_attempts.find_one({"attempt_id": attempt_id})
+                            user: User = Depends(get_current_user),
+                            db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(ExamAttempt).where(ExamAttempt.attempt_id == attempt_id))
+    a = res.scalar_one_or_none()
     if not a:
         raise HTTPException(status_code=404, detail="Attempt not found")
-    if a["user_id"] != user["user_id"] and user.get("role") != "admin":
+    if a.user_id != user.user_id and user.role != "admin":
         raise HTTPException(status_code=403, detail="Access denied")
-    return strip_mongo(a)
+    return _row_to_dict(a)
 
 
 # ----------------------------------------------------------------------------
 # Dashboard
 # ----------------------------------------------------------------------------
 @app.get("/api/dashboard/stats")
-async def dashboard_stats(user: dict = Depends(get_current_user)):
-    subs = [s async for s in db.submissions.find(
-        {"user_id": user["user_id"]}).sort("created_at", 1)]
+async def dashboard_stats(user: User = Depends(get_current_user),
+                          db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(Submission).where(Submission.user_id == user.user_id)
+        .order_by(Submission.created_at.asc()))
+    subs = res.scalars().all()
     total = len(subs)
-    avg = round(sum(s["overall_score"] for s in subs) / total, 1) if total else 0.0
+    avg = round(sum(s.overall_score for s in subs) / total, 1) if total else 0.0
     breakdown = {c: 0 for c in VALID_CATEGORIES}
     for s in subs:
-        for e in s.get("errors", []):
+        for e in (s.errors or []):
             cat = e.get("category", "spelling")
             breakdown[cat] = breakdown.get(cat, 0) + 1
-    trend = [{"date": s["created_at"].strftime("%Y-%m-%d")
-              if isinstance(s["created_at"], datetime) else str(s["created_at"])[:10],
-              "score": s["overall_score"]} for s in subs[-10:]]
+    trend = [{"date": s.created_at.strftime("%Y-%m-%d")
+              if isinstance(s.created_at, datetime) else str(s.created_at)[:10],
+              "score": s.overall_score} for s in subs[-10:]]
     freq = sorted(((c, n) for c, n in breakdown.items() if n > 0),
                   key=lambda x: -x[1])
     return {
@@ -941,25 +1202,30 @@ async def dashboard_stats(user: dict = Depends(get_current_user)):
         "error_breakdown": breakdown,
         "score_trend": trend,
         "most_frequent_errors": [{"category": c, "count": n} for c, n in freq],
-        "current_streak": user.get("current_streak", 0),
-        "longest_streak": user.get("longest_streak", 0),
-        "xp": user.get("xp", 0),
-        "badges": user.get("badges", []),
+        "current_streak": user.current_streak or 0,
+        "longest_streak": user.longest_streak or 0,
+        "xp": user.xp or 0,
+        "badges": user.badges or [],
     }
 
 
 @app.get("/api/dashboard/heatmap")
-async def dashboard_heatmap(user: dict = Depends(get_current_user)):
+async def dashboard_heatmap(user: User = Depends(get_current_user),
+                            db: AsyncSession = Depends(get_db)):
     since = now_utc() - timedelta(days=365)
     out: Dict[str, int] = {}
-    async for s in db.submissions.find(
-            {"user_id": user["user_id"], "created_at": {"$gte": since}}):
-        d = s["created_at"]
+    res = await db.execute(
+        select(Submission).where(Submission.user_id == user.user_id,
+                                 Submission.created_at >= since))
+    for s in res.scalars().all():
+        d = s.created_at
         key = d.strftime("%Y-%m-%d") if isinstance(d, datetime) else str(d)[:10]
         out[key] = out.get(key, 0) + 1
-    async for r in db.review_sessions.find(
-            {"user_id": user["user_id"], "created_at": {"$gte": since}}):
-        d = r["created_at"]
+    res = await db.execute(
+        select(ReviewSession).where(ReviewSession.user_id == user.user_id,
+                                    ReviewSession.created_at >= since))
+    for r in res.scalars().all():
+        d = r.created_at
         key = d.strftime("%Y-%m-%d") if isinstance(d, datetime) else str(d)[:10]
         out[key] = out.get(key, 0) + 1
     return {"heatmap": out}
@@ -983,40 +1249,47 @@ CATEGORY_LABELS_FR = {
 
 
 @app.get("/api/mistakes/summary")
-async def mistakes_summary(user: dict = Depends(get_current_user)):
-    mistakes = [m async for m in db.mistakes.find({"user_id": user["user_id"]})]
+async def mistakes_summary(user: User = Depends(get_current_user),
+                           db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(Mistake).where(Mistake.user_id == user.user_id))
+    mistakes = res.scalars().all()
     per_cat = {c: 0 for c in VALID_CATEGORIES if c != "improvement"}
     status_counts = {"new": 0, "reviewing": 0, "mastered": 0}
     for m in mistakes:
-        per_cat[m["category"]] = (per_cat.get(m["category"], 0)
-                                  + m.get("times_repeated", 1))
-        st = m.get("status", "new")
+        per_cat[m.category] = (per_cat.get(m.category, 0)
+                               + (m.times_repeated or 1))
+        st = m.status or "new"
         status_counts[st] = status_counts.get(st, 0) + 1
     monthly: Dict[str, Dict[str, int]] = {}
-    async for s in db.submissions.find({"user_id": user["user_id"]}):
-        d = s["created_at"]
+    res = await db.execute(
+        select(Submission).where(Submission.user_id == user.user_id))
+    subs_all = res.scalars().all()
+    for s in subs_all:
+        d = s.created_at
         key = d.strftime("%Y-%m") if isinstance(d, datetime) else str(d)[:7]
         bucket = monthly.setdefault(key, {"errors": 0, "words": 0})
-        bucket["errors"] += len([e for e in s.get("errors", [])
+        bucket["errors"] += len([e for e in (s.errors or [])
                                  if e.get("category") != "improvement"])
-        bucket["words"] += s.get("word_count",
-                                 len(s["original_text"].split()))
+        bucket["words"] += s.word_count or len(s.original_text.split())
     trend = [{"month": k,
               "errors_per_100_words": round(v["errors"] / v["words"] * 100, 2)
               if v["words"] else 0}
              for k, v in sorted(monthly.items())]
     repeat_leaders = sorted(mistakes,
-                            key=lambda m: -m.get("times_repeated", 1))[:5]
+                            key=lambda m: -(m.times_repeated or 1))[:5]
     weak = sorted(((c, n) for c, n in per_cat.items() if n > 0),
                   key=lambda x: -x[1])[:3]
     narrative = None
-    subs = [s async for s in db.submissions.find({"user_id": user["user_id"]})
-            .sort("created_at", -1).limit(10)]
+    res = await db.execute(
+        select(Submission).where(Submission.user_id == user.user_id)
+        .order_by(Submission.created_at.desc()).limit(10))
+    subs = res.scalars().all()
     if len(subs) >= 6:
         def rate(group, cat):
-            errs = sum(len([e for e in s.get("errors", [])
+            errs = sum(len([e for e in (s.errors or [])
                             if e.get("category") == cat]) for s in group)
-            words = sum(s.get("word_count", 1) for s in group) or 1
+            words = sum(s.word_count or 1 for s in group) or 1
             return errs / words
         recent, older = subs[:5], subs[5:]
         best_cat, best_drop = None, 0
@@ -1035,7 +1308,7 @@ async def mistakes_summary(user: dict = Depends(get_current_user)):
         "status_counts": status_counts,
         "trend": trend,
         "monthly_trend": trend,
-        "repeat_leaders": [strip_mongo(m) for m in repeat_leaders],
+        "repeat_leaders": [_row_to_dict(m) for m in repeat_leaders],
         "weak_points": [{"category": c, "count": n,
                          "label": CATEGORY_LABELS_FR.get(c, c),
                          "tip": CATEGORY_TIPS.get(c, "")} for c, n in weak],
@@ -1054,98 +1327,109 @@ XP_CATEGORY_CLEAR_BONUS = 50
 @app.get("/api/review/queue")
 async def review_queue(category: Optional[str] = None,
                        limit: int = Query(20, le=50),
-                       user: dict = Depends(get_current_user)):
-    q: Dict[str, Any] = {"user_id": user["user_id"],
-                         "status": {"$ne": "mastered"},
-                         "srs_due_at": {"$lte": now_utc()}}
+                       user: User = Depends(get_current_user),
+                       db: AsyncSession = Depends(get_db)):
+    stmt = select(Mistake).where(
+        Mistake.user_id == user.user_id,
+        Mistake.status != "mastered",
+        Mistake.srs_due_at <= now_utc())
     if category and category in VALID_CATEGORIES:
-        q["category"] = category
-    cur = db.mistakes.find(q).sort("srs_due_at", 1).limit(limit)
-    return {"due": [strip_mongo(m) async for m in cur]}
+        stmt = stmt.where(Mistake.category == category)
+    stmt = stmt.order_by(Mistake.srs_due_at.asc()).limit(limit)
+    res = await db.execute(stmt)
+    return {"due": [_row_to_dict(m) for m in res.scalars().all()]}
 
 
 @app.post("/api/review/submit")
 async def review_submit(body: ReviewSubmitIn,
-                        user: dict = Depends(get_current_user)):
+                        user: User = Depends(get_current_user),
+                        db: AsyncSession = Depends(get_db)):
     xp = 0
     mastered_now: List[str] = []
     new_badges: List[str] = []
     for r in body.results:
-        m = await db.mistakes.find_one(
-            {"mistake_id": r.mistake_id, "user_id": user["user_id"]})
+        res = await db.execute(
+            select(Mistake).where(Mistake.mistake_id == r.mistake_id,
+                                  Mistake.user_id == user.user_id))
+        m = res.scalar_one_or_none()
         if not m:
             continue
-        updates: Dict[str, Any] = {}
         if r.correct:
             xp += XP_PER_CORRECT
-            streak_ok = m.get("srs_consecutive_got_it", 0) + 1
-            idx = m.get("srs_interval_index", 0)
+            streak_ok = (m.srs_consecutive_got_it or 0) + 1
+            idx = m.srs_interval_index or 0
             if idx >= len(SRS_LADDER) - 1 and streak_ok >= 2:
-                updates["status"] = "mastered"
-                mastered_now.append(m["mistake_id"])
+                m.status = "mastered"
+                mastered_now.append(m.mistake_id)
             else:
                 idx = min(idx + 1, len(SRS_LADDER) - 1)
-                updates["status"] = "reviewing"
-            updates["srs_consecutive_got_it"] = streak_ok
-            updates["srs_interval_index"] = idx
-            updates["srs_due_at"] = now_utc() + timedelta(days=SRS_LADDER[idx])
+                m.status = "reviewing"
+            m.srs_consecutive_got_it = streak_ok
+            m.srs_interval_index = idx
+            m.srs_due_at = now_utc() + timedelta(days=SRS_LADDER[idx])
         else:
-            updates["srs_consecutive_got_it"] = 0
-            updates["srs_interval_index"] = 0
-            updates["srs_due_at"] = now_utc() + timedelta(days=SRS_LADDER[0])
-            updates["status"] = "reviewing"
-        await db.mistakes.update_one({"mistake_id": m["mistake_id"]},
-                                     {"$set": updates})
-        if (updates.get("status") == "mastered"
-                and m.get("times_repeated", 1) >= 3):
+            m.srs_consecutive_got_it = 0
+            m.srs_interval_index = 0
+            m.srs_due_at = now_utc() + timedelta(days=SRS_LADDER[0])
+            m.status = "reviewing"
+        await db.commit()
+        if m.status == "mastered" and (m.times_repeated or 1) >= 3:
             new_badges.append("Comeback — fixed a mistake repeated 3+ times")
-    user_doc = await db.users.find_one({"user_id": user["user_id"]})
-    badges = set(user_doc.get("badges", []))
+
+    user_doc = await get_user_by_id(db, user.user_id)
+    badges = set(user_doc.badges or [])
     slayer = "Conjugaison Slayer — 25 conjugation mistakes mastered"
-    n_conj = await db.mistakes.count_documents(
-        {"user_id": user["user_id"], "category": "conjugation",
-         "status": "mastered"})
-    if n_conj >= 25 and slayer not in badges:
+    n_conj = await db.scalar(
+        select(func.count()).select_from(Mistake).where(
+            Mistake.user_id == user.user_id,
+            Mistake.category == "conjugation",
+            Mistake.status == "mastered"))
+    if (n_conj or 0) >= 25 and slayer not in badges:
         new_badges.append(slayer)
     for cat in VALID_CATEGORIES:
-        remaining = await db.mistakes.count_documents(
-            {"user_id": user["user_id"], "category": cat,
-             "status": {"$ne": "mastered"}})
-        had_any = await db.mistakes.count_documents(
-            {"user_id": user["user_id"], "category": cat})
-        if had_any and remaining == 0:
+        remaining = await db.scalar(
+            select(func.count()).select_from(Mistake).where(
+                Mistake.user_id == user.user_id, Mistake.category == cat,
+                Mistake.status != "mastered"))
+        had_any = await db.scalar(
+            select(func.count()).select_from(Mistake).where(
+                Mistake.user_id == user.user_id, Mistake.category == cat))
+        if had_any and not remaining:
             xp += XP_CATEGORY_CLEAR_BONUS
     badges.update(new_badges)
-    session = {
-        "session_id": new_id("rev"), "user_id": user["user_id"],
-        "mode": body.mode,
-        "mistake_ids": [r.mistake_id for r in body.results],
-        "results": [r.dict() for r in body.results],
-        "xp_earned": xp, "created_at": now_utc(),
-    }
-    await db.review_sessions.insert_one(dict(session))
-    await db.users.update_one({"user_id": user["user_id"]},
-                              {"$inc": {"xp": xp},
-                               "$set": {"badges": sorted(badges)}})
-    streak = await update_streak(user["user_id"])
-    return {"session": strip_mongo(session), "xp_earned": xp,
+    session = ReviewSession(
+        session_id=new_id("rev"), user_id=user.user_id, mode=body.mode,
+        mistake_ids=[r.mistake_id for r in body.results],
+        results=[r.dict() for r in body.results],
+        xp_earned=xp, created_at=now_utc(),
+    )
+    db.add(session)
+    prev_xp = user_doc.xp or 0
+    user_doc.xp = prev_xp + xp
+    user_doc.badges = sorted(badges)
+    await db.commit()
+    streak = await update_streak(db, user.user_id)
+    return {"session": _row_to_dict(session), "xp_earned": xp,
             "newly_mastered": mastered_now, "badges": new_badges,
-            "total_xp": user_doc.get("xp", 0) + xp,
+            "total_xp": prev_xp + xp,
             "streak": streak}
 
 
 @app.get("/api/review/mastery")
-async def review_mastery(user: dict = Depends(get_current_user)):
+async def review_mastery(user: User = Depends(get_current_user),
+                         db: AsyncSession = Depends(get_db)):
     out = {}
     for cat in VALID_CATEGORIES:
         if cat == "improvement":
             continue
-        total = await db.mistakes.count_documents(
-            {"user_id": user["user_id"], "category": cat})
-        mastered = await db.mistakes.count_documents(
-            {"user_id": user["user_id"], "category": cat,
-             "status": "mastered"})
-        out[cat] = {"total": total, "mastered": mastered}
+        total = await db.scalar(
+            select(func.count()).select_from(Mistake).where(
+                Mistake.user_id == user.user_id, Mistake.category == cat))
+        mastered = await db.scalar(
+            select(func.count()).select_from(Mistake).where(
+                Mistake.user_id == user.user_id, Mistake.category == cat,
+                Mistake.status == "mastered"))
+        out[cat] = {"total": total or 0, "mastered": mastered or 0}
     return out
 
 
@@ -1153,19 +1437,22 @@ async def review_mastery(user: dict = Depends(get_current_user)):
 # Mock exams
 # ----------------------------------------------------------------------------
 @app.get("/api/exam/questions/{exam_type}")
-async def exam_questions(exam_type: str):
+async def exam_questions(exam_type: str, db: AsyncSession = Depends(get_db)):
     if exam_type not in {"reading-comprehension", "oral-comprehension"}:
         raise HTTPException(status_code=404, detail="Unknown exam type")
-    cur = db.exam_questions.find({"exam_type": exam_type, "is_active": True})
-    return {"questions": [strip_mongo(q) async for q in cur]}
+    res = await db.execute(
+        select(ExamQuestion).where(ExamQuestion.exam_type == exam_type,
+                                   ExamQuestion.is_active == True))  # noqa: E712
+    return {"questions": [_row_to_dict(q) for q in res.scalars().all()]}
 
 
 # ----------------------------------------------------------------------------
 # Speaking (stub)
 # ----------------------------------------------------------------------------
 @app.post("/api/speaking/analyze")
-async def speaking_analyze(user: dict = Depends(get_current_user)):
-    await enforce_free_limit(user)
+async def speaking_analyze(user: User = Depends(get_current_user),
+                           db: AsyncSession = Depends(get_db)):
+    await enforce_free_limit(db, user)
     return {
         "message": ("La transcription audio n'est pas encore disponible. "
                     "Cette fonctionnalité arrive bientôt ! En attendant, "
@@ -1179,44 +1466,48 @@ async def speaking_analyze(user: dict = Depends(get_current_user)):
 # Recent topics
 # ----------------------------------------------------------------------------
 @app.get("/api/recent-topics")
-async def recent_topics(task_type: Optional[int] = None):
-    q: Dict[str, Any] = {"is_active": True}
+async def recent_topics(task_type: Optional[int] = None,
+                        db: AsyncSession = Depends(get_db)):
+    stmt = select(RecentTopic).where(RecentTopic.is_active == True)  # noqa: E712
     if task_type in (1, 2, 3):
-        q["task_type"] = task_type
-    cur = db.recent_topics.find(q).sort("created_at", -1)
+        stmt = stmt.where(RecentTopic.task_type == task_type)
+    stmt = stmt.order_by(RecentTopic.created_at.desc())
+    res = await db.execute(stmt)
     out = []
-    async for t in cur:
-        t = strip_mongo(t)
-        t.pop("model_answer", None)  # never leak in the list view
-        out.append(t)
+    for t in res.scalars().all():
+        d = _row_to_dict(t)
+        d.pop("model_answer", None)  # never leak in the list view
+        out.append(d)
     return {"topics": out}
 
 
 @app.get("/api/recent-topics/{topic_id}")
 async def recent_topic(topic_id: str,
-                       user: dict = Depends(get_current_user)):
+                       user: User = Depends(get_current_user),
+                       db: AsyncSession = Depends(get_db)):
     """Topic detail. The model answer is included for premium users always,
     and for free users on up to FREE_MODEL_ANSWER_LIMIT distinct topics
     (re-reading an already-unlocked topic is free). Past the limit the
     answer is withheld and `model_answer_locked` is set instead."""
-    t = await db.recent_topics.find_one(
-        {"topic_id": topic_id, "is_active": True})
-    if not t:
+    res = await db.execute(
+        select(RecentTopic).where(RecentTopic.topic_id == topic_id,
+                                  RecentTopic.is_active == True))  # noqa: E712
+    t_obj = res.scalar_one_or_none()
+    if not t_obj:
         raise HTTPException(status_code=404, detail="Topic not found")
-    t = strip_mongo(t)
+    t = _row_to_dict(t_obj)
     model_answer = t.pop("model_answer", "")
     t["model_answer_locked"] = False
-    if user.get("subscription_status") == "premium":
+    if user.subscription_status == "premium":
         t["model_answer"] = model_answer
     else:
-        unlocked = user.get("model_answer_topic_ids", [])
+        unlocked = user.model_answer_topic_ids or []
         if topic_id in unlocked:
             t["model_answer"] = model_answer
         elif len(unlocked) < FREE_MODEL_ANSWER_LIMIT:
-            await db.users.update_one(
-                {"user_id": user["user_id"]},
-                {"$addToSet": {"model_answer_topic_ids": topic_id},
-                 "$inc": {"model_answers_read": 1}})
+            user.model_answer_topic_ids = list(unlocked) + [topic_id]
+            user.model_answers_read = (user.model_answers_read or 0) + 1
+            await db.commit()
             t["model_answer"] = model_answer
         else:
             t["model_answer_locked"] = True
@@ -1227,177 +1518,233 @@ async def recent_topic(topic_id: str,
 # Admin
 # ----------------------------------------------------------------------------
 @app.get("/api/admin/users")
-async def admin_users(admin: dict = Depends(get_admin_user)):
-    return {"users": [strip_mongo(u) async for u in
-                      db.users.find().sort("created_at", -1)]}
+async def admin_users(admin: User = Depends(get_admin_user),
+                      db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(User).order_by(User.created_at.desc()))
+    return {"users": [strip_user(u) for u in res.scalars().all()]}
 
 
 @app.get("/api/admin/submissions")
-async def admin_submissions(admin: dict = Depends(get_admin_user)):
-    cur = db.submissions.find().sort("created_at", -1).limit(200)
-    return {"submissions": [strip_mongo(s) async for s in cur]}
+async def admin_submissions(admin: User = Depends(get_admin_user),
+                            db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(Submission).order_by(Submission.created_at.desc()).limit(200))
+    return {"submissions": [_row_to_dict(s) for s in res.scalars().all()]}
 
 
 @app.get("/api/admin/analytics")
-async def admin_analytics(admin: dict = Depends(get_admin_user)):
-    total_users = await db.users.count_documents({})
-    total_submissions = await db.submissions.count_documents({})
+async def admin_analytics(admin: User = Depends(get_admin_user),
+                          db: AsyncSession = Depends(get_db)):
+    total_users = await db.scalar(select(func.count()).select_from(User))
+    total_submissions = await db.scalar(
+        select(func.count()).select_from(Submission))
     breakdown = {c: 0 for c in VALID_CATEGORIES}
     err_counts: Dict[str, int] = {}
-    async for s in db.submissions.find():
-        for e in s.get("errors", []):
+    res = await db.execute(select(Submission))
+    for s in res.scalars().all():
+        for e in (s.errors or []):
             cat = e.get("category", "spelling")
             breakdown[cat] = breakdown.get(cat, 0) + 1
             key = e.get("error", "").strip()
             if key:
                 err_counts[key] = err_counts.get(key, 0) + 1
     top = sorted(err_counts.items(), key=lambda x: -x[1])[:10]
-    return {"total_users": total_users,
-            "total_submissions": total_submissions,
+    return {"total_users": total_users or 0,
+            "total_submissions": total_submissions or 0,
             "error_breakdown": breakdown,
             "top_errors": [{"error": e, "count": n} for e, n in top]}
 
 
 @app.post("/api/admin/prompts")
 async def admin_create_prompt(body: PromptIn,
-                              admin: dict = Depends(get_admin_user)):
-    doc = {"prompt_id": new_id("prompt"), **body.dict(),
-           "is_active": True, "created_at": now_utc()}
-    await db.prompts.insert_one(dict(doc))
-    return strip_mongo(doc)
+                              admin: User = Depends(get_admin_user),
+                              db: AsyncSession = Depends(get_db)):
+    p = Prompt(prompt_id=new_id("prompt"), **body.dict(),
+               is_active=True, created_at=now_utc())
+    db.add(p)
+    await db.commit()
+    return _row_to_dict(p)
 
 
 @app.put("/api/admin/prompts/{prompt_id}")
 async def admin_update_prompt(prompt_id: str, body: PromptIn,
-                              admin: dict = Depends(get_admin_user)):
-    res = await db.prompts.update_one({"prompt_id": prompt_id},
-                                      {"$set": body.dict()})
-    if res.matched_count == 0:
+                              admin: User = Depends(get_admin_user),
+                              db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(Prompt).where(Prompt.prompt_id == prompt_id))
+    p = res.scalar_one_or_none()
+    if not p:
         raise HTTPException(status_code=404, detail="Prompt not found")
-    return strip_mongo(await db.prompts.find_one({"prompt_id": prompt_id}))
+    for k, v in body.dict().items():
+        setattr(p, k, v)
+    await db.commit()
+    return _row_to_dict(p)
 
 
 @app.delete("/api/admin/prompts/{prompt_id}")
 async def admin_delete_prompt(prompt_id: str,
-                              admin: dict = Depends(get_admin_user)):
-    res = await db.prompts.update_one({"prompt_id": prompt_id},
-                                      {"$set": {"is_active": False}})
-    if res.matched_count == 0:
+                              admin: User = Depends(get_admin_user),
+                              db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(Prompt).where(Prompt.prompt_id == prompt_id))
+    p = res.scalar_one_or_none()
+    if not p:
         raise HTTPException(status_code=404, detail="Prompt not found")
+    p.is_active = False
+    await db.commit()
     return {"detail": "Prompt deactivated"}
 
 
 @app.post("/api/admin/exam/questions")
 async def admin_create_question(body: ExamQuestionIn,
-                                admin: dict = Depends(get_admin_user)):
-    doc = {"question_id": new_id("q"), **body.dict(),
-           "created_at": now_utc(), "is_active": True}
-    await db.exam_questions.insert_one(dict(doc))
-    return strip_mongo(doc)
+                                admin: User = Depends(get_admin_user),
+                                db: AsyncSession = Depends(get_db)):
+    q = ExamQuestion(question_id=new_id("q"), **body.dict(),
+                     created_at=now_utc(), is_active=True)
+    db.add(q)
+    await db.commit()
+    return _row_to_dict(q)
 
 
 @app.put("/api/admin/exam/questions/{question_id}")
 async def admin_update_question(question_id: str, body: ExamQuestionUpdate,
-                                admin: dict = Depends(get_admin_user)):
+                                admin: User = Depends(get_admin_user),
+                                db: AsyncSession = Depends(get_db)):
     updates = {k: v for k, v in body.dict().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
-    res = await db.exam_questions.update_one({"question_id": question_id},
-                                             {"$set": updates})
-    if res.matched_count == 0:
+    res = await db.execute(
+        select(ExamQuestion).where(ExamQuestion.question_id == question_id))
+    q = res.scalar_one_or_none()
+    if not q:
         raise HTTPException(status_code=404, detail="Question not found")
-    return strip_mongo(
-        await db.exam_questions.find_one({"question_id": question_id}))
+    for k, v in updates.items():
+        setattr(q, k, v)
+    await db.commit()
+    return _row_to_dict(q)
 
 
 @app.delete("/api/admin/exam/questions/{question_id}")
 async def admin_delete_question(question_id: str,
-                                admin: dict = Depends(get_admin_user)):
-    res = await db.exam_questions.update_one(
-        {"question_id": question_id}, {"$set": {"is_active": False}})
-    if res.matched_count == 0:
+                                admin: User = Depends(get_admin_user),
+                                db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(ExamQuestion).where(ExamQuestion.question_id == question_id))
+    q = res.scalar_one_or_none()
+    if not q:
         raise HTTPException(status_code=404, detail="Question not found")
+    q.is_active = False
+    await db.commit()
     return {"detail": "Question deactivated"}
 
 
 @app.get("/api/admin/exam/questions")
-async def admin_list_questions(admin: dict = Depends(get_admin_user)):
-    cur = db.exam_questions.find().sort("created_at", -1)
-    return [strip_mongo(q) async for q in cur]
+async def admin_list_questions(admin: User = Depends(get_admin_user),
+                               db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(ExamQuestion).order_by(ExamQuestion.created_at.desc()))
+    return [_row_to_dict(q) for q in res.scalars().all()]
 
 
 @app.post("/api/admin/recent-topics")
 async def admin_create_topic(body: RecentTopicIn,
-                             admin: dict = Depends(get_admin_user)):
-    doc = {"topic_id": new_id("topic"), **body.dict(),
-           "created_at": now_utc(), "is_active": True}
-    await db.recent_topics.insert_one(dict(doc))
-    return strip_mongo(doc)
+                             admin: User = Depends(get_admin_user),
+                             db: AsyncSession = Depends(get_db)):
+    t = RecentTopic(topic_id=new_id("topic"), **body.dict(),
+                    created_at=now_utc(), is_active=True)
+    db.add(t)
+    await db.commit()
+    return _row_to_dict(t)
 
 
 @app.put("/api/admin/recent-topics/{topic_id}")
 async def admin_update_topic(topic_id: str, body: RecentTopicIn,
-                             admin: dict = Depends(get_admin_user)):
-    res = await db.recent_topics.update_one({"topic_id": topic_id},
-                                            {"$set": body.dict()})
-    if res.matched_count == 0:
+                             admin: User = Depends(get_admin_user),
+                             db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(RecentTopic).where(RecentTopic.topic_id == topic_id))
+    t = res.scalar_one_or_none()
+    if not t:
         raise HTTPException(status_code=404, detail="Topic not found")
-    return strip_mongo(
-        await db.recent_topics.find_one({"topic_id": topic_id}))
+    for k, v in body.dict().items():
+        setattr(t, k, v)
+    await db.commit()
+    return _row_to_dict(t)
 
 
 @app.delete("/api/admin/recent-topics/{topic_id}")
 async def admin_delete_topic(topic_id: str,
-                             admin: dict = Depends(get_admin_user)):
-    res = await db.recent_topics.update_one(
-        {"topic_id": topic_id}, {"$set": {"is_active": False}})
-    if res.matched_count == 0:
+                             admin: User = Depends(get_admin_user),
+                             db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(RecentTopic).where(RecentTopic.topic_id == topic_id))
+    t = res.scalar_one_or_none()
+    if not t:
         raise HTTPException(status_code=404, detail="Topic not found")
+    t.is_active = False
+    await db.commit()
     return {"detail": "Topic deactivated"}
 
 
 @app.get("/api/admin/recent-topics")
-async def admin_list_topics(admin: dict = Depends(get_admin_user)):
-    cur = db.recent_topics.find().sort("created_at", -1)
-    return {"topics": [strip_mongo(t) async for t in cur]}
+async def admin_list_topics(admin: User = Depends(get_admin_user),
+                            db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(RecentTopic).order_by(RecentTopic.created_at.desc()))
+    return {"topics": [_row_to_dict(t) for t in res.scalars().all()]}
 
 
 @app.get("/api/admin/simulator-prompts")
-async def admin_sim_prompts(admin: dict = Depends(get_admin_user)):
-    cur = db.simulator_prompts.find().sort(
-        [("task_type", 1), ("created_at", -1)])
-    return {"prompts": [strip_mongo(p) async for p in cur]}
+async def admin_sim_prompts(admin: User = Depends(get_admin_user),
+                            db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(SimulatorPrompt).order_by(
+            SimulatorPrompt.task_type.asc(),
+            SimulatorPrompt.created_at.desc()))
+    return {"prompts": [_row_to_dict(p) for p in res.scalars().all()]}
 
 
 @app.post("/api/admin/simulator-prompts")
 async def admin_create_sim_prompt(body: SimPromptIn,
-                                  admin: dict = Depends(get_admin_user)):
-    doc = {"sim_prompt_id": new_id("simp"), **body.dict(),
-           "is_active": True, "created_at": now_utc()}
-    await db.simulator_prompts.insert_one(dict(doc))
-    return strip_mongo(doc)
+                                  admin: User = Depends(get_admin_user),
+                                  db: AsyncSession = Depends(get_db)):
+    p = SimulatorPrompt(sim_prompt_id=new_id("simp"), **body.dict(),
+                        is_active=True, created_at=now_utc())
+    db.add(p)
+    await db.commit()
+    return _row_to_dict(p)
 
 
 @app.put("/api/admin/simulator-prompts/{sim_prompt_id}")
 async def admin_update_sim_prompt(sim_prompt_id: str, body: SimPromptIn,
-                                  admin: dict = Depends(get_admin_user)):
-    res = await db.simulator_prompts.update_one(
-        {"sim_prompt_id": sim_prompt_id}, {"$set": body.dict()})
-    if res.matched_count == 0:
+                                  admin: User = Depends(get_admin_user),
+                                  db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(SimulatorPrompt).where(
+            SimulatorPrompt.sim_prompt_id == sim_prompt_id))
+    p = res.scalar_one_or_none()
+    if not p:
         raise HTTPException(status_code=404,
                             detail="Simulator prompt not found")
-    return strip_mongo(await db.simulator_prompts.find_one(
-        {"sim_prompt_id": sim_prompt_id}))
+    for k, v in body.dict().items():
+        setattr(p, k, v)
+    await db.commit()
+    return _row_to_dict(p)
 
 
 @app.delete("/api/admin/simulator-prompts/{sim_prompt_id}")
 async def admin_delete_sim_prompt(sim_prompt_id: str,
-                                  admin: dict = Depends(get_admin_user)):
-    res = await db.simulator_prompts.update_one(
-        {"sim_prompt_id": sim_prompt_id}, {"$set": {"is_active": False}})
-    if res.matched_count == 0:
+                                  admin: User = Depends(get_admin_user),
+                                  db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(SimulatorPrompt).where(
+            SimulatorPrompt.sim_prompt_id == sim_prompt_id))
+    p = res.scalar_one_or_none()
+    if not p:
         raise HTTPException(status_code=404,
                             detail="Simulator prompt not found")
+    p.is_active = False
+    await db.commit()
     return {"detail": "Simulator prompt deactivated"}
 
 
