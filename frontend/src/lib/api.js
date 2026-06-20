@@ -4,7 +4,7 @@ import axios from "axios";
 const baseURL = "/api"; 
 export const api = axios.create({ baseURL, withCredentials: true });
 //const baseURL = "http://34.70.223.49:5000";
-#https://xn--monfranais-u6a.com/api
+//https://xn--monfranais-u6a.com/api
 //export const api = axios.create({ baseURL, withCredentials: true });
 
 export const BACKEND_URL = baseURL;
