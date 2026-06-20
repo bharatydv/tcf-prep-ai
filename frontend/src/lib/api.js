@@ -1,7 +1,11 @@
-import axios from "axios";
-const baseURL = "http://34.70.223.49:5000";
 
+import axios from "axios";
+// Use a relative path /api so it talks to the same domain (https://monfrançais.com/api)
+const baseURL = "/api"; 
 export const api = axios.create({ baseURL, withCredentials: true });
+//const baseURL = "http://34.70.223.49:5000";
+#https://xn--monfranais-u6a.com/api
+//export const api = axios.create({ baseURL, withCredentials: true });
 
 export const BACKEND_URL = baseURL;
 
@@ -31,7 +35,8 @@ export const catColor = (key) => CATEGORIES[key]?.color || "#E5E7EB";
 
 // POST + read an SSE stream (fetch-based, since EventSource is GET-only)
 export async function streamAnalyze(payload, { onStage, onComplete, onError }) {
-  const resp = await fetch(`${baseURL}/api/analyze/stream`, {
+  const resp = await fetch(`${baseURL}/analyze/stream`, {
+  //const resp = await fetch(`${baseURL}/api/analyze/stream`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
