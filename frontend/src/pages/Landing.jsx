@@ -85,20 +85,14 @@ export default function Landing() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [simTopic, setSimTopic] = useState('');
+  const [simAnswer, setSimAnswer] = useState('');
   const [email, setEmail] = useState('');
   const trialTo = user ? '/dashboard' : '/register';
 
   const startSimulator = () => {
     if (!user) { toast.info('Create your free account to run the simulator — 5 free attempts included.'); return navigate('/register'); }
-    navigate('/check-writing', { state: { label: simTopic.trim() || null } });
+    navigate('/check-writing', { state: { label: simTopic.trim() || null, prefill: simAnswer.trim() || null } });
   };
-
-  const features = [
-    { icon: Microphone, title: 'AI Speaking Lab', desc: 'Real-time pronunciation & fluency feedback.', to: '/speaking' },
-    { icon: PenNib, title: 'Writing Assistant', desc: 'Advanced grammar, coherence & structure check.', to: '/practice' },
-    { icon: GraduationCap, title: 'Mock Exams', desc: 'Full-length TCF tests with AI evaluation.', to: '/exam/reading-comprehension' },
-    { icon: FolderOpen, title: 'Resources', desc: 'Real recent topics with model answers for your level.', to: '/recent-topics' },
-  ];
 
   const plans = [
     { name: 'Bronze', price: '14.99', period: '/ 5 Days', popular: false },
@@ -127,42 +121,40 @@ export default function Landing() {
     <div className="overflow-x-clip bg-white">
       {/* ============================================================ HERO */}
       <section className="relative bg-gradient-to-br from-violet-100 via-fuchsia-50 to-violet-200">
-        {/* floating blobs */}
         <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
-          <div className="blob absolute -left-24 top-10 h-72 w-72 rounded-full bg-fuchsia-300/30 blur-3xl" />
-          <div className="blob absolute right-0 top-1/3 h-80 w-80 rounded-full bg-violet-400/25 blur-3xl" style={{ animationDelay: '-5s' }} />
-          <div className="blob absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-purple-300/30 blur-3xl" style={{ animationDelay: '-9s' }} />
+        <div className="blob absolute -left-24 top-10 h-72 w-72 rounded-full bg-fuchsia-300/30 blur-3xl" />
+        <div className="blob absolute right-0 top-1/3 h-80 w-80 rounded-full bg-violet-400/25 blur-3xl" style={{ animationDelay: '-5s' }} />
+        <div className="blob absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-purple-300/30 blur-3xl" style={{ animationDelay: '-9s' }} />
         </div>
-
+      
         <div className="relative mx-auto grid max-w-7xl items-center gap-10 px-4 pb-16 pt-12 sm:px-6 lg:grid-cols-2 lg:gap-14 lg:pb-24 lg:pt-20">
           {/* left copy */}
           <div>
-            <span className="hero-rise inline-flex items-center gap-2 rounded-full border border-violet-200 bg-white/80 px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider text-primary shadow-sm backdrop-blur">
+            {/* <span className="hero-rise inline-flex items-center gap-2 rounded-full border border-violet-200 bg-white/80 px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider text-primary shadow-sm backdrop-blur mx-auto">
               <SealCheck size={15} weight="fill" /> Official TCF curriculum aligned
-            </span>
+            </span> */}
             <h1 className="hero-rise mt-5 font-heading text-4xl font-extrabold leading-[1.08] tracking-tight text-gray-900 sm:text-5xl lg:text-6xl" style={{ animationDelay: '0.1s' }}>
-              Smart AI Practice.<br />
-              Real Exam{' '}
+              Write. Evaluate.<br />
+              Score CLB 7{' '}
               <span className="bg-gradient-to-r from-primary via-fuchsia-600 to-fuchsia-500 bg-clip-text text-transparent">Results.</span>
             </h1>
             <p className="hero-rise mt-5 max-w-md text-[15px] leading-relaxed text-gray-600" style={{ animationDelay: '0.2s' }}>
-              Accelerate your French certification journey with the only AI platform engineered
-              for TCF precision. Get real-time feedback on speaking and writing.
+              All-in-One TEF/TCF practice platform designed to record your persistent errors, provide correction, and help you achieve CLB 7.
             </p>
             <div className="hero-rise mt-7 flex flex-wrap gap-3" style={{ animationDelay: '0.3s' }}>
               <Link to={trialTo} data-testid="hero-trial-button"
                 className="btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600 !px-6 !py-3 shadow-lg shadow-violet-300/60 hover:!brightness-110">
                 Start 5-Day Free Trial
               </Link>
-              <Link to="/pricing" className="btn-outline !border-gray-300 bg-white !px-6 !py-3" data-testid="hero-plans-button">
+              {/* <Link to="/pricing" className="btn-outline !border-gray-300 bg-white !px-6 !py-3" data-testid="hero-plans-button">
                 Explore Study Plans
-              </Link>
+              </Link> */}
             </div>
             <div className="hero-rise mt-9 flex flex-wrap items-center gap-7" style={{ animationDelay: '0.4s' }}>
               <div className="flex items-center gap-3">
                 <div className="flex -space-x-2.5">
                   {['SL', 'KB', 'PN'].map((ini, i) => (
-                    <span key={ini} className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-white text-[10px] font-bold text-white"
+                    <span key={ini} className="flex h-9 w-9 items-center rounded-full border-2 border-white text-[10px] font-bold text-white"
                       style={{ background: ['#7C3AED', '#C026D3', '#5B21B6'][i] }}>{ini}</span>
                   ))}
                 </div>
@@ -171,66 +163,36 @@ export default function Landing() {
                   <p className="text-[11px] uppercase tracking-wide text-gray-400">Active learners</p>
                 </div>
               </div>
-              <div className="flex items-center gap-2.5">
+              {/* <div className="flex items-center gap-2.5">
                 <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-200/70 text-primary">
                   <ShieldCheck size={18} weight="fill" />
                 </span>
                 <p className="text-xs font-semibold leading-tight text-gray-700">Secure &<br /><span className="text-gray-400">Ad-Free</span></p>
-              </div>
+              </div> */}
             </div>
           </div>
-
-          {/* right: live correction preview card */}
+          {/* right: youtube video — oozing-from-screen effect */}
           <div className="hero-rise" style={{ animationDelay: '0.25s' }}>
-            <div className="tilt-card relative mx-auto max-w-md rounded-3xl border border-white/70 bg-white/90 p-6 shadow-2xl shadow-violet-300/40 backdrop-blur">
-              <div className="flex items-center justify-between">
-                <p className="font-heading text-sm font-bold text-gray-800">Live AI Correction</p>
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="ping-soft absolute inline-flex h-full w-full rounded-full bg-green-400" />
-                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-500" />
-                </span>
-              </div>
-              <p className="mt-4 rounded-2xl bg-violet-50/80 p-4 text-sm leading-7 text-gray-700">
-                Hier, je suis{' '}
-                <span className="rounded px-1 font-medium" style={{ background: '#FED7AA' }}>aller</span>{' '}
-                au marché avec{' '}
-                <span className="rounded px-1 font-medium" style={{ background: '#BFDBFE' }}>ma</span>{' '}
-                ami pour acheter des légumes{' '}
-                <span className="rounded px-1 font-medium" style={{ background: '#FEF08A' }}>frais</span>.
-              </p>
-              <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold">
-                <span className="pill bg-orange-100 text-orange-700">Conjugaison · allé</span>
-                <span className="pill bg-violet-100 text-primary">Accord · mon amie</span>
-              </div>
-              <div className="mt-5 flex items-center justify-between rounded-2xl border border-violet-100 bg-gradient-to-br from-white to-violet-50 p-4">
-                <div>
-                  <p className="text-[10px] uppercase tracking-wider text-gray-400">Estimated level</p>
-                  <p className="font-heading text-3xl font-extrabold text-gray-900">B2 <ArrowRight size={18} className="inline text-green-500" /> <span className="text-primary">C1</span></p>
+            <div className="relative mx-auto max-w-lg[1024px]">
+              <div aria-hidden className="pointer-events-none absolute -inset-4 rounded-[2rem] bg-violet-400/20 blur-2xl" />
+              <div aria-hidden className="pointer-events-none absolute -inset-8 rounded-[2.5rem] bg-fuchsia-300/15 blur-3xl" />
+              <div className="relative rounded-[1.75rem] bg-gradient-to-br from-white/60 to-violet-200/40 p-[5px] shadow-2xl shadow-violet-400/50 backdrop-blur-sm ring-1 ring-white/60">
+              <div className="overflow-hidden rounded-[1.4rem]">
+                <div className="relative" style={{ paddingBottom: '56.25%' }}>
+                  <iframe
+                  className="absolute inset-0 h-full w-full"
+                  src="https://www.youtube.com/embed/Sgxbx65IDeM?autoplay=1&mute=1&loop=1&playlist=Sgxbx65IDeM&controls=1&rel=0&modestbranding=1"
+                  title="TCF Prep AI — See it in action"
+                  frameBorder="0"
+                  allow="autoplay; encrypted-media; picture-in-picture"
+                  allowFullScreen
+                  />
                 </div>
-                <ScoreRing value={82} />
               </div>
+              </div>
+              <div aria-hidden className="pointer-events-none absolute -bottom-6 left-1/2 h-6 w-3/4 -translate-x-1/2 rounded-full bg-violet-400/30 blur-xl" />
             </div>
           </div>
-        </div>
-
-        {/* feature strip */}
-        <div className="relative mx-auto max-w-6xl px-4 pb-10 sm:px-6">
-          <Reveal>
-            <div className="grid divide-y divide-gray-100 rounded-3xl bg-white shadow-xl shadow-violet-200/50 sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4 lg:divide-x">
-              {features.map((f, i) => (
-                <Link key={f.title} to={f.to} data-testid={`feature-${i}`}
-                  className="group flex items-start gap-4 p-6 transition hover:bg-violet-50/60">
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-primary transition group-hover:scale-110 group-hover:bg-primary group-hover:text-white">
-                    <f.icon size={22} weight="duotone" />
-                  </span>
-                  <span>
-                    <span className="block font-heading text-sm font-bold text-gray-900">{f.title}</span>
-                    <span className="mt-1 block text-xs leading-relaxed text-gray-500">{f.desc}</span>
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </Reveal>
         </div>
       </section>
 
@@ -239,8 +201,8 @@ export default function Landing() {
         <Reveal>
           <div className="grid items-center gap-8 rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-6 sm:p-10 lg:grid-cols-[1fr_320px]">
             <div>
-              <span className="pill bg-primary text-white"><Sparkle size={13} weight="fill" /> NEW</span>
-              <h2 className="mt-4 font-heading text-2xl font-extrabold text-gray-900">AI Written Simulator ✍️</h2>
+              {/* <span className="pill bg-primary text-white"><Sparkle size={13} weight="fill" /> NEW</span> */}
+              <h2 className="mt-4 font-heading text-2xl font-extrabold text-gray-900">Evaluate Your Writing in Under 10-Seconds</h2>
               <p className="mt-2 max-w-md text-sm text-gray-600">
                 Paste any topic or question and experience a real AI written test simulation instantly.
               </p>
@@ -251,6 +213,18 @@ export default function Landing() {
                   data-testid="sim-topic-input"
                 />
                 <p className="mt-2 text-xs italic text-gray-400">e.g. Impact of technology on modern education</p>
+
+                <textarea
+                  className="input !rounded-xl text-sm mt-4 resize-none"
+                  placeholder="Write your answer here… (optional — leave blank to start fresh on the next page)"
+                  rows={5}
+                  value={simAnswer}
+                  maxLength={3000}
+                  onChange={(e) => setSimAnswer(e.target.value)}
+                  data-testid="sim-answer-input"
+                />
+                <p className="mt-1 text-right text-xs text-gray-400">{simAnswer.length} / 3000</p>
+
                 <div className="mt-3 flex items-center justify-between gap-3">
                   <span className="rounded-lg bg-gray-50 px-3 py-1 text-xs text-gray-400">{simTopic.length} / 1000</span>
                   <button onClick={startSimulator} data-testid="start-simulator-button"
@@ -279,9 +253,12 @@ export default function Landing() {
                 <p className="mt-1 text-center text-[10px] uppercase tracking-wider text-gray-400">Estimated score</p>
               </div>
             </Reveal>
+           
           </div>
         </Reveal>
       </section>
+
+      
 
       {/* ================================== PRECISION / PERSONALIZATION */}
       <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6">
