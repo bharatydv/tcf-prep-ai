@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { EnvelopeSimple, Lock } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
+import { api } from '../lib/api';
 
 export default function Login() {
   const { login } = useAuth();
