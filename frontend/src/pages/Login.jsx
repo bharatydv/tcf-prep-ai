@@ -15,7 +15,7 @@ export default function Login() {
   const submit = async (e) => {
     e.preventDefault();
     setError(''); setBusy(true);
-    const res = await api.post('/auth/login', { email, password });
+    const res = await api.post('/api/auth/login', { email, password });
     setBusy(false);
     if (res.ok) {
       toast.success(`Bienvenue, ${res.user.name} !`);
