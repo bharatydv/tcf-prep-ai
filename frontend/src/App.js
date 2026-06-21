@@ -19,6 +19,9 @@ import MockExam from "./pages/MockExam";
 import Admin from "./pages/Admin";
 import Combinations from './pages/Combinations';
 
+import Blog from './pages/Blog';
+import BlogPost from './pages/BlogPost';
+import BlogAdmin from './pages/BlogAdmin';
 
 export default function App() {
   return (
@@ -61,6 +64,9 @@ export default function App() {
             path="/admin"
             element={<ProtectedRoute adminOnly><Admin /></ProtectedRoute>}
           />
+          <Route path="/blog" element={<Blog />} />
+<Route path="/blog/:slug" element={<BlogPost />} />
+<Route path="/admin/blog" element={<ProtectedRoute adminOnly><BlogAdmin /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         <Toaster position="top-right" richColors closeButton />

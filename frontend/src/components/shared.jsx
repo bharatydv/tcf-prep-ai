@@ -15,6 +15,7 @@ export function Header() {
     { to: '/practice', label: 'Writing Assistant' },
     { to: '/exam/reading-comprehension', label: 'Mock Exams' },
     { to: '/recent-topics', label: 'Resources' },
+    { to: '/blog', label: 'Blog' },
   ];
 
   return (

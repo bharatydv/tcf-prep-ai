@@ -1,9 +1,17 @@
+/*for local testing
+import axios from "axios";
 
+const baseURL = "http://localhost:8000/api";
+
+export const api = axios.create({ baseURL, withCredentials: true });
+export const BACKEND_URL = "http://localhost:8000";*/
+
+//gcp testing
 import axios from "axios";
 // Use a relative path /api so it talks to the same domain (https://monfrançais.com/api)
 const baseURL = "/"; 
 export const api = axios.create({ baseURL, withCredentials: true });
-//const baseURL = "http://34.70.223.49:5000";
+const baseURL = "http://34.70.223.49:5000";
 //https://xn--monfranais-u6a.com/api
 //export const api = axios.create({ baseURL, withCredentials: true });
 

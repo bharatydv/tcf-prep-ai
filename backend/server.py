@@ -1746,6 +1746,190 @@ async def admin_delete_sim_prompt(sim_prompt_id: str,
     p.is_active = False
     await db.commit()
     return {"detail": "Simulator prompt deactivated"}
+# ============================================================================
+# BLOG — additions for server.py (PostgreSQL edition)
+# ============================================================================
+# This file shows the EXACT code to paste into your existing server.py.
+# Each block is labelled with WHERE it goes. Nothing here changes existing
+# behaviour — it only adds blog support.
+# ============================================================================
+
+
+# ----------------------------------------------------------------------------
+# 1) ORM MODEL  — paste alongside your other models (e.g. after ReviewSession)
+# ----------------------------------------------------------------------------
+class BlogPost(Base):
+    __tablename__ = "blog_posts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    post_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    slug: Mapped[str] = mapped_column(String(220), unique=True, index=True)
+    title: Mapped[str] = mapped_column(Text)
+    excerpt: Mapped[str] = mapped_column(Text, default="")
+    content: Mapped[str] = mapped_column(Text)            # markdown or HTML
+    cover_image: Mapped[str] = mapped_column(Text, default="")
+    meta_description: Mapped[str] = mapped_column(Text, default="")
+    author: Mapped[str] = mapped_column(String(120), default="MonFrancais")
+    tags: Mapped[Any] = mapped_column(JSONB, default=list)
+    is_published: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+# ----------------------------------------------------------------------------
+# 2) HELPER  — paste near your other helpers (e.g. after new_id())
+# ----------------------------------------------------------------------------
+def slugify(text: str) -> str:
+    text = (text or "").strip().lower()
+    text = re.sub(r"[^a-z0-9\s-]", "", text)
+    text = re.sub(r"[\s_-]+", "-", text).strip("-")
+    return text[:200] or new_id("post")
+
+
+# ----------------------------------------------------------------------------
+# 3) PYDANTIC SCHEMAS  — paste with your other Pydantic models
+# ----------------------------------------------------------------------------
+class BlogPostIn(BaseModel):
+    title: str = Field(min_length=1)
+    content: str = Field(min_length=1)
+    excerpt: Optional[str] = ""
+    cover_image: Optional[str] = ""
+    meta_description: Optional[str] = ""
+    author: Optional[str] = "MonFrancais"
+    tags: Optional[List[str]] = None
+    is_published: Optional[bool] = True
+    slug: Optional[str] = None  # auto-generated from title if omitted
+
+
+class BlogPostUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    excerpt: Optional[str] = None
+    cover_image: Optional[str] = None
+    meta_description: Optional[str] = None
+    author: Optional[str] = None
+    tags: Optional[List[str]] = None
+    is_published: Optional[bool] = None
+    slug: Optional[str] = None
+
+
+# ----------------------------------------------------------------------------
+# 4) PUBLIC ENDPOINTS  — paste with your other public routes
+#    (e.g. just after the /api/recent-topics routes)
+# ----------------------------------------------------------------------------
+@app.get("/api/blog")
+async def list_blog_posts(db: AsyncSession = Depends(get_db)):
+    """Public: list published posts, newest first (no full content)."""
+    res = await db.execute(
+        select(BlogPost).where(BlogPost.is_published == True)  # noqa: E712
+        .order_by(BlogPost.created_at.desc()))
+    out = []
+    for p in res.scalars().all():
+        d = _row_to_dict(p)
+        d.pop("content", None)  # list view doesn't need the full body
+        out.append(d)
+    return {"posts": out}
+
+
+@app.get("/api/blog/{slug}")
+async def get_blog_post(slug: str, db: AsyncSession = Depends(get_db)):
+    """Public: a single published post by slug."""
+    res = await db.execute(
+        select(BlogPost).where(BlogPost.slug == slug,
+                               BlogPost.is_published == True))  # noqa: E712
+    p = res.scalar_one_or_none()
+    if not p:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return {"post": _row_to_dict(p)}
+
+
+# ----------------------------------------------------------------------------
+# 5) ADMIN ENDPOINTS  — paste with your other admin routes
+# ----------------------------------------------------------------------------
+@app.get("/api/admin/blog")
+async def admin_list_blog(admin: User = Depends(get_admin_user),
+                          db: AsyncSession = Depends(get_db)):
+    """Admin: list ALL posts (published or not), newest first."""
+    res = await db.execute(
+        select(BlogPost).order_by(BlogPost.created_at.desc()))
+    return {"posts": [_row_to_dict(p) for p in res.scalars().all()]}
+
+
+async def _unique_slug(db: AsyncSession, base: str,
+                       ignore_post_id: Optional[str] = None) -> str:
+    """Ensure the slug is unique; append -2, -3, ... if needed."""
+    slug = base
+    n = 1
+    while True:
+        res = await db.execute(
+            select(BlogPost).where(BlogPost.slug == slug))
+        existing = res.scalar_one_or_none()
+        if not existing or existing.post_id == ignore_post_id:
+            return slug
+        n += 1
+        slug = f"{base}-{n}"
+
+
+@app.post("/api/admin/blog")
+async def admin_create_blog(body: BlogPostIn,
+                            admin: User = Depends(get_admin_user),
+                            db: AsyncSession = Depends(get_db)):
+    base = slugify(body.slug or body.title)
+    slug = await _unique_slug(db, base)
+    now = now_utc()
+    p = BlogPost(
+        post_id=new_id("post"),
+        slug=slug,
+        title=body.title,
+        excerpt=body.excerpt or "",
+        content=body.content,
+        cover_image=body.cover_image or "",
+        meta_description=body.meta_description or (body.excerpt or "")[:160],
+        author=body.author or "MonFrancais",
+        tags=body.tags or [],
+        is_published=body.is_published if body.is_published is not None else True,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(p)
+    await db.commit()
+    return _row_to_dict(p)
+
+
+@app.put("/api/admin/blog/{post_id}")
+async def admin_update_blog(post_id: str, body: BlogPostUpdate,
+                            admin: User = Depends(get_admin_user),
+                            db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(BlogPost).where(BlogPost.post_id == post_id))
+    p = res.scalar_one_or_none()
+    if not p:
+        raise HTTPException(status_code=404, detail="Post not found")
+    updates = {k: v for k, v in body.dict().items() if v is not None}
+    # Handle slug/title changes carefully so slugs stay unique.
+    new_slug = updates.pop("slug", None)
+    if new_slug is not None:
+        p.slug = await _unique_slug(db, slugify(new_slug), ignore_post_id=post_id)
+    for k, v in updates.items():
+        setattr(p, k, v)
+    p.updated_at = now_utc()
+    await db.commit()
+    return _row_to_dict(p)
+
+
+@app.delete("/api/admin/blog/{post_id}")
+async def admin_delete_blog(post_id: str,
+                            admin: User = Depends(get_admin_user),
+                            db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(BlogPost).where(BlogPost.post_id == post_id))
+    p = res.scalar_one_or_none()
+    if not p:
+        raise HTTPException(status_code=404, detail="Post not found")
+    await db.delete(p)
+    await db.commit()
+    return {"detail": "Post deleted"}
 
 
 if __name__ == "__main__":
