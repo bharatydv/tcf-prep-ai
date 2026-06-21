@@ -1,7 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { api, errMsg } from '../lib/api';
-// To this:
-const res = await api.post('/auth/login', ...);
+
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
@@ -10,13 +9,14 @@ export function AuthProvider({ children }) {
 
   const refreshUser = useCallback(async () => {
     try {
-      const { data } = await api.get('/api/auth/me');
+      // Changed to '/auth/me' (base /api is added by api.js)
+      const { data } = await api.get('/auth/me');
       setUser(data.user);
       return data.user;
     } catch (e) {
       if (e?.response?.status === 401) {
         try {
-          const { data } = await api.post('/api/auth/refresh');
+          const { data } = await api.post('/auth/refresh');
           setUser(data.user);
           return data.user;
         } catch {
@@ -33,7 +33,8 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     try {
-      const { data } = await api.post('/api/auth/login', { email, password });
+      // Changed to '/auth/login'
+      const { data } = await api.post('/auth/login', { email, password });
       setUser(data.user);
       return { ok: true, user: data.user };
     } catch (e) {
@@ -43,7 +44,8 @@ export function AuthProvider({ children }) {
 
   const register = async (name, email, password) => {
     try {
-      const { data } = await api.post('/api/auth/register', { name, email, password });
+      // Changed to '/auth/register'
+      const { data } = await api.post('/auth/register', { name, email, password });
       setUser(data.user);
       return { ok: true, user: data.user };
     } catch (e) {
@@ -52,7 +54,7 @@ export function AuthProvider({ children }) {
   };
 
   const logout = async () => {
-    try { await api.post('/api/auth/logout'); } catch {}
+    try { await api.post('/auth/logout'); } catch {}
     setUser(null);
   };
 

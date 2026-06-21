@@ -78,6 +78,8 @@ export async function streamAnalyze(payload, { onStage, onComplete, onError }) {
   }
 }
 
-export const errMsg = errorMessage;
+export const errMsg = (err, defaultMsg) => {
+  return err.response?.data?.detail || err.message || defaultMsg;
+};
 export const CATEGORY_META = CATEGORIES;
 export const ACCENTS = ["é", "è", "ê", "ë", "à", "â", "ç", "î", "ï", "ô", "û", "ù", "ü", "œ", "«", "»", "’"];
