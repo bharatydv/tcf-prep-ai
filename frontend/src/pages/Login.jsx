@@ -12,7 +12,8 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-
+// To this:
+const res = await api.post('/auth/login', ...);
   const submit = async (e) => {
     e.preventDefault();
     setError(''); setBusy(true);

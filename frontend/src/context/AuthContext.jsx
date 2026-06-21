@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { api, errMsg } from '../lib/api';
-
+// To this:
+const res = await api.post('/auth/login', ...);
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
