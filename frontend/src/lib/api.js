@@ -1,7 +1,7 @@
 
 import axios from "axios";
 // Use a relative path /api so it talks to the same domain (https://monfrançais.com/api)
-const baseURL = "/api"; 
+const baseURL = "/"; 
 export const api = axios.create({ baseURL, withCredentials: true });
 //const baseURL = "http://34.70.223.49:5000";
 //https://xn--monfranais-u6a.com/api
