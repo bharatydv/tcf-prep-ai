@@ -10,6 +10,16 @@ export const api = axios.create({
   withCredentials: true 
 });
 
+// 👇 FIX: strips the duplicate /api from any call that already includes it.
+// This means components calling '/api/dashboard/stats' AND '/dashboard/stats'
+// will both correctly resolve to '/api/dashboard/stats'.
+api.interceptors.request.use((config) => {
+  if (config.url && config.url.startsWith('/api/')) {
+    config.url = config.url.slice(4); // remove the leading '/api'
+  }
+  return config;
+});
+
 // Exporting baseURL as BACKEND_URL for consistency
 export const BACKEND_URL = baseURL;
 
@@ -82,4 +92,4 @@ export const errMsg = (err, defaultMsg) => {
   return err.response?.data?.detail || err.message || defaultMsg;
 };
 export const CATEGORY_META = CATEGORIES;
-export const ACCENTS = ["é", "è", "ê", "ë", "à", "â", "ç", "î", "ï", "ô", "û", "ù", "ü", "œ", "«", "»", "’"];
+export const ACCENTS = ["é", "è", "ê", "ë", "à", "â", "ç", "î", "ï", "ô", "û", "ù", "ü", "œ", "«", "»", "'"];
