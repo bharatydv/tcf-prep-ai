@@ -398,8 +398,9 @@ function SimPrompts() {
       </section>
     </div>
   );
+}
 
-  /* ---------------------------------------------------------------- Blog ---- */
+/* ---------------------------------------------------------------- Blog ---- */
 function Blog() {
   const [items, load] = useCrud('/api/admin/blog', 'posts');
   const empty = { title: '', excerpt: '', content: '', cover_image: '', meta_description: '', author: 'MonFrancais', tags: '', is_published: true };
@@ -482,5 +483,4 @@ function Blog() {
       </section>
     </div>
   );
-}
 }
