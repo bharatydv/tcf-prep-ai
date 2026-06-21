@@ -1,20 +1,15 @@
-/*for local testing
 import axios from "axios";
 
-const baseURL = "http://localhost:8000/api";
+// In production (GCP + Nginx), we use relative paths.
+// This tells the browser to append the endpoint to the current domain: https://monfrançais.com/api/...
+const baseURL = "/api"; 
 
-export const api = axios.create({ baseURL, withCredentials: true });
-export const BACKEND_URL = "http://localhost:8000";*/
+export const api = axios.create({ 
+  baseURL, 
+  withCredentials: true 
+});
 
-//gcp testing
-import axios from "axios";
-// Use a relative path /api so it talks to the same domain (https://monfrançais.com/api)
-const baseURL = "/"; 
-export const api = axios.create({ baseURL, withCredentials: true });
-const baseURL = "http://34.70.223.49:5000";
-//https://xn--monfranais-u6a.com/api
-//export const api = axios.create({ baseURL, withCredentials: true });
-
+// Exporting baseURL as BACKEND_URL for consistency
 export const BACKEND_URL = baseURL;
 
 // Turn FastAPI error shapes into a readable message
@@ -41,20 +36,22 @@ export const CATEGORIES = {
 export const catLabel = (key) => CATEGORIES[key]?.label || key;
 export const catColor = (key) => CATEGORIES[key]?.color || "#E5E7EB";
 
-// POST + read an SSE stream (fetch-based, since EventSource is GET-only)
+// POST + read an SSE stream
 export async function streamAnalyze(payload, { onStage, onComplete, onError }) {
+  // Use /analyze/stream because baseURL already includes /api
   const resp = await fetch(`${baseURL}/analyze/stream`, {
-  //const resp = await fetch(`${baseURL}/api/analyze/stream`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+  
   if (!resp.ok && resp.headers.get("content-type")?.includes("json")) {
     const data = await resp.json();
     onError?.(typeof data.detail === "string" ? data.detail : "Request failed", resp.status);
     return;
   }
+  
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -80,9 +77,6 @@ export async function streamAnalyze(payload, { onStage, onComplete, onError }) {
   }
 }
 
-// Aliases used across pages/components
 export const errMsg = errorMessage;
 export const CATEGORY_META = CATEGORIES;
-
-// French accent toolbar characters
 export const ACCENTS = ["é", "è", "ê", "ë", "à", "â", "ç", "î", "ï", "ô", "û", "ù", "ü", "œ", "«", "»", "’"];
