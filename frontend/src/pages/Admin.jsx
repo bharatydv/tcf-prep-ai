@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import { api, errMsg, CATEGORY_META } from '../lib/api';
 
-const TABS = ['Analytics', 'Users', 'Submissions', 'Prompts', 'Exam Questions', 'Recent Topics', 'Simulator Prompts'];
+const TABS = ['Analytics', 'Users', 'Submissions', 'Prompts', 'Exam Questions', 'Recent Topics', 'Simulator Prompts', 'Blog'];
 
 export default function Admin() {
   const [tab, setTab] = useState('Analytics');
@@ -26,6 +26,7 @@ export default function Admin() {
         {tab === 'Exam Questions' && <Questions />}
         {tab === 'Recent Topics' && <Topics />}
         {tab === 'Simulator Prompts' && <SimPrompts />}
+        {tab === 'Blog' && <Blog />}
       </div>
     </main>
   );
@@ -397,4 +398,89 @@ function SimPrompts() {
       </section>
     </div>
   );
+
+  /* ---------------------------------------------------------------- Blog ---- */
+function Blog() {
+  const [items, load] = useCrud('/api/admin/blog', 'posts');
+  const empty = { title: '', excerpt: '', content: '', cover_image: '', meta_description: '', author: 'MonFrancais', tags: '', is_published: true };
+  const [form, setForm] = useState(empty);
+  const [editing, setEditing] = useState(null);
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+  const save = async () => {
+    const payload = {
+      title: form.title,
+      excerpt: form.excerpt,
+      content: form.content,
+      cover_image: form.cover_image,
+      meta_description: form.meta_description,
+      author: form.author,
+      tags: form.tags ? form.tags.split(',').map((t) => t.trim()).filter(Boolean) : [],
+      is_published: form.is_published,
+    };
+    try {
+      if (editing) await api.put(`/api/admin/blog/${editing}`, payload);
+      else await api.post('/api/admin/blog', payload);
+      toast.success('Saved'); setForm(empty); setEditing(null); load();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+  const del = async (id) => {
+    try { await api.delete(`/api/admin/blog/${id}`); toast.success('Deleted'); load(); }
+    catch (e) { toast.error(errMsg(e)); }
+  };
+  if (!items) return <Spinner />;
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <section className="card space-y-4 p-6">
+        <h2 className="font-heading font-semibold">{editing ? 'Edit post' : 'New blog post'}</h2>
+        <Field label="Title"><input className="input" value={form.title} onChange={set('title')} data-testid="blog-title-input" /></Field>
+        <Field label="Excerpt (short summary)"><textarea className="input min-h-[70px]" value={form.excerpt} onChange={set('excerpt')} /></Field>
+        <Field label="Content (Markdown or HTML)"><textarea className="input min-h-[220px] font-mono text-xs" value={form.content} onChange={set('content')} data-testid="blog-content-textarea" /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Author"><input className="input" value={form.author} onChange={set('author')} /></Field>
+          <Field label="Tags (comma-separated)"><input className="input" placeholder="tcf, grammaire" value={form.tags} onChange={set('tags')} /></Field>
+        </div>
+        <Field label="Cover image URL"><input className="input" value={form.cover_image} onChange={set('cover_image')} /></Field>
+        <Field label="Meta description (SEO)"><input className="input" value={form.meta_description} onChange={set('meta_description')} /></Field>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={form.is_published} onChange={(e) => setForm({ ...form, is_published: e.target.checked })} />
+          <span className="font-medium text-gray-600">Published</span>
+        </label>
+        <div className="flex gap-3">
+          <button className="btn-primary" onClick={save} data-testid="save-blog-button">{editing ? 'Update' : 'Create'}</button>
+          {editing && <button className="btn-outline" onClick={() => { setEditing(null); setForm(empty); }}>Cancel</button>}
+        </div>
+      </section>
+      <section className="space-y-3">
+        {items.map((p) => (
+          <div key={p.post_id} className={`card flex items-start justify-between gap-4 p-5 ${p.is_published ? '' : 'opacity-50'}`}>
+            <div>
+              <p className="font-semibold">{p.title}</p>
+              <p className="text-xs text-gray-500">/{p.slug} · {p.author} {p.is_published ? '' : '· draft'}</p>
+              {p.tags?.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {p.tags.map((t) => <span key={t} className="pill bg-violet-50 text-xs text-primary">{t}</span>)}
+                </div>
+              )}
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <button className="btn-outline !px-3 !py-1 text-xs" onClick={() => {
+                setEditing(p.post_id);
+                setForm({
+                  title: p.title, excerpt: p.excerpt || '', content: p.content || '',
+                  cover_image: p.cover_image || '', meta_description: p.meta_description || '',
+                  author: p.author || 'MonFrancais',
+                  tags: (p.tags || []).join(', '),
+                  is_published: p.is_published,
+                });
+              }}>Edit</button>
+              <button className="btn-outline !border-red-200 !px-3 !py-1 text-xs !text-red-600" onClick={() => del(p.post_id)}>Delete</button>
+            </div>
+          </div>
+        ))}
+        {!items.length && <p className="text-sm text-gray-400">No posts yet — write the first one.</p>}
+      </section>
+    </div>
+  );
+}
 }
