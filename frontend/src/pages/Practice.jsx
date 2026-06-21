@@ -216,7 +216,7 @@ export default function Practice() {
                 ref={taRef}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                onPaste={(e) => { e.preventDefault(); toast.error('Le collage est d\u00e9sactiv\u00e9 \u2014 r\u00e9digez votre texte \u00e0 la main.'); }}
+                //onPaste={(e) => { e.preventDefault(); toast.error('Le collage est d\u00e9sactiv\u00e9 \u2014 r\u00e9digez votre texte \u00e0 la main.'); }}
                 onDrop={(e) => e.preventDefault()}
                 lang="fr"
                 className="input paper-textarea mt-3 min-h-[340px] p-6 shadow-card"
