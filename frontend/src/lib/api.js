@@ -1,5 +1,6 @@
 import axios from "axios";
 
+
 // In production (GCP + Nginx), we use relative paths.
 // This tells the browser to append the endpoint to the current domain: https://monfrançais.com/api/...
 const baseURL = "/api"; 
