@@ -12,21 +12,23 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-// To this:
-const res = await api.post('/auth/login', ...);
-  const submit = async (e) => {
-    e.preventDefault();
-    setError(''); setBusy(true);
-    const res = await api.post('/api/auth/login', { email, password });
-    setBusy(false);
-    if (res.ok) {
-      toast.success(`Bienvenue, ${res.user.name} !`);
-      navigate(res.user.role === 'admin' ? '/admin' : '/practice');
-    } else {
-      setError(res.error);
-      toast.error(res.error);
-    }
-  };
+
+const submit = async (e) => {
+  e.preventDefault();
+  setError(''); 
+  setBusy(true);
+  
+  const res = await login(email, password);  // ✅ This is the function from useAuth
+  
+  setBusy(false);
+  if (res.ok) {
+    toast.success(`Bienvenue, ${res.user.name} !`);
+    navigate(res.user.role === 'admin' ? '/admin' : '/practice');
+  } else {
+    setError(res.error);
+    toast.error(res.error);
+  }
+};
 
   return (
     <main className="flex min-h-[calc(100vh-65px)] items-center justify-center bg-gradient-to-br from-violet-50 via-white to-violet-100 px-4 py-12">
