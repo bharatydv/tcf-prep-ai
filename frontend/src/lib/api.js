@@ -21,7 +21,7 @@ api.interceptors.request.use((config) => {
 });
 
 // Exporting baseURL as BACKEND_URL for consistency
-export const BACKEND_URL = baseURL;
+export const BACKEND_URL = "";
 
 // Turn FastAPI error shapes into a readable message
 export function errorMessage(err, fallback = "Something went wrong") {
