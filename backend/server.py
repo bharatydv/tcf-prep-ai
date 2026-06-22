@@ -499,7 +499,6 @@ def _call_anthropic_sync(model: str, user_text: str) -> str:
     resp = aclient.messages.create(
         model=model,
         max_tokens=2000,
-        temperature=0.2,
         system=GRADER_SYSTEM,
         messages=[{"role": "user", "content": user_text}],
     )
