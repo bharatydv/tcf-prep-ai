@@ -8,6 +8,9 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Pricing from "./pages/Pricing";
 import Practice from "./pages/Practice";
+import SelectTask from "./pages/SelectTask";
+import PracticeWrite from "./pages/PracticeWrite";
+import SelectTheme from "./pages/SelectTheme";
 import CheckWriting from "./pages/CheckWriting";
 import ExamSimulator from "./pages/ExamSimulator";
 import Feedback from "./pages/Feedback";
@@ -34,7 +37,11 @@ export default function App() {
           <Route path="/register" element={<Register />} />
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/practice" element={<Practice />} />
-          <Route path="/practice/:promptId" element={<Practice />} />
+          {/* Specific /practice routes MUST come before /practice/:promptId */}
+          <Route path="/practice/tasks" element={<SelectTask />} />
+          <Route path="/practice/themes" element={<SelectTheme />} />
+          <Route path="/practice/write" element={<PracticeWrite />} />
+          <Route path="/practice/:promptId" element={<PracticeWrite />} />
           <Route path="/speaking" element={<Speaking />} />
           <Route path="/exam/:examType" element={<MockExam />} />
           <Route path="/recent-topics" element={<RecentTopics />} />
@@ -65,8 +72,8 @@ export default function App() {
             element={<ProtectedRoute adminOnly><Admin /></ProtectedRoute>}
           />
           <Route path="/blog" element={<Blog />} />
-<Route path="/blog/:slug" element={<BlogPost />} />
-<Route path="/admin/blog" element={<ProtectedRoute adminOnly><BlogAdmin /></ProtectedRoute>} />
+          <Route path="/blog/:slug" element={<BlogPost />} />
+          <Route path="/admin/blog" element={<ProtectedRoute adminOnly><BlogAdmin /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         <Toaster position="top-right" richColors closeButton />

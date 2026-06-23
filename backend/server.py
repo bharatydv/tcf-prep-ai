@@ -1775,7 +1775,378 @@ class BlogPost(Base):
         DateTime(timezone=True), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
+# ============================================================================
+# PHASE 2 — THEMES + THEME QUESTIONS  (additions for server.py)
+# ============================================================================
+# Paste each labelled block into the matching place in your server.py.
+# The themes hold writing questions grouped by tâche (1/2/3). Some themes are
+# free, others premium (Pro-locked). Phase 4 will add per-user progress.
+# Tables auto-create on startup (your lifespan runs create_all).
+# ============================================================================
 
+
+# ----------------------------------------------------------------------------
+# 1) ORM MODELS  — paste with your other models (after BlogPost / ReviewSession)
+# ----------------------------------------------------------------------------
+class Theme(Base):
+    __tablename__ = "themes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    theme_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    emoji: Mapped[str] = mapped_column(String(8), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    is_premium: Mapped[bool] = mapped_column(Boolean, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ThemeQuestion(Base):
+    __tablename__ = "theme_questions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    question_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    theme_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("themes.theme_id"), index=True)
+    task_type: Mapped[int] = mapped_column(Integer, index=True)  # 1, 2 or 3
+    prompt_text: Mapped[str] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+# ----------------------------------------------------------------------------
+# 2) PYDANTIC SCHEMAS  — paste with your other BaseModel classes
+# ----------------------------------------------------------------------------
+class ThemeIn(BaseModel):
+    name: str = Field(min_length=1)
+    emoji: Optional[str] = ""
+    description: Optional[str] = ""
+    is_premium: Optional[bool] = False
+    sort_order: Optional[int] = 0
+
+
+class ThemeUpdate(BaseModel):
+    name: Optional[str] = None
+    emoji: Optional[str] = None
+    description: Optional[str] = None
+    is_premium: Optional[bool] = None
+    sort_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class ThemeQuestionIn(BaseModel):
+    theme_id: str
+    task_type: int = Field(ge=1, le=3)
+    prompt_text: str = Field(min_length=1)
+
+
+class ThemeQuestionUpdate(BaseModel):
+    theme_id: Optional[str] = None
+    task_type: Optional[int] = Field(default=None, ge=1, le=3)
+    prompt_text: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+# ----------------------------------------------------------------------------
+# 3) PUBLIC ENDPOINTS  — paste with your other public routes
+# ----------------------------------------------------------------------------
+@app.get("/api/themes")
+async def list_themes(task_type: Optional[int] = None,
+                      db: AsyncSession = Depends(get_db)):
+    """List active themes, with the question count for a given tâche.
+
+    Pass ?task_type=1 (or 2/3) to get the count of questions for that tâche.
+    Premium themes are returned too, marked is_premium=True so the UI can
+    show a Pro badge / lock.
+    """
+    res = await db.execute(
+        select(Theme).where(Theme.is_active == True)  # noqa: E712
+        .order_by(Theme.sort_order.asc(), Theme.name.asc()))
+    themes = res.scalars().all()
+    out = []
+    for t in themes:
+        d = _row_to_dict(t)
+        if task_type in (1, 2, 3):
+            count = await db.scalar(
+                select(func.count()).select_from(ThemeQuestion).where(
+                    ThemeQuestion.theme_id == t.theme_id,
+                    ThemeQuestion.task_type == task_type,
+                    ThemeQuestion.is_active == True))  # noqa: E712
+            d["question_count"] = count or 0
+        out.append(d)
+    return {"themes": out}
+
+
+@app.get("/api/themes/{theme_id}/questions")
+async def theme_questions(theme_id: str, task_type: Optional[int] = None,
+                          db: AsyncSession = Depends(get_db)):
+    """List active questions in a theme, optionally filtered by tâche."""
+    stmt = select(ThemeQuestion).where(
+        ThemeQuestion.theme_id == theme_id,
+        ThemeQuestion.is_active == True)  # noqa: E712
+    if task_type in (1, 2, 3):
+        stmt = stmt.where(ThemeQuestion.task_type == task_type)
+    stmt = stmt.order_by(ThemeQuestion.created_at.asc())
+    res = await db.execute(stmt)
+    return {"questions": [_row_to_dict(q) for q in res.scalars().all()]}
+
+
+# ----------------------------------------------------------------------------
+# 4) ADMIN ENDPOINTS  — paste with your other /api/admin routes
+# ----------------------------------------------------------------------------
+@app.get("/api/admin/themes")
+async def admin_list_themes(admin: User = Depends(get_admin_user),
+                            db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(Theme).order_by(Theme.sort_order.asc(), Theme.name.asc()))
+    return {"themes": [_row_to_dict(t) for t in res.scalars().all()]}
+
+
+@app.post("/api/admin/themes")
+async def admin_create_theme(body: ThemeIn,
+                             admin: User = Depends(get_admin_user),
+                             db: AsyncSession = Depends(get_db)):
+    t = Theme(theme_id=new_id("theme"), **body.dict(),
+              is_active=True, created_at=now_utc())
+    db.add(t)
+    await db.commit()
+    return _row_to_dict(t)
+
+
+@app.put("/api/admin/themes/{theme_id}")
+async def admin_update_theme(theme_id: str, body: ThemeUpdate,
+                             admin: User = Depends(get_admin_user),
+                             db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(Theme).where(Theme.theme_id == theme_id))
+    t = res.scalar_one_or_none()
+    if not t:
+        raise HTTPException(status_code=404, detail="Theme not found")
+    for k, v in body.dict().items():
+        if v is not None:
+            setattr(t, k, v)
+    await db.commit()
+    return _row_to_dict(t)
+
+
+@app.delete("/api/admin/themes/{theme_id}")
+async def admin_delete_theme(theme_id: str,
+                             admin: User = Depends(get_admin_user),
+                             db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(Theme).where(Theme.theme_id == theme_id))
+    t = res.scalar_one_or_none()
+    if not t:
+        raise HTTPException(status_code=404, detail="Theme not found")
+    t.is_active = False
+    await db.commit()
+    return {"detail": "Theme deactivated"}
+
+
+@app.get("/api/admin/theme-questions")
+async def admin_list_theme_questions(theme_id: Optional[str] = None,
+                                     admin: User = Depends(get_admin_user),
+                                     db: AsyncSession = Depends(get_db)):
+    stmt = select(ThemeQuestion)
+    if theme_id:
+        stmt = stmt.where(ThemeQuestion.theme_id == theme_id)
+    stmt = stmt.order_by(ThemeQuestion.task_type.asc(),
+                         ThemeQuestion.created_at.asc())
+    res = await db.execute(stmt)
+    return {"questions": [_row_to_dict(q) for q in res.scalars().all()]}
+
+
+@app.post("/api/admin/theme-questions")
+async def admin_create_theme_question(body: ThemeQuestionIn,
+                                      admin: User = Depends(get_admin_user),
+                                      db: AsyncSession = Depends(get_db)):
+    q = ThemeQuestion(question_id=new_id("tq"), **body.dict(),
+                      is_active=True, created_at=now_utc())
+    db.add(q)
+    await db.commit()
+    return _row_to_dict(q)
+
+
+@app.put("/api/admin/theme-questions/{question_id}")
+async def admin_update_theme_question(question_id: str,
+                                      body: ThemeQuestionUpdate,
+                                      admin: User = Depends(get_admin_user),
+                                      db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(ThemeQuestion).where(ThemeQuestion.question_id == question_id))
+    q = res.scalar_one_or_none()
+    if not q:
+        raise HTTPException(status_code=404, detail="Question not found")
+    for k, v in body.dict().items():
+        if v is not None:
+            setattr(q, k, v)
+    await db.commit()
+    return _row_to_dict(q)
+
+
+@app.delete("/api/admin/theme-questions/{question_id}")
+async def admin_delete_theme_question(question_id: str,
+                                      admin: User = Depends(get_admin_user),
+                                      db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(ThemeQuestion).where(ThemeQuestion.question_id == question_id))
+    q = res.scalar_one_or_none()
+    if not q:
+        raise HTTPException(status_code=404, detail="Question not found")
+    q.is_active = False
+    await db.commit()
+    return {"detail": "Question deactivated"}
+
+
+# ----------------------------------------------------------------------------
+# 5) SEED CONTENT  — paste ABOVE run_seeds(), then add the seeding block
+#    shown in block 6 INSIDE run_seeds().
+# ----------------------------------------------------------------------------
+# Each theme: (name, emoji, is_premium, sort_order, description)
+SEED_THEMES = [
+    ("Logement & Déménagement", "🏠", False, 1,
+     "Locations, voisinage, déménagement et vie quotidienne à la maison."),
+    ("Voyages & Déplacements", "✈️", False, 2,
+     "Vacances, transports, tourisme et expériences de voyage."),
+    ("Travail & Études", "💼", True, 3,
+     "Vie professionnelle, recherche d'emploi, formation et études."),
+    ("Santé & Bien-être", "🩺", True, 4,
+     "Mode de vie sain, sport, alimentation et équilibre de vie."),
+    ("Environnement & Société", "🌍", True, 5,
+     "Écologie, vie en société et grands enjeux contemporains."),
+    ("Loisirs & Culture", "🎭", True, 6,
+     "Sorties, gastronomie, événements culturels et temps libre."),
+]
+
+# Each question: (theme_name, task_type, prompt_text)
+SEED_THEME_QUESTIONS = [
+    # --- Logement & Déménagement ---
+    ("Logement & Déménagement", 1,
+     "Vous venez d'emménager dans un nouvel appartement. Écrivez un message à un ami pour lui donner votre nouvelle adresse et l'inviter à venir le visiter. (60 à 120 mots)"),
+    ("Logement & Déménagement", 1,
+     "Votre voisin organise des travaux bruyants. Écrivez-lui un message poli pour lui demander de réduire le bruit le soir. (60 à 120 mots)"),
+    ("Logement & Déménagement", 1,
+     "Vous cherchez un colocataire. Écrivez une annonce courte décrivant le logement et la personne recherchée. (60 à 120 mots)"),
+    ("Logement & Déménagement", 2,
+     "Racontez sur votre blog votre expérience de déménagement récente : les préparatifs, les difficultés et vos impressions sur votre nouveau quartier. (120 à 150 mots)"),
+    ("Logement & Déménagement", 2,
+     "Rédigez un article décrivant le logement idéal selon vous et expliquant pourquoi il vous correspondrait. (120 à 150 mots)"),
+    ("Logement & Déménagement", 3,
+     "« Il vaut mieux louer son logement que de l'acheter. » Comparez les deux points de vue et donnez votre opinion. (120 à 180 mots)"),
+    ("Logement & Déménagement", 3,
+     "« Vivre en ville est préférable à vivre à la campagne. » Présentez les avantages des deux modes de vie et défendez votre position. (120 à 180 mots)"),
+
+    # --- Voyages & Déplacements ---
+    ("Voyages & Déplacements", 1,
+     "Vous préparez un voyage avec un ami. Écrivez-lui un message pour proposer une destination, des dates et le moyen de transport. (60 à 120 mots)"),
+    ("Voyages & Déplacements", 1,
+     "Vous avez raté votre train. Écrivez un message à la personne qui vous attend pour expliquer la situation et proposer une solution. (60 à 120 mots)"),
+    ("Voyages & Déplacements", 1,
+     "Écrivez une carte postale à votre famille pour décrire le lieu où vous passez vos vacances. (60 à 120 mots)"),
+    ("Voyages & Déplacements", 2,
+     "Racontez sur votre blog un voyage qui vous a particulièrement marqué : le lieu, les rencontres et ce que vous en avez retenu. (120 à 150 mots)"),
+    ("Voyages & Déplacements", 2,
+     "Rédigez un article pour conseiller les voyageurs sur la meilleure façon de découvrir une ville étrangère. (120 à 150 mots)"),
+    ("Voyages & Déplacements", 3,
+     "« Voyager seul est plus enrichissant que voyager en groupe. » Comparez les deux façons de voyager et donnez votre avis. (120 à 180 mots)"),
+    ("Voyages & Déplacements", 3,
+     "« Le tourisme de masse nuit aux destinations. » Présentez les deux points de vue et défendez le vôtre. (120 à 180 mots)"),
+
+    # --- Travail & Études (premium) ---
+    ("Travail & Études", 1,
+     "Vous ne pouvez pas assister à une réunion importante. Écrivez un message à votre responsable pour vous excuser et proposer une alternative. (60 à 120 mots)"),
+    ("Travail & Études", 2,
+     "Racontez dans un article une expérience professionnelle ou un stage qui vous a beaucoup appris. (120 à 150 mots)"),
+    ("Travail & Études", 3,
+     "« Le télétravail devrait devenir la norme. » Comparez les avantages du bureau et du télétravail, puis donnez votre opinion. (120 à 180 mots)"),
+
+    # --- Santé & Bien-être (premium) ---
+    ("Santé & Bien-être", 1,
+     "Un ami se sent stressé. Écrivez-lui un message pour lui proposer des activités qui pourraient l'aider à se détendre. (60 à 120 mots)"),
+    ("Santé & Bien-être", 2,
+     "Rédigez un article sur les habitudes que vous avez adoptées pour rester en bonne santé. (120 à 150 mots)"),
+    ("Santé & Bien-être", 3,
+     "« La technologie nuit à notre santé. » Présentez les deux points de vue et défendez votre position. (120 à 180 mots)"),
+
+    # --- Environnement & Société (premium) ---
+    ("Environnement & Société", 1,
+     "Votre quartier organise une journée de nettoyage. Écrivez un message pour inviter vos voisins à y participer. (60 à 120 mots)"),
+    ("Environnement & Société", 2,
+     "Rédigez un article décrivant les gestes simples que chacun peut faire pour protéger l'environnement. (120 à 150 mots)"),
+    ("Environnement & Société", 3,
+     "« Les individus, et non les gouvernements, sont responsables de la protection de l'environnement. » Comparez les deux points de vue et donnez votre avis. (120 à 180 mots)"),
+
+    # --- Loisirs & Culture (premium) ---
+    ("Loisirs & Culture", 1,
+     "Vous organisez une sortie au restaurant pour l'anniversaire d'un ami. Écrivez un message pour inviter vos amis (date, lieu, organisation). (60 à 120 mots)"),
+    ("Loisirs & Culture", 2,
+     "Racontez dans un article un événement culturel (concert, exposition, festival) auquel vous avez assisté. (120 à 150 mots)"),
+    ("Loisirs & Culture", 3,
+     "« Les livres papier sont meilleurs que les livres numériques. » Comparez les deux et défendez votre position. (120 à 180 mots)"),
+]
+
+
+# ----------------------------------------------------------------------------
+# 6) SEEDING BLOCK  — paste INSIDE run_seeds(), after the existing seeds
+#    (e.g. right after the exam-questions seed block).
+# ----------------------------------------------------------------------------
+"""
+        # Themes + theme questions
+        count = await db.scalar(select(func.count()).select_from(Theme))
+        if not count:
+            name_to_id = {}
+            for name, emoji, premium, order, desc in SEED_THEMES:
+                tid = new_id("theme")
+                name_to_id[name] = tid
+                db.add(Theme(
+                    theme_id=tid, name=name, emoji=emoji, description=desc,
+                    is_premium=premium, sort_order=order, is_active=True,
+                    created_at=now_utc()))
+            await db.commit()
+            for theme_name, task_type, prompt_text in SEED_THEME_QUESTIONS:
+                tid = name_to_id.get(theme_name)
+                if not tid:
+                    continue
+                db.add(ThemeQuestion(
+                    question_id=new_id("tq"), theme_id=tid, task_type=task_type,
+                    prompt_text=prompt_text, is_active=True,
+                    created_at=now_utc()))
+            await db.commit()
+            log.info("Seeded %d themes and %d theme questions",
+                     len(SEED_THEMES), len(SEED_THEME_QUESTIONS))
+"""
+
+
+# ----------------------------------------------------------------------------
+# 7) PHASE 4 — Pro-lock enforcement + progress
+#    Paste with your other public routes (needs get_current_user).
+# ----------------------------------------------------------------------------
+@app.get("/api/themes/{theme_id}/access")
+async def theme_access(theme_id: str,
+                       user: User = Depends(get_current_user),
+                       db: AsyncSession = Depends(get_db)):
+    """Check whether the current user may use a theme. Premium themes require
+    a premium subscription. Returns the theme plus an `allowed` flag."""
+    res = await db.execute(
+        select(Theme).where(Theme.theme_id == theme_id,
+                            Theme.is_active == True))  # noqa: E712
+    t = res.scalar_one_or_none()
+    if not t:
+        raise HTTPException(status_code=404, detail="Theme not found")
+    allowed = (not t.is_premium) or (user.subscription_status == "premium")
+    return {"theme": _row_to_dict(t), "allowed": allowed}
+
+
+@app.get("/api/themes/progress")
+async def themes_progress(user: User = Depends(get_current_user),
+                          db: AsyncSession = Depends(get_db)):
+    """Per-user practice progress. Returns the total number of practice
+    submissions the user has made (used to show simple progress in the UI).
+    A finer per-theme breakdown can be added once submissions store theme_id."""
+    total = await db.scalar(
+        select(func.count()).select_from(Submission).where(
+            Submission.user_id == user.user_id,
+            Submission.source == "practice"))
+    return {"practice_submissions": total or 0}
 # ----------------------------------------------------------------------------
 # 2) HELPER  — paste near your other helpers (e.g. after new_id())
 # ----------------------------------------------------------------------------
