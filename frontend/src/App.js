@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider } from "./context/AuthContext";
 import { Header, ProtectedRoute } from "./components/shared";
+import TefTcfWritingGuide from './pages/TefTcfWritingGuide';
 
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
@@ -54,6 +55,7 @@ export default function App() {
             path="/exam-simulator"
             element={<ProtectedRoute><ExamSimulator /></ProtectedRoute>}
           />
+          <Route path="/tef-tcf-writing-guide" element={<TefTcfWritingGuide />} />
           <Route
             path="/dashboard"
             element={<ProtectedRoute><Dashboard /></ProtectedRoute>}
