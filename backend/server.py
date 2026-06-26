@@ -20,7 +20,7 @@ from typing import Optional, List, Dict, Any
 import bcrypt
 import jwt
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, Response, HTTPException, Depends, Query
+from fastapi import FastAPI, Request, Response, HTTPException, Depends, Query, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, Field
@@ -55,8 +55,8 @@ REFRESH_TTL_DAYS = 7
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@frenchcorrector.com").lower()
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123!")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
-# OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-# OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_TRANSCRIBE_MODEL = os.environ.get("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-transcribe")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5")
 FREE_MONTHLY_LIMIT = 5
@@ -669,6 +669,95 @@ async def persist_submission(db: AsyncSession, user: User, text: str,
     out = _row_to_dict(sub)
     out["streak"] = streak
     return out
+
+
+
+# ----------------------------------------------------------------------------
+# Speaking grader (Phase 1)
+# ----------------------------------------------------------------------------
+SPEAKING_GRADER_SYSTEM = """You are a certified TEF/TCF Canada examiner evaluating a candidate's SPOKEN answer (provided as a transcript) to a French speaking task.
+
+You receive the QUESTION (the task) and the TRANSCRIPT of what the candidate said. The transcript may contain small transcription errors; judge the language charitably where a word is clearly a transcription artifact, not a learner error.
+
+Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
+{"answers_question": true, "relevance_comment": "one sentence (English) on whether and how well the answer addresses the task", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"]}
+
+Evaluate TWO things:
+1. RELEVANCE - does the spoken answer actually address the question/task? Set answers_question true/false and explain in relevance_comment. An off-topic or incomplete answer should lower the score even if the French is correct.
+2. LANGUAGE - grammar, vocabulary, fluency markers, using the same error categories and CEFR rubric as written grading.
+
+CEFR scoring (overall_score 0-100, tcf_level one of A1,A2,B1,B2,C1,C2):
+- A1 (5-19) A2 (20-39) B1 (40-54) B2 (55-69) C1 (70-84) C2 (85-100).
+If the answer does not address the task, cap the score at B1.
+
+suggestions: 3-5 concrete English tips to improve THIS spoken answer. vocabulary_suggestions: French words/phrases to enrich it. You are grading a transcript, so do NOT comment on pronunciation or accent."""
+
+
+def _transcribe_audio_sync(audio_bytes: bytes, filename: str) -> str:
+    import io
+    from openai import OpenAI
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    buf = io.BytesIO(audio_bytes)
+    buf.name = filename or "audio.webm"
+    resp = client.audio.transcriptions.create(
+        model=OPENAI_TRANSCRIBE_MODEL, file=buf, language="fr")
+    return (resp.text or "").strip()
+
+
+async def transcribe_audio(audio_bytes: bytes, filename: str) -> str:
+    if not OPENAI_API_KEY:
+        log.warning("No OPENAI_API_KEY set for transcription")
+        return ""
+    loop = asyncio.get_event_loop()
+    try:
+        return await loop.run_in_executor(
+            None, _transcribe_audio_sync, audio_bytes, filename)
+    except Exception as exc:
+        log.warning("Transcription failed: %s", exc)
+        return ""
+
+
+def _call_anthropic_speaking_sync(model: str, user_text: str) -> str:
+    from anthropic import Anthropic
+    aclient = Anthropic(api_key=ANTHROPIC_API_KEY)
+    resp = aclient.messages.create(
+        model=model, max_tokens=2000,
+        system=SPEAKING_GRADER_SYSTEM,
+        messages=[{"role": "user", "content": user_text}])
+    parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
+    return "".join(parts)
+
+
+def _validate_speaking(data: dict) -> dict:
+    base = _validate_analysis(data)
+    base["answers_question"] = bool(data.get("answers_question", False))
+    base["relevance_comment"] = str(data.get("relevance_comment", ""))[:400]
+    base["suggestions"] = [str(x) for x in (data.get("suggestions") or [])][:8]
+    return base
+
+
+async def analyze_speaking_with_ai(transcript: str, question: str) -> dict:
+    if not transcript.strip():
+        return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
+                "relevance_comment": "No speech was detected in the recording.",
+                "suggestions": []}
+    prompt = (f"QUESTION (task):\n{question}\n\n"
+              f"TRANSCRIPT of the candidate's spoken answer:\n{transcript}")
+    if not ANTHROPIC_API_KEY:
+        return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
+                "relevance_comment": "", "suggestions": []}
+    loop = asyncio.get_event_loop()
+    for attempt in range(2):
+        try:
+            raw = await loop.run_in_executor(
+                None, _call_anthropic_speaking_sync, ANTHROPIC_MODEL, prompt)
+            data = json.loads(_strip_fences(raw))
+            return _validate_speaking(data)
+        except Exception as exc:
+            log.warning("Speaking AI call failed (attempt %s): %s", attempt + 1, exc)
+            await asyncio.sleep(0.5)
+    return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
+            "relevance_comment": "", "suggestions": []}
 
 
 # ----------------------------------------------------------------------------
@@ -1474,21 +1563,25 @@ async def exam_questions(exam_type: str, db: AsyncSession = Depends(get_db)):
 # Speaking (stub)
 # ----------------------------------------------------------------------------
 @app.post("/api/speaking/analyze")
-async def speaking_analyze(user: User = Depends(get_current_user),
+async def speaking_analyze(question: str = Form(...),
+                           audio: UploadFile = File(...),
+                           user: User = Depends(get_current_user),
                            db: AsyncSession = Depends(get_db)):
-    await enforce_free_limit(db, user)
-    return {
-        "message": ("La transcription audio n'est pas encore disponible. "
-                    "Cette fonctionnalité arrive bientôt ! En attendant, "
-                    "entraînez-vous avec l'Expression Écrite pour améliorer "
-                    "votre français."),
-        "available": False,
-    }
+    user = await enforce_free_limit(db, user)
+    audio_bytes = await audio.read()
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio upload")
+    transcript = await transcribe_audio(audio_bytes, audio.filename or "audio.webm")
+    analysis = await analyze_speaking_with_ai(transcript, question)
+    analysis["transcript"] = transcript
+    sub = await persist_submission(
+        db, user, transcript or "(no speech detected)", None, analysis,
+        source="speaking")
+    analysis["submission_id"] = sub.get("submission_id")
+    analysis["streak"] = sub.get("streak")
+    return analysis
 
 
-# ----------------------------------------------------------------------------
-# Recent topics
-# ----------------------------------------------------------------------------
 @app.get("/api/recent-topics")
 async def recent_topics(task_type: Optional[int] = None,
                         db: AsyncSession = Depends(get_db)):

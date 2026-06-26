@@ -3,7 +3,10 @@ import { Toaster } from "sonner";
 import { AuthProvider } from "./context/AuthContext";
 import { Header, ProtectedRoute } from "./components/shared";
 import TefTcfWritingGuide from './pages/TefTcfWritingGuide';
-
+import SpeakingHome from './pages/SpeakingHome';
+import SpeakingTasks from './pages/SpeakingTasks';
+import SpeakingThemes from './pages/SpeakingThemes';
+import SpeakingRecord from './pages/SpeakingRecord';
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -18,7 +21,6 @@ import Feedback from "./pages/Feedback";
 import Dashboard from "./pages/Dashboard";
 import Review from "./pages/Review";
 import RecentTopics, { RecentTopicDetail } from "./pages/RecentTopics";
-import Speaking from "./pages/Speaking";
 import MockExam from "./pages/MockExam";
 import Admin from "./pages/Admin";
 import Combinations from './pages/Combinations';
@@ -43,7 +45,11 @@ export default function App() {
           <Route path="/practice/themes" element={<SelectTheme />} />
           <Route path="/practice/write" element={<PracticeWrite />} />
           <Route path="/practice/:promptId" element={<PracticeWrite />} />
-          <Route path="/speaking" element={<Speaking />} />
+          {/* Speaking flow — mirrors the writing flow; public like writing */}
+          <Route path="/speaking" element={<SpeakingHome />} />
+          <Route path="/speaking/tasks" element={<SpeakingTasks />} />
+          <Route path="/speaking/themes" element={<SpeakingThemes />} />
+          <Route path="/speaking/record" element={<SpeakingRecord />} />
           <Route path="/exam/:examType" element={<MockExam />} />
           <Route path="/recent-topics" element={<RecentTopics />} />
           <Route path="/recent-topics/:topicId" element={<RecentTopicDetail />} />
