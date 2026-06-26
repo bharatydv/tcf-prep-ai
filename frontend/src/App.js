@@ -24,10 +24,12 @@ import RecentTopics, { RecentTopicDetail } from "./pages/RecentTopics";
 import MockExam from "./pages/MockExam";
 import Admin from "./pages/Admin";
 import Combinations from './pages/Combinations';
-
+import ReadingHome from './pages/ReadingHome';
+import ListeningHome from './pages/ListeningHome';
 import Blog from './pages/Blog';
 import BlogPost from './pages/BlogPost';
 import BlogAdmin from './pages/BlogAdmin';
+import Resources from './pages/Resources';
 
 export default function App() {
   return (
@@ -57,6 +59,9 @@ export default function App() {
             path="/check-writing"
             element={<ProtectedRoute><CheckWriting /></ProtectedRoute>}
           />
+          <Route path="/resources" element={<Resources />} />
+          <Route path="/reading" element={<ReadingHome />} />
+          <Route path="/listening" element={<ListeningHome />} />
           <Route
             path="/exam-simulator"
             element={<ProtectedRoute><ExamSimulator /></ProtectedRoute>}

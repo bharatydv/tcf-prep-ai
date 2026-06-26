@@ -13,9 +13,10 @@ export function Header() {
   const links = [
     { to: '/speaking', label: 'Speaking Lab' },
     { to: '/practice', label: 'Writing Assistant' },
+    { to: '/reading', label: 'Reading' },
+    { to: '/listening', label: 'Listening' },
     { to: '/exam/reading-comprehension', label: 'Mock Exams' },
-    { to: '/recent-topics', label: 'Resources' },
-    { to: '/blog', label: 'Blog' },
+    { to: '/resources', label: 'Resources' },
   ];
 
   return (
