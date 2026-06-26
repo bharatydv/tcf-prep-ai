@@ -56,9 +56,22 @@ ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@frenchcorrector.com").lower()
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123!")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_TRANSCRIBE_MODEL = os.environ.get("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-transcribe")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+
+# ---- Per-task AI provider selection (you decide which API does which task) ----
+# Grading providers: "anthropic" | "openai" | "gemini"
+WRITING_GRADER_PROVIDER = os.environ.get("WRITING_GRADER_PROVIDER", "anthropic").lower()
+SPEAKING_GRADER_PROVIDER = os.environ.get("SPEAKING_GRADER_PROVIDER", "anthropic").lower()
+# Transcription providers: "openai" | "gemini"  (anthropic cannot transcribe)
+TRANSCRIBE_PROVIDER = os.environ.get("TRANSCRIBE_PROVIDER", "openai").lower()
+
+# ---- Per-provider models (all current, non-deprecated; override in .env) ----
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5")
+OPENAI_GRADER_MODEL = os.environ.get("OPENAI_GRADER_MODEL", "gpt-4o-mini")
+GEMINI_GRADER_MODEL = os.environ.get("GEMINI_GRADER_MODEL", "gemini-2.5-flash-lite")
+OPENAI_TRANSCRIBE_MODEL = os.environ.get("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-transcribe")
+GEMINI_TRANSCRIBE_MODEL = os.environ.get("GEMINI_TRANSCRIBE_MODEL", "gemini-2.5-flash")
 FREE_MONTHLY_LIMIT = 5
 FREE_MODEL_ANSWER_LIMIT = 3
 
@@ -493,18 +506,78 @@ def _strip_fences(text: str) -> str:
     return text.strip()
 
 
-def _call_anthropic_sync(model: str, user_text: str) -> str:
+# ----------------------------------------------------------------------------
+# Multi-provider AI adapters. Each takes (model, system_prompt, user_text) and
+# returns the raw text response. The grader dispatcher picks one by provider.
+# ----------------------------------------------------------------------------
+def _call_anthropic(model: str, system_prompt: str, user_text: str) -> str:
     from anthropic import Anthropic
     aclient = Anthropic(api_key=ANTHROPIC_API_KEY)
     resp = aclient.messages.create(
         model=model,
         max_tokens=2000,
-        temperature=0.2,
-        system=GRADER_SYSTEM,
+        system=system_prompt,
         messages=[{"role": "user", "content": user_text}],
     )
     parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
     return "".join(parts)
+
+
+def _call_openai(model: str, system_prompt: str, user_text: str) -> str:
+    from openai import OpenAI
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    resp = client.chat.completions.create(
+        model=model,
+        max_tokens=2000,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_text},
+        ],
+    )
+    return resp.choices[0].message.content or ""
+
+
+def _call_gemini(model: str, system_prompt: str, user_text: str) -> str:
+    from google import genai
+    from google.genai import types
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    resp = client.models.generate_content(
+        model=model,
+        contents=user_text,
+        config=types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            max_output_tokens=2000,
+        ),
+    )
+    return resp.text or ""
+
+
+# provider -> (callable, key, model) for GRADING tasks
+def _grader_backend(provider: str):
+    if provider == "openai":
+        return _call_openai, OPENAI_API_KEY, OPENAI_GRADER_MODEL
+    if provider == "gemini":
+        return _call_gemini, GEMINI_API_KEY, GEMINI_GRADER_MODEL
+    # default anthropic
+    return _call_anthropic, ANTHROPIC_API_KEY, ANTHROPIC_MODEL
+
+
+async def _grade_with_provider(provider: str, system_prompt: str,
+                               user_text: str) -> Optional[str]:
+    """Run a grading call on the chosen provider. Returns raw text or None."""
+    fn, key, model = _grader_backend(provider)
+    if not key:
+        log.warning("No API key set for grading provider '%s'", provider)
+        return None
+    loop = asyncio.get_event_loop()
+    for attempt in range(2):
+        try:
+            return await loop.run_in_executor(None, fn, model, system_prompt, user_text)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Grading call failed (%s/%s attempt %s): %s",
+                        provider, model, attempt + 1, exc)
+            await asyncio.sleep(0.5)
+    return None
 
 
 def _validate_analysis(data: dict) -> dict:
@@ -540,24 +613,23 @@ def _validate_analysis(data: dict) -> dict:
 
 
 async def analyze_text_with_ai(text: str, topic: Optional[str] = None) -> dict:
-    """Grade with Anthropic. Two attempts."""
+    """Grade writing using the configured WRITING_GRADER_PROVIDER."""
     prompt = (f"Topic/consigne: {topic}\n\nText to grade:\n{text}"
               if topic else f"Text to grade:\n{text}")
-    if not ANTHROPIC_API_KEY:
-        log.warning("No ANTHROPIC_API_KEY set")
+    provider = WRITING_GRADER_PROVIDER
+    raw = await _grade_with_provider(provider, GRADER_SYSTEM, prompt)
+    if raw is None:
         return dict(FALLBACK_ANALYSIS)
-    loop = asyncio.get_event_loop()
-    for attempt in range(2):
-        try:
-            raw = await loop.run_in_executor(
-                None, _call_anthropic_sync, ANTHROPIC_MODEL, prompt)
-            data = json.loads(_strip_fences(raw))
-            return _validate_analysis(data)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("AI call failed (anthropic/%s attempt %s): %s",
-                        ANTHROPIC_MODEL, attempt + 1, exc)
-            await asyncio.sleep(0.5)
-    return dict(FALLBACK_ANALYSIS)
+    try:
+        data = json.loads(_strip_fences(raw))
+        result = _validate_analysis(data)
+        _, _, model = _grader_backend(provider)
+        result["ai_provider"] = provider
+        result["ai_model"] = model
+        return result
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not parse grading JSON (%s): %s", provider, exc)
+        return dict(FALLBACK_ANALYSIS)
 
 
 STATIC_DISTRACTORS = {
@@ -581,7 +653,8 @@ async def generate_distractor(error_text: str, correction: str,
     try:
         if ANTHROPIC_API_KEY:
             raw = await loop.run_in_executor(
-                None, _call_anthropic_sync, ANTHROPIC_MODEL, prompt)
+                None, _call_anthropic, ANTHROPIC_MODEL,
+                "You generate plausible incorrect French answer options.", prompt)
             raw = _strip_fences(raw).strip().strip('"')
             if raw and raw.lower() != correction.lower():
                 return raw[:200]
@@ -693,7 +766,7 @@ If the answer does not address the task, cap the score at B1.
 suggestions: 3-5 concrete English tips to improve THIS spoken answer. vocabulary_suggestions: French words/phrases to enrich it. You are grading a transcript, so do NOT comment on pronunciation or accent."""
 
 
-def _transcribe_audio_sync(audio_bytes: bytes, filename: str) -> str:
+def _transcribe_openai(audio_bytes: bytes, filename: str) -> str:
     import io
     from openai import OpenAI
     client = OpenAI(api_key=OPENAI_API_KEY)
@@ -704,28 +777,45 @@ def _transcribe_audio_sync(audio_bytes: bytes, filename: str) -> str:
     return (resp.text or "").strip()
 
 
+def _transcribe_gemini(audio_bytes: bytes, filename: str) -> str:
+    from google import genai
+    from google.genai import types
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    mime = "audio/webm"
+    fn = (filename or "").lower()
+    if fn.endswith(".mp3"):
+        mime = "audio/mp3"
+    elif fn.endswith(".wav"):
+        mime = "audio/wav"
+    elif fn.endswith(".m4a"):
+        mime = "audio/mp4"
+    resp = client.models.generate_content(
+        model=GEMINI_TRANSCRIBE_MODEL,
+        contents=[
+            "Transcribe this French audio exactly. Return ONLY the transcript text.",
+            types.Part.from_bytes(data=audio_bytes, mime_type=mime),
+        ],
+    )
+    return (resp.text or "").strip()
+
+
 async def transcribe_audio(audio_bytes: bytes, filename: str) -> str:
-    if not OPENAI_API_KEY:
-        log.warning("No OPENAI_API_KEY set for transcription")
+    """Transcribe using the configured TRANSCRIBE_PROVIDER (openai | gemini)."""
+    provider = TRANSCRIBE_PROVIDER
+    if provider == "gemini":
+        fn, key = _transcribe_gemini, GEMINI_API_KEY
+    else:
+        fn, key = _transcribe_openai, OPENAI_API_KEY
+        provider = "openai"
+    if not key:
+        log.warning("No API key set for transcription provider '%s'", provider)
         return ""
     loop = asyncio.get_event_loop()
     try:
-        return await loop.run_in_executor(
-            None, _transcribe_audio_sync, audio_bytes, filename)
-    except Exception as exc:
-        log.warning("Transcription failed: %s", exc)
+        return await loop.run_in_executor(None, fn, audio_bytes, filename)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Transcription failed (%s): %s", provider, exc)
         return ""
-
-
-def _call_anthropic_speaking_sync(model: str, user_text: str) -> str:
-    from anthropic import Anthropic
-    aclient = Anthropic(api_key=ANTHROPIC_API_KEY)
-    resp = aclient.messages.create(
-        model=model, max_tokens=2000,
-        system=SPEAKING_GRADER_SYSTEM,
-        messages=[{"role": "user", "content": user_text}])
-    parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
-    return "".join(parts)
 
 
 def _validate_speaking(data: dict) -> dict:
@@ -737,27 +827,29 @@ def _validate_speaking(data: dict) -> dict:
 
 
 async def analyze_speaking_with_ai(transcript: str, question: str) -> dict:
+    """Grade a spoken answer using the configured SPEAKING_GRADER_PROVIDER."""
     if not transcript.strip():
         return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
                 "relevance_comment": "No speech was detected in the recording.",
                 "suggestions": []}
     prompt = (f"QUESTION (task):\n{question}\n\n"
               f"TRANSCRIPT of the candidate's spoken answer:\n{transcript}")
-    if not ANTHROPIC_API_KEY:
+    provider = SPEAKING_GRADER_PROVIDER
+    raw = await _grade_with_provider(provider, SPEAKING_GRADER_SYSTEM, prompt)
+    if raw is None:
         return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
                 "relevance_comment": "", "suggestions": []}
-    loop = asyncio.get_event_loop()
-    for attempt in range(2):
-        try:
-            raw = await loop.run_in_executor(
-                None, _call_anthropic_speaking_sync, ANTHROPIC_MODEL, prompt)
-            data = json.loads(_strip_fences(raw))
-            return _validate_speaking(data)
-        except Exception as exc:
-            log.warning("Speaking AI call failed (attempt %s): %s", attempt + 1, exc)
-            await asyncio.sleep(0.5)
-    return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
-            "relevance_comment": "", "suggestions": []}
+    try:
+        data = json.loads(_strip_fences(raw))
+        result = _validate_speaking(data)
+        _, _, model = _grader_backend(provider)
+        result["ai_provider"] = provider
+        result["ai_model"] = model
+        return result
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not parse speaking JSON (%s): %s", provider, exc)
+        return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
+                "relevance_comment": "", "suggestions": []}
 
 
 # ----------------------------------------------------------------------------

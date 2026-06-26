@@ -9,3 +9,4 @@ python-dotenv==1.0.1
 anthropic==0.107.1
 openai
 python-multipart
+google-genai
