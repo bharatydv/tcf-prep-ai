@@ -16,6 +16,7 @@ export default function SpeakingThemes() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const tache = parseInt(searchParams.get('tache'), 10) || 1;
+  const mode = searchParams.get('mode') === 'upload' ? 'upload' : 'record';
 
   const [themes, setThemes] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -35,7 +36,7 @@ export default function SpeakingThemes() {
       toast.error('Ce thème est réservé aux membres Pro.');
       return navigate('/pricing');
     }
-    navigate(`/speaking/record?tache=${tache}&theme=${t.theme_id}`);
+    navigate(`/speaking/record?tache=${tache}&theme=${t.theme_id}&mode=${mode}`);
   };
 
   return (

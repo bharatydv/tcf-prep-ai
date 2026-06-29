@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Microphone, Stop, ArrowClockwise, ArrowLeft,
+  Microphone, Stop, ArrowClockwise, ArrowLeft, UploadSimple,
   CheckCircle, XCircle, Sparkle, Lightning,
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
@@ -9,9 +9,9 @@ import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 
 const TACHE_INFO = {
-  1: { title: 'Tâche 1 : Message oral', range: '1 – 2 min' },
-  2: { title: 'Tâche 2 : Raconter / décrire', range: '2 – 3 min' },
-  3: { title: 'Tâche 3 : Donner son avis', range: '2 – 3 min' },
+  1: { title: 'Tâche 1 : Entretien Dirigé', range: '2 min' },
+  2: { title: 'Tâche 2 : Exercice en Interaction', range: '5.5 min' },
+  3: { title: "Tâche 3 : Expression d'un Point de Vue", range: '4.5 min' },
 };
 
 const CAT_LABELS = {
@@ -26,6 +26,7 @@ export default function SpeakingRecord() {
   const tacheNum = parseInt(searchParams.get('tache'), 10);
   const tache = TACHE_INFO[tacheNum] || null;
   const themeId = searchParams.get('theme');
+  const mode = searchParams.get('mode') === 'upload' ? 'upload' : 'record';
 
   const [question, setQuestion] = useState(
     'Présentez-vous : parlez de vous, de votre travail ou de vos études, et de vos centres d’intérêt.');
@@ -33,6 +34,7 @@ export default function SpeakingRecord() {
   const [recording, setRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState(null);
   const [audioUrl, setAudioUrl] = useState('');
+  const [audioName, setAudioName] = useState('answer.webm');
   const [elapsed, setElapsed] = useState(0);
   const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState(null);
@@ -40,6 +42,7 @@ export default function SpeakingRecord() {
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
   const timerRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     document.title = 'Speaking practice | MonFrancais';
@@ -67,8 +70,24 @@ export default function SpeakingRecord() {
     setAudioBlob(null);
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     setAudioUrl('');
+    setAudioName('answer.webm');
     setElapsed(0);
     setResult(null);
+  };
+
+  const handleFile = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('audio/')) {
+      return toast.error('Veuillez sélectionner un fichier audio (mp3, m4a, wav, webm).');
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      return toast.error('Fichier trop volumineux (max 25 Mo).');
+    }
+    resetRecording();
+    setAudioBlob(file);
+    setAudioName(file.name || 'upload.mp3');
+    setAudioUrl(URL.createObjectURL(file));
   };
 
   const startRecording = async () => {
@@ -82,6 +101,7 @@ export default function SpeakingRecord() {
       mr.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
         setAudioBlob(blob);
+        setAudioName('answer.webm');
         setAudioUrl(URL.createObjectURL(blob));
         stream.getTracks().forEach((t) => t.stop());
       };
@@ -104,13 +124,13 @@ export default function SpeakingRecord() {
   };
 
   const submit = async () => {
-    if (!audioBlob) return toast.error("Enregistrez d'abord votre réponse.");
+    if (!audioBlob) return toast.error(mode === 'upload' ? "Choisissez d'abord un fichier audio." : "Enregistrez d'abord votre réponse.");
     setAnalyzing(true);
     setResult(null);
     try {
       const form = new FormData();
       form.append('question', question);
-      form.append('audio', audioBlob, 'answer.webm');
+      form.append('audio', audioBlob, audioName);
       const { data } = await api.post('/api/speaking/analyze', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -134,7 +154,7 @@ export default function SpeakingRecord() {
     <main className="overflow-x-clip bg-white">
       <section className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
         <button
-          onClick={() => navigate(themeId ? `/speaking/themes?tache=${tacheNum}` : '/speaking/tasks')}
+          onClick={() => navigate(themeId ? `/speaking/themes?tache=${tacheNum}&mode=${mode}` : '/speaking/tasks')}
           className="mb-6 inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline">
           <ArrowLeft size={16} /> Back
         </button>
@@ -152,30 +172,46 @@ export default function SpeakingRecord() {
           <p className="mt-2 text-[15px] leading-relaxed text-gray-800">{question}</p>
         </div>
 
-        {/* RECORDER */}
+        {/* RECORDER / UPLOAD */}
         <div className="mt-6 rounded-3xl border border-violet-100 bg-white p-8 text-center shadow-xl shadow-violet-200/40">
           {!audioBlob ? (
-            <>
-              <button onClick={recording ? stopRecording : startRecording}
-                className={`mx-auto flex h-24 w-24 items-center justify-center rounded-full text-white shadow-lg transition ${
-                  recording ? 'animate-pulse bg-gradient-to-br from-red-500 to-rose-600' : 'bg-gradient-to-br from-primary to-fuchsia-600 hover:scale-105'
-                }`}>
-                {recording ? <Stop size={36} weight="fill" /> : <Microphone size={36} weight="fill" />}
-              </button>
-              <p className="mt-4 font-heading text-lg font-bold text-gray-900">
-                {recording ? `Enregistrement… ${mm}:${ss}` : 'Appuyez pour parler'}
-              </p>
-              <p className="mt-1 text-sm text-gray-500">
-                {recording ? 'Appuyez à nouveau pour arrêter.' : 'Répondez à la question à voix haute.'}
-              </p>
-            </>
+            mode === 'upload' ? (
+              <>
+                <input ref={fileInputRef} type="file" accept="audio/*" onChange={handleFile} className="hidden" />
+                <button onClick={() => { if (!user) return navigate('/login'); fileInputRef.current?.click(); }}
+                  className="mx-auto flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-primary to-fuchsia-600 text-white shadow-lg transition hover:scale-105">
+                  <UploadSimple size={36} weight="bold" />
+                </button>
+                <p className="mt-4 font-heading text-lg font-bold text-gray-900">Importer un enregistrement</p>
+                <p className="mt-1 text-sm text-gray-500">
+                  Choisissez un fichier audio (mp3, m4a, wav, webm — max 25 Mo).
+                </p>
+              </>
+            ) : (
+              <>
+                <button onClick={recording ? stopRecording : startRecording}
+                  className={`mx-auto flex h-24 w-24 items-center justify-center rounded-full text-white shadow-lg transition ${
+                    recording ? 'animate-pulse bg-gradient-to-br from-red-500 to-rose-600' : 'bg-gradient-to-br from-primary to-fuchsia-600 hover:scale-105'
+                  }`}>
+                  {recording ? <Stop size={36} weight="fill" /> : <Microphone size={36} weight="fill" />}
+                </button>
+                <p className="mt-4 font-heading text-lg font-bold text-gray-900">
+                  {recording ? `Enregistrement… ${mm}:${ss}` : 'Appuyez pour parler'}
+                </p>
+                <p className="mt-1 text-sm text-gray-500">
+                  {recording ? 'Appuyez à nouveau pour arrêter.' : 'Répondez à la question à voix haute.'}
+                </p>
+              </>
+            )
           ) : (
             <>
-              <p className="font-heading text-lg font-bold text-gray-900">Votre enregistrement ({mm}:{ss})</p>
+              <p className="font-heading text-lg font-bold text-gray-900">
+                {mode === 'upload' ? `Fichier : ${audioName}` : `Votre enregistrement (${mm}:${ss})`}
+              </p>
               <audio src={audioUrl} controls className="mx-auto mt-4 w-full max-w-md" />
               <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
                 <button onClick={resetRecording} className="btn-outline">
-                  <ArrowClockwise size={18} /> Réenregistrer
+                  {mode === 'upload' ? <><UploadSimple size={18} weight="bold" /> Changer de fichier</> : <><ArrowClockwise size={18} /> Réenregistrer</>}
                 </button>
                 <button onClick={submit} disabled={analyzing}
                   className="btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600">

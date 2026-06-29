@@ -1070,8 +1070,8 @@ async def run_seeds():
                 name_to_id[name] = tid
                 db.add(Theme(
                     theme_id=tid, name=name, emoji=emoji, description=desc,
-                    is_premium=premium, sort_order=order, is_active=True,
-                    created_at=now_utc()))
+                    is_premium=premium, skill="writing", sort_order=order,
+                    is_active=True, created_at=now_utc()))
             await db.commit()
             for theme_name, task_type, prompt_text in SEED_THEME_QUESTIONS:
                 tid = name_to_id.get(theme_name)
@@ -1084,6 +1084,33 @@ async def run_seeds():
             await db.commit()
             log.info("Seeded %d themes and %d theme questions",
                      len(SEED_THEMES), len(SEED_THEME_QUESTIONS))
+
+        # Seed SPEAKING themes (skill='speaking') separately so they can be
+        # added even if writing themes already exist.
+        speaking_count = await db.scalar(
+            select(func.count()).select_from(Theme).where(
+                Theme.skill == "speaking"))
+        if not speaking_count:
+            sp_name_to_id = {}
+            for name, emoji, premium, order, desc in SEED_SPEAKING_THEMES:
+                tid = new_id("theme")
+                sp_name_to_id[name] = tid
+                db.add(Theme(
+                    theme_id=tid, name=name, emoji=emoji, description=desc,
+                    is_premium=premium, skill="speaking", sort_order=order,
+                    is_active=True, created_at=now_utc()))
+            await db.commit()
+            for theme_name, task_type, prompt_text in SEED_SPEAKING_QUESTIONS:
+                tid = sp_name_to_id.get(theme_name)
+                if not tid:
+                    continue
+                db.add(ThemeQuestion(
+                    question_id=new_id("tq"), theme_id=tid, task_type=task_type,
+                    prompt_text=prompt_text, is_active=True,
+                    created_at=now_utc()))
+            await db.commit()
+            log.info("Seeded %d speaking themes and %d speaking questions",
+                     len(SEED_SPEAKING_THEMES), len(SEED_SPEAKING_QUESTIONS))
 
 
 # ----------------------------------------------------------------------------
@@ -2167,6 +2194,7 @@ class Theme(Base):
     emoji: Mapped[str] = mapped_column(String(8), default="")
     description: Mapped[str] = mapped_column(Text, default="")
     is_premium: Mapped[bool] = mapped_column(Boolean, default=False)
+    skill: Mapped[str] = mapped_column(String(16), default="writing", index=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -2223,16 +2251,20 @@ class ThemeQuestionUpdate(BaseModel):
 # ----------------------------------------------------------------------------
 @app.get("/api/themes")
 async def list_themes(task_type: Optional[int] = None,
+                      skill: Optional[str] = None,
                       db: AsyncSession = Depends(get_db)):
     """List active themes, with the question count for a given tâche.
 
     Pass ?task_type=1 (or 2/3) to get the count of questions for that tâche.
+    Pass ?skill=writing or ?skill=speaking to filter by skill area.
     Premium themes are returned too, marked is_premium=True so the UI can
     show a Pro badge / lock.
     """
-    res = await db.execute(
-        select(Theme).where(Theme.is_active == True)  # noqa: E712
-        .order_by(Theme.sort_order.asc(), Theme.name.asc()))
+    stmt = select(Theme).where(Theme.is_active == True)  # noqa: E712
+    if skill in ("writing", "speaking"):
+        stmt = stmt.where(Theme.skill == skill)
+    stmt = stmt.order_by(Theme.sort_order.asc(), Theme.name.asc())
+    res = await db.execute(stmt)
     themes = res.scalars().all()
     out = []
     for t in themes:
@@ -2452,6 +2484,188 @@ SEED_THEME_QUESTIONS = [
      "Racontez dans un article un événement culturel (concert, exposition, festival) auquel vous avez assisté. (120 à 150 mots)"),
     ("Loisirs & Culture", 3,
      "« Les livres papier sont meilleurs que les livres numériques. » Comparez les deux et défendez votre position. (120 à 180 mots)"),
+]
+
+# ----------------------------------------------------------------------------
+# SPEAKING THEMES (skill='speaking'), all topics under Tâche 3 (task_type=3).
+# First 2 themes free, remaining 8 Pro. 10 themes x 15 topics = 150 questions.
+# ----------------------------------------------------------------------------
+# Each theme: (name, emoji, is_premium, sort_order, description)
+SEED_SPEAKING_THEMES = [
+    ('Immigration et Intégration', '🌍', False, 101, "15 sujets d'expression orale — Immigration et Intégration."),
+    ('Monde du Travail et Économie', '💼', False, 102, "15 sujets d'expression orale — Monde du Travail et Économie."),
+    ('Environnement et Transition Écologique', '♻️', True, 103, "15 sujets d'expression orale — Environnement et Transition Écologique."),
+    ('Éducation et Jeunesse', '🎓', True, 104, "15 sujets d'expression orale — Éducation et Jeunesse."),
+    ('Nouvelles Technologies et Réseaux Sociaux', '📱', True, 105, "15 sujets d'expression orale — Nouvelles Technologies et Réseaux Sociaux."),
+    ('Voyages, Tourisme et Transport', '🧳', True, 106, "15 sujets d'expression orale — Voyages, Tourisme et Transport."),
+    ('Société et Consommation', '🛒', True, 107, "15 sujets d'expression orale — Société et Consommation."),
+    ('Culture, Langue et Patrimoine', '🎭', True, 108, "15 sujets d'expression orale — Culture, Langue et Patrimoine."),
+    ('Santé, Sport et Bien-être', '🩺', True, 109, "15 sujets d'expression orale — Santé, Sport et Bien-être."),
+    ('Vie Sociale, Famille et Démographie', '👨\u200d👩\u200d👧', True, 110, "15 sujets d'expression orale — Vie Sociale, Famille et Démographie."),
+]
+
+# Each question: (theme_name, task_type, prompt_text) — all task_type=3
+SEED_SPEAKING_QUESTIONS = [
+    # --- Immigration et Intégration ---
+    ('Immigration et Intégration', 3, 'Partir s’installer à l’étranger est plus simple quand on est jeune.'),
+    ('Immigration et Intégration', 3, "L'obligation d'atteindre un niveau linguistique avant l'obtention de la résidence permanente."),
+    ('Immigration et Intégration', 3, 'Écrire à un ami pour décrire vos premières impressions après votre arrivée au Canada.'),
+    ('Immigration et Intégration', 3, 'Le concept du multiculturalisme favorise-t-il la cohésion ou la division sociale ?'),
+    ('Immigration et Intégration', 3, 'Les défis psychologiques du "choc culturel" et l\'isolement des nouveaux arrivants.'),
+    ('Immigration et Intégration', 3, 'Demander des conseils par courriel concernant la recherche de logement à un expatrié installé.'),
+    ('Immigration et Intégration', 3, 'La reconnaissance des diplômes étrangers par les ordres professionnels locaux.'),
+    ('Immigration et Intégration', 3, "Les programmes de parrainage communautaire pour aider l'intégration des réfugiés."),
+    ('Immigration et Intégration', 3, 'Faut-il vivre dans un pays pour en comprendre réellement la culture ?'),
+    ('Immigration et Intégration', 3, "L'impact de l'immigration économique sur le dynamisme des petites municipalités."),
+    ('Immigration et Intégration', 3, 'Raconter votre première démarche administrative réussie dans votre nouveau pays.'),
+    ('Immigration et Intégration', 3, 'Le vote aux élections locales devrait-il être accordé aux résidents permanents non-citoyens ?'),
+    ('Immigration et Intégration', 3, "Les cours de citoyenneté obligatoire favorisent-ils l'assimilation forcée ou l'intégration ?"),
+    ('Immigration et Intégration', 3, "L'apprentissage de l'histoire locale doit-il être un prérequis à l'immigration ?"),
+    ('Immigration et Intégration', 3, 'Écrire un message pour inviter un collègue canadien à célébrer une fête nationale de votre pays d’origine.'),
+    # --- Monde du Travail et Économie ---
+    ('Monde du Travail et Économie', 3, 'Le télétravail obligatoire : symbole de liberté ou facteur d’isolement social ?'),
+    ('Monde du Travail et Économie', 3, 'Annoncer à un ancien collègue votre récente promotion et décrire vos nouvelles tâches.'),
+    ('Monde du Travail et Économie', 3, "L'automatisation et l'intelligence artificielle vont-elles détruire plus d'emplois qu'elles n'en créent ?"),
+    ('Monde du Travail et Économie', 3, 'La semaine de travail de quatre jours augmente-t-elle la productivité des entreprises ?'),
+    ('Monde du Travail et Économie', 3, 'Rédiger une lettre ouverte pour dénoncer le manque de flexibilité des horaires de bureau.'),
+    ('Monde du Travail et Économie', 3, "La parité homme-femme obligatoire dans les conseils d'administration des grandes entreprises."),
+    ('Monde du Travail et Économie', 3, "Demander des informations détaillées sur les conditions de stage au sein d'une start-up."),
+    ('Monde du Travail et Économie', 3, "L'entrepreneuriat chez les jeunes : une solution viable face au chômage ou un risque excessif ?"),
+    ('Monde du Travail et Économie', 3, 'L\'importance grandissante des "soft skills" (compétences douces) face aux compétences techniques.'),
+    ('Monde du Travail et Économie', 3, 'Le concept du "revenu universel de base" pour pallier la précarité de l\'emploi moderne.'),
+    ('Monde du Travail et Économie', 3, "Raconter un conflit marquant survenu au travail et la façon dont vous l'avez résolu."),
+    ('Monde du Travail et Économie', 3, "Faut-il interdire l'accès aux courriels professionnels après les heures de bureau standard ?"),
+    ('Monde du Travail et Économie', 3, "Le salaire des dirigeants d'entreprises devrait-il être plafonné par des lois strictes ?"),
+    ('Monde du Travail et Économie', 3, 'Les espaces de coworking favorisent-ils la créativité ou perturbent-ils la concentration ?'),
+    ('Monde du Travail et Économie', 3, 'Écrire une lettre de recommandation pour un collègue qui postule à un nouvel emploi.'),
+    # --- Environnement et Transition Écologique ---
+    ('Environnement et Transition Écologique', 3, "L'interdiction totale des véhicules thermiques dans les centres-villes d'ici cinq ans."),
+    ('Environnement et Transition Écologique', 3, "Écrire un article pour donner votre opinion sur l'augmentation des espaces verts urbains."),
+    ('Environnement et Transition Écologique', 3, 'La responsabilité de la crise climatique repose-t-elle sur le consommateur ou sur les industries ?'),
+    ('Environnement et Transition Écologique', 3, 'Faut-il taxer lourdement les produits importés pour encourager massivement la consommation locale ?'),
+    ('Environnement et Transition Écologique', 3, "Raconter votre participation à une journée de nettoyage bénévole d'une plage ou d'un parc."),
+    ('Environnement et Transition Écologique', 3, "L'impact environnemental du secteur du numérique et le stockage massif des données (Cloud)."),
+    ('Environnement et Transition Écologique', 3, 'Demander des détails à votre municipalité concernant la mise en place du compostage obligatoire.'),
+    ('Environnement et Transition Écologique', 3, "Le développement de l'énergie nucléaire reste-t-il indispensable pour atteindre la neutralité carbone ?"),
+    ('Environnement et Transition Écologique', 3, "L'introduction de quotas de voyage en avion par citoyen pour limiter l'empreinte carbone collective."),
+    ('Environnement et Transition Écologique', 3, 'Le suremballage plastique dans la grande distribution : faut-il passer aux sanctions financières ?'),
+    ('Environnement et Transition Écologique', 3, 'Proposer par écrit un projet de covoiturage à l’échelle de votre quartier résidentiel.'),
+    ('Environnement et Transition Écologique', 3, "L'écotourisme est-il une véritable alternative durable ou une simple stratégie de communication ?"),
+    ('Environnement et Transition Écologique', 3, "L'interdiction de la publicité pour les produits à forte empreinte écologique (comme les SUV)."),
+    ('Environnement et Transition Écologique', 3, "L'éducation environnementale devrait-elle devenir une matière principale dès l'école primaire ?"),
+    ('Environnement et Transition Écologique', 3, 'Écrire à un ami pour lui décrire votre transition vers un mode de vie zéro déchet.'),
+    # --- Éducation et Jeunesse ---
+    ('Éducation et Jeunesse', 3, "Le port de l'uniforme scolaire obligatoire favorise-t-il l'égalité entre les élèves ?"),
+    ('Éducation et Jeunesse', 3, "L'apprentissage d'un instrument de musique devrait-il être imposé à tous les enfants."),
+    ('Éducation et Jeunesse', 3, "Écrire à un enseignant pour le remercier de l'impact positif qu'il a eu sur votre parcours."),
+    ('Éducation et Jeunesse', 3, "L'interdiction stricte des smartphones au sein de tous les établissements scolaires."),
+    ('Éducation et Jeunesse', 3, "Les cours magistraux à l'université doivent-ils être définitivement remplacés par des formations en ligne ?"),
+    ('Éducation et Jeunesse', 3, "Donner de l'argent de poche aux adolescents est un mauvais service que nous leur rendons."),
+    ('Éducation et Jeunesse', 3, "Demander des précisions sur le programme d'une formation linguistique intensive."),
+    ('Éducation et Jeunesse', 3, "L'abaissement du droit de vote des citoyens à l'âge de seize ans."),
+    ('Éducation et Jeunesse', 3, 'Le système de notation traditionnel par notes chiffrées nuit-il à la motivation des élèves ?'),
+    ('Éducation et Jeunesse', 3, "Les années sabbatiques avant l'entrée à l'université : perte de temps ou gain d'autonomie ?"),
+    ('Éducation et Jeunesse', 3, 'Raconter un souvenir marquant lié à un projet de groupe durant vos études secondaires.'),
+    ('Éducation et Jeunesse', 3, "L'enseignement de l'informatique et du code doit-il remplacer les cours de dessin ou d'arts plastiques ?"),
+    ('Éducation et Jeunesse', 3, 'Les devoirs à la maison devraient-ils être interdits pour préserver le bien-être familial ?'),
+    ('Éducation et Jeunesse', 3, "Le financement public des universités doit-il dépendre du taux d'insertion professionnelle de leurs diplômés ?"),
+    ('Éducation et Jeunesse', 3, "Inviter des parents d'élèves par message à organiser la kermesse de fin d'année scolaire."),
+    # --- Nouvelles Technologies et Réseaux Sociaux ---
+    ('Nouvelles Technologies et Réseaux Sociaux', 3, 'Les sites de rencontres nous éloignent-ils plus qu’ils ne nous rapprochent de la réalité ?'),
+    ('Nouvelles Technologies et Réseaux Sociaux', 3, "Raconter une expérience où vous avez décidé de faire une détox numérique complète d'une semaine."),
+    ('Nouvelles Technologies et Réseaux Sociaux', 3, "L'anonymat sur Internet devrait-il être supprimé pour lutter contre la cybercriminalité ?"),
+    ('Nouvelles Technologies et Réseaux Sociaux', 3, 'Les réseaux sociaux représentent-ils un grave danger pour la santé mentale des jeunes ?'),
+    ('Nouvelles Technologies et Réseaux Sociaux', 3, 'Écrire un message à un ami pour lui conseiller une application mobile qui a changé votre quotidien.'),
+    ('Nouvelles Technologies et Réseaux Sociaux', 3, 'Les livres électroniques vont-ils faire disparaître définitivement le format papier ?'),
+    ('Nouvelles Technologies et Réseaux Sociaux', 3, "Demander des informations à un service client à la suite d'une panne prolongée de votre connexion internet."),
+    ('Nouvelles Technologies et Réseaux Sociaux', 3, "L'intelligence artificielle générative menace-t-elle l'authenticité des créations artistiques ?"),
+    ('Nouvelles Technologies et Réseaux Sociaux', 3, "La surveillance de l'espace public par reconnaissance faciale est-elle une atteinte intolérable aux libertés ?"),
+    ('Nouvelles Technologies et Réseaux Sociaux', 3, "Le télétravail dans le métavers : l'avenir des réunions professionnelles à distance."),
+    ('Nouvelles Technologies et Réseaux Sociaux', 3, "Rédiger un court message d'annonce pour vendre votre ordinateur portable d'occasion."),
+    ('Nouvelles Technologies et Réseaux Sociaux', 3, 'Les algorithmes de recommandation limitent-ils notre ouverture culturelle et notre curiosité ?'),
+    ('Nouvelles Technologies et Réseaux Sociaux', 3, "L'impact de la dépendance aux écrans sur les relations de communication intra-familiales."),
+    ('Nouvelles Technologies et Réseaux Sociaux', 3, 'Faut-il punir légalement les influenceurs qui partagent de fausses informations à leur communauté ?'),
+    ('Nouvelles Technologies et Réseaux Sociaux', 3, 'Écrire un courriel de réclamation suite au piratage de vos données personnelles sur un site marchand.'),
+    # --- Voyages, Tourisme et Transport ---
+    ('Voyages, Tourisme et Transport', 3, "Les voyages organisés sont-ils incompatibles avec la découverte réelle d'un pays ?"),
+    ('Voyages, Tourisme et Transport', 3, 'Écrire à une agence de voyages pour demander des détails sur les excursions incluses dans un forfait.'),
+    ('Voyages, Tourisme et Transport', 3, 'Le surtourisme dégrade-t-il irréversiblement les sites classés au patrimoine mondial ?'),
+    ('Voyages, Tourisme et Transport', 3, 'Les transports en commun urbains devraient-ils devenir totalement gratuits pour les résidents ?'),
+    ('Voyages, Tourisme et Transport', 3, "Décrire vos impressions négatives sur un séjour à l'hôtel dans un avis publié sur un forum."),
+    ('Voyages, Tourisme et Transport', 3, "Voyager seul est-ce le meilleur moyen d'apprendre à mieux se connaître ?"),
+    ('Voyages, Tourisme et Transport', 3, 'Inviter un ami par courriel à partir en voyage à vélo à travers la campagne pendant le week-end.'),
+    ('Voyages, Tourisme et Transport', 3, "L'essor des plateformes de location de courte durée nuit-il à l'accès au logement pour les locaux ?"),
+    ('Voyages, Tourisme et Transport', 3, "Faut-il interdire l'usage des vols courts internes lorsqu'une alternative en train rapide existe ?"),
+    ('Voyages, Tourisme et Transport', 3, 'Le concept du "Slow Travel" (voyager lentement) face à la consommation frénétique de destinations.'),
+    ('Voyages, Tourisme et Transport', 3, "Raconter un imprévu survenu lors d'un voyage et comment vous avez réussi à gérer la situation."),
+    ('Voyages, Tourisme et Transport', 3, "Est-il indispensable de maîtriser les bases de la langue du pays avant de s'y rendre ?"),
+    ('Voyages, Tourisme et Transport', 3, 'Le développement du tourisme spatial est-il une aberration éthique et environnementale ?'),
+    ('Voyages, Tourisme et Transport', 3, 'Le passeport numérique universel facilitera-t-il ou segmentera-t-il davantage les flux migratoires ?'),
+    ('Voyages, Tourisme et Transport', 3, 'Demander des conseils à un ami concernant les meilleurs quartiers à visiter à Montréal.'),
+    # --- Société et Consommation ---
+    ('Société et Consommation', 3, 'La société de consommation moderne transforme-t-elle les citoyens en simples acheteurs passifs ?'),
+    ('Société et Consommation', 3, "Écrire un message pour organiser un cadeau commun pour le départ à la retraite d'un collègue."),
+    ('Société et Consommation', 3, 'Le boycott des marques non éthiques est-il une arme politique efficace pour le citoyen ?'),
+    ('Société et Consommation', 3, 'La publicité ciblée en ligne constitue-t-elle une violation agressive de notre vie privée ?'),
+    ('Société et Consommation', 3, "Raconter votre dernière expérience d'achat dans une friperie ou un marché de seconde main."),
+    ('Société et Consommation', 3, 'Les commerces de proximité traditionnels peuvent-ils survivre face aux géants du e-commerce ?'),
+    ('Société et Consommation', 3, "Rédiger une lettre de réclamation à la suite d'une facturation abusive d'un opérateur téléphonique."),
+    ('Société et Consommation', 3, 'Le véganisme : choix de consommation éthique nécessaire ou tendance alimentaire marginale ?'),
+    ('Société et Consommation', 3, 'La généralisation des caisses automatiques dans les supermarchés détruit-elle le lien social de proximité ?'),
+    ('Société et Consommation', 3, "Le minimalisme matériel permet-il d'atteindre une forme de liberté et de bonheur réel ?"),
+    ('Société et Consommation', 3, 'Demander des détails par écrit sur les conditions d’abonnement annuel d’une salle de sport.'),
+    ('Société et Consommation', 3, "L'obsolescence programmée des appareils électroniques devrait-elle être sévèrement punie pénalement ?"),
+    ('Société et Consommation', 3, "L'affichage obligatoire de l'indice de réparabilité sur tous les objets de consommation courante."),
+    ('Société et Consommation', 3, "L'influence des tendances de mode éphémères (Fast Fashion) sur les comportements des adolescents."),
+    ('Société et Consommation', 3, 'Écrire à un ami pour lui prêter votre logement durant ses vacances et lui lister les règles de la maison.'),
+    # --- Culture, Langue et Patrimoine ---
+    ('Culture, Langue et Patrimoine', 3, "La culture et l'accès aux musées nationaux devraient être complètement gratuits pour tous."),
+    ('Culture, Langue et Patrimoine', 3, 'Écrire un courriel pour confirmer votre présence à un mariage et demander des détails sur la liste de cadeaux.'),
+    ('Culture, Langue et Patrimoine', 3, "L'omniprésence de la langue anglaise menace-t-elle la diversité culturelle et linguistique mondiale ?"),
+    ('Culture, Langue et Patrimoine', 3, "Les œuvres d'art acquises durant la colonisation doivent-elles être restituées à leur pays d'origine ?"),
+    ('Culture, Langue et Patrimoine', 3, 'Raconter vos impressions après avoir assisté à un festival de cinéma indépendant ou une pièce de théâtre.'),
+    ('Culture, Langue et Patrimoine', 3, 'Le street-art (art urbain) doit-il être considéré comme un art majeur ou une dégradation publique ?'),
+    ('Culture, Langue et Patrimoine', 3, "Proposer une sortie culturelle par message à un groupe d'amis pour visiter une exposition d'art contemporain."),
+    ('Culture, Langue et Patrimoine', 3, 'La numérisation complète du patrimoine mondial va-t-elle tuer le désir de visiter les sites physiques ?'),
+    ('Culture, Langue et Patrimoine', 3, "La gastronomie locale fait-elle partie intégrante de l'identité nationale d'un peuple ?"),
+    ('Culture, Langue et Patrimoine', 3, 'Les subventions publiques accordées aux artistes indépendants sont-elles un investissement nécessaire ?'),
+    ('Culture, Langue et Patrimoine', 3, 'Demander par écrit des renseignements sur les tarifs de groupe pour un festival de musique d’été.'),
+    ('Culture, Langue et Patrimoine', 3, "Le développement de la lecture chez les jeunes passe-t-il par l'acceptation des bandes dessinées et mangas à l'école ?"),
+    ('Culture, Langue et Patrimoine', 3, "Les monuments historiques doivent-ils être préservés à tout prix, même s'ils bloquent le développement urbain ?"),
+    ('Culture, Langue et Patrimoine', 3, "L'adaptation des œuvres littéraires classiques au cinéma dénature-t-elle le message de l'auteur ?"),
+    ('Culture, Langue et Patrimoine', 3, "Écrire à un correspondant pour lui faire part d'une tradition culturelle unique propre à votre région d'origine."),
+    # --- Santé, Sport et Bien-être ---
+    ('Santé, Sport et Bien-être', 3, 'Faut-il arrêter de prescrire des médicaments de façon systématique pour se tourner vers des alternatives ?'),
+    ('Santé, Sport et Bien-être', 3, "Rédiger un message à l'attention de vos collègues pour proposer des séances hebdomadaires de yoga au bureau."),
+    ('Santé, Sport et Bien-être', 3, "Les sportifs professionnels de haut niveau gagnent-ils trop d'argent par rapport à leur utilité sociale ?"),
+    ('Santé, Sport et Bien-être', 3, "La taxe nutritionnelle sur la restauration rapide (Fast-food) est-elle efficace pour lutter contre l'obésité ?"),
+    ('Santé, Sport et Bien-être', 3, "Raconter le déroulement d'une course à pied caritative à laquelle vous avez participé activement."),
+    ('Santé, Sport et Bien-être', 3, 'La chirurgie esthétique de confort devrait-elle être interdite ou strictement encadrée chez les mineurs ?'),
+    ('Santé, Sport et Bien-être', 3, "Demander des informations détaillées concernant les horaires d'ouverture d'un centre de rééducation médicale."),
+    ('Santé, Sport et Bien-être', 3, "Les thérapies basées sur l'intelligence artificielle peuvent-elles remplacer un suivi psychologique humain ?"),
+    ('Santé, Sport et Bien-être', 3, "L'introduction d'heures de sport quotidiennes obligatoires dans l'ensemble des universités et entreprises."),
+    ('Santé, Sport et Bien-être', 3, "Le burn-out (épuisement professionnel) doit-il être reconnu d'office comme une maladie professionnelle ?"),
+    ('Santé, Sport et Bien-être', 3, "Rédiger un message pour chercher un partenaire de sport pour vous entraîner en vue d'un marathon."),
+    ('Santé, Sport et Bien-être', 3, "La légalisation de l'usage récréatif du cannabis : avancée en matière de santé publique ou dérive sociale ?"),
+    ('Santé, Sport et Bien-être', 3, "L'impact du manque de sommeil chronique sur les performances et la santé globale de la population."),
+    ('Santé, Sport et Bien-être', 3, 'Le système de santé universel gratuit pour tous est-il un modèle viable économiquement à long terme ?'),
+    ('Santé, Sport et Bien-être', 3, "Écrire un courriel à un proche pour l'encourager à modifier ses habitudes de vie pour préserver sa santé."),
+    # --- Vie Sociale, Famille et Démographie ---
+    ('Vie Sociale, Famille et Démographie', 3, 'Envoyer les personnes âgées en maison de retraite est-ce un drame ou une nécessité moderne ?'),
+    ('Vie Sociale, Famille et Démographie', 3, "Rédiger une invitation informelle à vos voisins pour un repas de quartier partagé dans la cour de l'immeuble."),
+    ('Vie Sociale, Famille et Démographie', 3, 'Les personnes âgées de plus de 70 ans devraient-elles obligatoirement repasser leur permis de conduire ?'),
+    ('Vie Sociale, Famille et Démographie', 3, 'Le modèle de la famille nucléaire traditionnelle est-il devenu obsolète dans nos sociétés contemporaines ?'),
+    ('Vie Sociale, Famille et Démographie', 3, 'Raconter un événement familial marquant et décrire les émotions vécues durant cette journée.'),
+    ('Vie Sociale, Famille et Démographie', 3, "L'isolement social des jeunes adultes dans les grandes métropoles urbaines hyperconnectées."),
+    ('Vie Sociale, Famille et Démographie', 3, "Demander des conseils à un ami concernant le choix d'un cadeau pour une fête de crémaillère."),
+    ('Vie Sociale, Famille et Démographie', 3, 'Les congés parentaux payés devraient-ils être répartis de manière strictement égale entre les deux parents ?'),
+    ('Vie Sociale, Famille et Démographie', 3, 'Le vieillissement accéléré de la population va-t-il paralyser la croissance économique mondiale ?'),
+    ('Vie Sociale, Famille et Démographie', 3, 'Les réseaux de solidarité locale de quartier sont-ils le meilleur moyen de lutter contre la solitude ?'),
+    ('Vie Sociale, Famille et Démographie', 3, "Écrire à un ami proche pour annoncer la naissance de votre enfant ou l'adoption d'un animal de compagnie."),
+    ('Vie Sociale, Famille et Démographie', 3, 'Le bénévolat associatif doit-il donner droit à des avantages fiscaux ou à des trimestres de retraite ?'),
+    ('Vie Sociale, Famille et Démographie', 3, 'Les applications de communication modernes ont-elles détruit la spontanéité des relations humaines ?'),
+    ('Vie Sociale, Famille et Démographie', 3, "L'instauration d'un service citoyen obligatoire pour renforcer le sentiment d'appartenance nationale."),
+    ('Vie Sociale, Famille et Démographie', 3, 'Écrire un court message pour proposer de garder les animaux de compagnie de votre voisin pendant ses vacances.'),
 ]
 
 
