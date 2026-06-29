@@ -52,8 +52,13 @@ export default function SpeakingRecord() {
     };
   }, [audioUrl]);
 
-  // Load a random question from the chosen theme + tâche
+  // Load the chosen question (passed via ?q=) or a random one from the theme.
   useEffect(() => {
+    const passed = searchParams.get('q');
+    if (passed) {
+      setQuestion(passed);
+      return;
+    }
     if (!themeId || !tacheNum) return;
     api.get(`/api/themes/${themeId}/questions?task_type=${tacheNum}`)
       .then(({ data }) => {
@@ -64,7 +69,7 @@ export default function SpeakingRecord() {
         }
       })
       .catch(() => {});
-  }, [themeId, tacheNum]);
+  }, [themeId, tacheNum, searchParams]);
 
   const resetRecording = () => {
     setAudioBlob(null);

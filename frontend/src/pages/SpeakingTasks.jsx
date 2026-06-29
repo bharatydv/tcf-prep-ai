@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ChatText, Handshake, Scales, ClockCountdown, ArrowLeft,
-  Lock, CaretRight, BookOpen,
+  Lock, CaretRight, BookOpen, Microphone, Star, Clock,
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api } from '../lib/api';
@@ -17,6 +17,8 @@ const TACHES = [
     focus: 'Deliver a structured argument to state and defend your opinion on an abstract societal issue.', icon: Scales },
 ];
 
+const TACHE_DURATION = { 1: '2 min', 2: '5 min 30 s', 3: '4 min 30 s' };
+
 export default function SpeakingTasks() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -25,11 +27,18 @@ export default function SpeakingTasks() {
   const [themes, setThemes] = useState([]);
   const [loadingThemes, setLoadingThemes] = useState(false);
 
+  // question-list view state
+  const [activeTheme, setActiveTheme] = useState(null); // theme object
+  const [questions, setQuestions] = useState([]);
+  const [loadingQuestions, setLoadingQuestions] = useState(false);
+
   const isPremiumUser = user?.subscription_status === 'premium';
 
   const selectTache = (t) => {
     if (!user) return navigate('/login');
     setActiveTache(t.n);
+    setActiveTheme(null);
+    setQuestions([]);
     setThemes([]);
     setLoadingThemes(true);
     api.get(`/api/themes?task_type=${t.n}&skill=speaking`)
@@ -44,13 +53,31 @@ export default function SpeakingTasks() {
       toast.error('Ce thème est réservé aux membres Pro.');
       return navigate('/pricing');
     }
-    navigate(`/speaking/record?tache=${activeTache}&theme=${t.theme_id}`);
+    setActiveTheme(t);
+    setQuestions([]);
+    setLoadingQuestions(true);
+    api.get(`/api/themes/${t.theme_id}/questions?task_type=${activeTache}`)
+      .then(({ data }) => setQuestions(data.questions || []))
+      .catch(() => setQuestions([]))
+      .finally(() => setLoadingQuestions(false));
+  };
+
+  const recordQuestion = (q) => {
+    if (!user) return navigate('/login');
+    const params = new URLSearchParams({
+      tache: String(activeTache),
+      theme: activeTheme.theme_id,
+      q: q.prompt_text,
+    });
+    navigate(`/speaking/record?${params.toString()}`);
   };
 
   const startSimulator = () => {
     if (!user) return navigate('/login');
     navigate('/exam-simulator');
   };
+
+  const activeTacheObj = TACHES.find((t) => t.n === activeTache);
 
   return (
     <main className="overflow-x-clip bg-white">
@@ -96,9 +123,10 @@ export default function SpeakingTasks() {
             })}
           </div>
 
-          {/* RIGHT — simulator by default, themes after selecting a task */}
+          {/* RIGHT — simulator / themes / questions */}
           <div className="min-h-[360px]">
             {activeTache === null ? (
+              /* DEFAULT: simulator */
               <div className="flex h-full flex-col justify-center rounded-3xl border border-pink-100 bg-gradient-to-br from-pink-50 to-fuchsia-50 p-8 shadow-soft">
                 <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-pink-100 text-pink-700">
                   <ClockCountdown size={28} weight="fill" />
@@ -118,6 +146,60 @@ export default function SpeakingTasks() {
                 </button>
                 <p className="mt-5 text-xs text-gray-400">Or pick a task on the left to practice one at a time.</p>
               </div>
+            ) : activeTheme ? (
+              /* QUESTION LIST for the selected theme */
+              <div>
+                <button onClick={() => { setActiveTheme(null); setQuestions([]); }}
+                  className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline">
+                  <ArrowLeft size={16} /> Back to themes
+                </button>
+
+                {/* task header card */}
+                <div className="mb-4 flex items-center gap-3 rounded-2xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-4">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-white">
+                    <ClockCountdown size={22} weight="fill" />
+                  </span>
+                  <div>
+                    <h2 className="font-heading text-base font-bold text-gray-900">
+                      {activeTheme.emoji ? `${activeTheme.emoji} ` : ''}{activeTheme.name}
+                    </h2>
+                    <p className="text-xs font-semibold text-primary">
+                      {activeTacheObj?.title.split(' (')[0]} · Preparation: None · Duration: {TACHE_DURATION[activeTache]}
+                    </p>
+                  </div>
+                </div>
+
+                {loadingQuestions ? (
+                  <div className="flex items-center justify-center rounded-2xl border border-violet-100 bg-white p-10">
+                    <div className="h-8 w-8 animate-spin rounded-full border-4 border-violet-200 border-t-primary" />
+                  </div>
+                ) : questions.length === 0 ? (
+                  <div className="rounded-2xl border border-violet-100 bg-white p-8 text-center text-sm text-gray-500">
+                    No questions available for this theme yet.
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    {questions.map((q) => (
+                      <div key={q.question_id}
+                        className="rounded-2xl border border-gray-200 bg-white p-5 shadow-soft transition hover:border-violet-200 hover:shadow-lg hover:shadow-violet-100">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4 text-xs font-semibold text-gray-500">
+                            <span className="inline-flex items-center gap-1.5">
+                              <Clock size={14} weight="bold" className="text-gray-400" /> {TACHE_DURATION[activeTache]}
+                            </span>
+                          </div>
+                          <Star size={18} className="text-gray-300" />
+                        </div>
+                        <p className="mt-3 text-sm leading-relaxed text-gray-800">{q.prompt_text}</p>
+                        <button onClick={() => recordQuestion(q)}
+                          className="btn-primary mt-4 w-full justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600">
+                          <Microphone size={16} weight="fill" /> Record answer
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             ) : loadingThemes ? (
               <div className="flex h-full items-center justify-center rounded-3xl border border-violet-100 bg-white p-8">
                 <div className="h-9 w-9 animate-spin rounded-full border-4 border-violet-200 border-t-primary" />
@@ -127,6 +209,7 @@ export default function SpeakingTasks() {
                 No themes available for this task yet.
               </div>
             ) : (
+              /* THEME GRID */
               <div>
                 <h2 className="mb-4 font-heading text-lg font-extrabold text-gray-900">
                   Choose a theme — Tâche {activeTache}
@@ -158,13 +241,9 @@ export default function SpeakingTasks() {
                         )}
                         <div className="mt-4">
                           <div className="flex items-center justify-between text-xs text-gray-500">
-                            <span>Attempted questions</span>
-                            <span className="font-semibold text-gray-700">{locked ? '—' : `0/${count}`}</span>
+                            <span>Questions</span>
+                            <span className="font-semibold text-gray-700">{locked ? '—' : count}</span>
                           </div>
-                          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-violet-100">
-                            <div className="h-full rounded-full bg-gradient-to-r from-primary to-fuchsia-500" style={{ width: '0%' }} />
-                          </div>
-                          <p className="mt-1 text-right text-[10px] text-gray-400">{locked ? 'Upgrade to unlock' : '0% completed'}</p>
                         </div>
                       </button>
                     );
