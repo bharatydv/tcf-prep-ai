@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ChatText, Handshake, Scales, ClockCountdown, ArrowLeft,
   Lock, CaretRight, BookOpen, Microphone, Star, Clock,
+  Stop, ArrowClockwise, UploadSimple, Lightning, CheckCircle, XCircle,
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api } from '../lib/api';
@@ -19,18 +20,288 @@ const TACHES = [
 
 const TACHE_DURATION = { 1: '2 min', 2: '5 min 30 s', 3: '4 min 30 s' };
 
+const CAT_LABELS = {
+  prepositions: 'Prépositions', spelling: 'Orthographe', conjugation: 'Conjugaison',
+  gender_number: 'Accord', anglicism: 'Anglicismes', improvement: 'Améliorations C1',
+};
+
+/* ---- Inline recorder/uploader + analysis for a single question ---- */
+function QuestionCard({ q, duration, isActive, onActivate, refreshUser, navigate }) {
+  const [recording, setRecording] = useState(false);
+  const [audioBlob, setAudioBlob] = useState(null);
+  const [audioUrl, setAudioUrl] = useState('');
+  const [audioName, setAudioName] = useState('answer.webm');
+  const [elapsed, setElapsed] = useState(0);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const mediaRecorderRef = useRef(null);
+  const chunksRef = useRef([]);
+  const timerRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  // If another card becomes active, stop & reset this one
+  useEffect(() => {
+    if (!isActive) {
+      if (mediaRecorderRef.current && recording) {
+        try { mediaRecorderRef.current.stop(); } catch (e) {}
+      }
+      if (timerRef.current) clearInterval(timerRef.current);
+      setRecording(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive]);
+
+  useEffect(() => () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+  }, [audioUrl]);
+
+  const reset = () => {
+    setAudioBlob(null);
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    setAudioUrl('');
+    setAudioName('answer.webm');
+    setElapsed(0);
+    setResult(null);
+  };
+
+  const startRecording = async () => {
+    onActivate();
+    reset();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      chunksRef.current = [];
+      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      mr.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        setAudioBlob(blob);
+        setAudioName('answer.webm');
+        setAudioUrl(URL.createObjectURL(blob));
+        stream.getTracks().forEach((t) => t.stop());
+      };
+      mr.start();
+      mediaRecorderRef.current = mr;
+      setRecording(true);
+      setElapsed(0);
+      timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
+    } catch (err) {
+      toast.error("Impossible d'accéder au microphone. Vérifiez les autorisations.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && recording) {
+      mediaRecorderRef.current.stop();
+      setRecording(false);
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+  };
+
+  const openFilePicker = () => {
+    onActivate();
+    reset();
+    fileInputRef.current?.click();
+  };
+
+  const handleFile = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('audio/')) {
+      return toast.error('Veuillez sélectionner un fichier audio (mp3, m4a, wav, webm).');
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      return toast.error('Fichier trop volumineux (max 25 Mo).');
+    }
+    reset();
+    setAudioBlob(file);
+    setAudioName(file.name || 'upload.mp3');
+    setAudioUrl(URL.createObjectURL(file));
+  };
+
+  const submit = async () => {
+    if (!audioBlob) return;
+    setAnalyzing(true);
+    setResult(null);
+    try {
+      const form = new FormData();
+      form.append('question', q.prompt_text);
+      form.append('audio', audioBlob, audioName);
+      const { data } = await api.post('/api/speaking/analyze', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setResult(data);
+      await refreshUser();
+      if (!data.transcript) toast.error('Aucune parole détectée. Réessayez.');
+      else toast.success(`Analyse terminée — niveau ${data.tcf_level}`);
+    } catch (err) {
+      const status = err?.response?.status;
+      if (status === 402) { toast.error('Limite gratuite atteinte.'); navigate('/pricing'); }
+      else toast.error("L'analyse a échoué. Réessayez.");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+  const ss = String(elapsed % 60).padStart(2, '0');
+  const showActions = isActive && (recording || audioBlob || analyzing || result);
+
+  return (
+    <div className={`rounded-2xl border bg-white p-5 shadow-soft transition ${
+      isActive ? 'border-violet-300 shadow-lg shadow-violet-100' : 'border-gray-200 hover:border-violet-200 hover:shadow-lg hover:shadow-violet-100'
+    }`}>
+      <div className="flex items-center justify-between">
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-500">
+          <Clock size={14} weight="bold" className="text-gray-400" /> {duration}
+        </span>
+        <Star size={18} className="text-gray-300" />
+      </div>
+      <p className="mt-3 text-sm leading-relaxed text-gray-800">{q.prompt_text}</p>
+
+      <input ref={fileInputRef} type="file" accept="audio/*" onChange={handleFile} className="hidden" />
+
+      {/* Two action buttons */}
+      {!showActions && (
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+          <button onClick={startRecording}
+            className="btn-primary flex-1 justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600">
+            <Microphone size={16} weight="fill" /> Record answer
+          </button>
+          <button onClick={openFilePicker} className="btn-outline flex-1 justify-center">
+            <UploadSimple size={16} weight="bold" /> Upload recording
+          </button>
+        </div>
+      )}
+
+      {/* Inline recorder / playback / analyze */}
+      {showActions && (
+        <div className="mt-4 rounded-2xl border border-violet-100 bg-violet-50/30 p-5 text-center">
+          {recording ? (
+            <>
+              <button onClick={stopRecording}
+                className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-red-500 to-rose-600 text-white shadow-lg animate-pulse">
+                <Stop size={26} weight="fill" />
+              </button>
+              <p className="mt-3 font-heading text-sm font-bold text-gray-900">Enregistrement… {mm}:{ss}</p>
+              <p className="text-xs text-gray-500">Appuyez pour arrêter.</p>
+            </>
+          ) : audioBlob ? (
+            <>
+              <p className="font-heading text-sm font-bold text-gray-900">
+                {audioName === 'answer.webm' ? `Votre enregistrement (${mm}:${ss})` : `Fichier : ${audioName}`}
+              </p>
+              <audio src={audioUrl} controls className="mx-auto mt-3 w-full max-w-sm" />
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                <button onClick={reset} className="btn-outline !py-1.5 text-sm">
+                  <ArrowClockwise size={16} /> Recommencer
+                </button>
+                <button onClick={submit} disabled={analyzing}
+                  className="btn-primary !py-1.5 text-sm !bg-gradient-to-r !from-primary !to-fuchsia-600">
+                  {analyzing ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> Analyse…</> : <><Lightning size={16} weight="fill" /> Analyser</>}
+                </button>
+              </div>
+            </>
+          ) : null}
+        </div>
+      )}
+
+      {/* Inline results */}
+      {result && (
+        <div className="mt-4 space-y-3">
+          <div className="rounded-2xl border border-violet-100 bg-white p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                {result.answers_question
+                  ? <CheckCircle size={22} weight="fill" className="text-green-500" />
+                  : <XCircle size={22} weight="fill" className="text-amber-500" />}
+                <div>
+                  <p className="text-sm font-bold text-gray-900">
+                    {result.answers_question ? 'Réponse pertinente' : 'Réponse à améliorer'}
+                  </p>
+                  <p className="text-xs text-gray-600">{result.relevance_comment}</p>
+                </div>
+              </div>
+              <div className="text-center">
+                <p className="text-[10px] uppercase tracking-wide text-gray-400">Niveau</p>
+                <p className="font-heading text-2xl font-extrabold text-primary">{result.tcf_level}</p>
+                <p className="text-[10px] text-gray-400">{result.overall_score}/100</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-violet-100 bg-white p-4">
+            <p className="text-xs font-bold text-gray-900">Transcription</p>
+            <p className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-gray-700">
+              {result.transcript || 'Aucune parole détectée.'}
+            </p>
+          </div>
+
+          {Array.isArray(result.errors) && result.errors.length > 0 && (
+            <div className="rounded-2xl border border-violet-100 bg-white p-4">
+              <p className="text-xs font-bold text-gray-900">Corrections</p>
+              <div className="mt-2 space-y-2">
+                {result.errors.map((e, i) => (
+                  <div key={i} className="rounded-xl border border-violet-50 bg-violet-50/40 p-3">
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="text-red-500 line-through">{e.error}</span>
+                      <span className="text-gray-400">→</span>
+                      <span className="font-semibold text-green-600">{e.correction}</span>
+                      <span className="ml-auto rounded-full bg-violet-100 px-2 py-0.5 text-[9px] font-bold uppercase text-primary">{CAT_LABELS[e.category] || e.category}</span>
+                    </div>
+                    <p className="mt-1 text-[11px] text-gray-500">{e.explanation}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {Array.isArray(result.suggestions) && result.suggestions.length > 0 && (
+            <div className="rounded-2xl border border-violet-100 bg-white p-4">
+              <p className="text-xs font-bold text-gray-900">Suggestions</p>
+              <ul className="mt-2 space-y-1.5">
+                {result.suggestions.map((s, i) => (
+                  <li key={i} className="flex items-start gap-2 text-xs text-gray-700">
+                    <CheckCircle size={14} weight="fill" className="mt-0.5 shrink-0 text-primary" /> {s}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {Array.isArray(result.vocabulary_suggestions) && result.vocabulary_suggestions.length > 0 && (
+            <div className="rounded-2xl border border-violet-100 bg-white p-4">
+              <p className="text-xs font-bold text-gray-900">Vocabulaire à enrichir</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {result.vocabulary_suggestions.map((v, i) => (
+                  <span key={i} className="rounded-full bg-fuchsia-50 px-2.5 py-1 text-[11px] font-medium text-fuchsia-700">{v}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <button onClick={reset} className="btn-outline w-full justify-center !py-2 text-sm">
+            <Microphone size={16} weight="fill" /> Nouvelle réponse
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SpeakingTasks() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
 
   const [activeTache, setActiveTache] = useState(null);
   const [themes, setThemes] = useState([]);
   const [loadingThemes, setLoadingThemes] = useState(false);
 
-  // question-list view state
-  const [activeTheme, setActiveTheme] = useState(null); // theme object
+  const [activeTheme, setActiveTheme] = useState(null);
   const [questions, setQuestions] = useState([]);
   const [loadingQuestions, setLoadingQuestions] = useState(false);
+  const [activeQid, setActiveQid] = useState(null);
 
   const isPremiumUser = user?.subscription_status === 'premium';
 
@@ -39,6 +310,7 @@ export default function SpeakingTasks() {
     setActiveTache(t.n);
     setActiveTheme(null);
     setQuestions([]);
+    setActiveQid(null);
     setThemes([]);
     setLoadingThemes(true);
     api.get(`/api/themes?task_type=${t.n}&skill=speaking`)
@@ -55,21 +327,12 @@ export default function SpeakingTasks() {
     }
     setActiveTheme(t);
     setQuestions([]);
+    setActiveQid(null);
     setLoadingQuestions(true);
     api.get(`/api/themes/${t.theme_id}/questions?task_type=${activeTache}`)
       .then(({ data }) => setQuestions(data.questions || []))
       .catch(() => setQuestions([]))
       .finally(() => setLoadingQuestions(false));
-  };
-
-  const recordQuestion = (q) => {
-    if (!user) return navigate('/login');
-    const params = new URLSearchParams({
-      tache: String(activeTache),
-      theme: activeTheme.theme_id,
-      q: q.prompt_text,
-    });
-    navigate(`/speaking/record?${params.toString()}`);
   };
 
   const startSimulator = () => {
@@ -126,7 +389,6 @@ export default function SpeakingTasks() {
           {/* RIGHT — simulator / themes / questions */}
           <div className="min-h-[360px]">
             {activeTache === null ? (
-              /* DEFAULT: simulator */
               <div className="flex h-full flex-col justify-center rounded-3xl border border-pink-100 bg-gradient-to-br from-pink-50 to-fuchsia-50 p-8 shadow-soft">
                 <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-pink-100 text-pink-700">
                   <ClockCountdown size={28} weight="fill" />
@@ -147,14 +409,12 @@ export default function SpeakingTasks() {
                 <p className="mt-5 text-xs text-gray-400">Or pick a task on the left to practice one at a time.</p>
               </div>
             ) : activeTheme ? (
-              /* QUESTION LIST for the selected theme */
               <div>
-                <button onClick={() => { setActiveTheme(null); setQuestions([]); }}
+                <button onClick={() => { setActiveTheme(null); setQuestions([]); setActiveQid(null); }}
                   className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline">
                   <ArrowLeft size={16} /> Back to themes
                 </button>
 
-                {/* task header card */}
                 <div className="mb-4 flex items-center gap-3 rounded-2xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-4">
                   <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-white">
                     <ClockCountdown size={22} weight="fill" />
@@ -180,22 +440,15 @@ export default function SpeakingTasks() {
                 ) : (
                   <div className="flex flex-col gap-3">
                     {questions.map((q) => (
-                      <div key={q.question_id}
-                        className="rounded-2xl border border-gray-200 bg-white p-5 shadow-soft transition hover:border-violet-200 hover:shadow-lg hover:shadow-violet-100">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-4 text-xs font-semibold text-gray-500">
-                            <span className="inline-flex items-center gap-1.5">
-                              <Clock size={14} weight="bold" className="text-gray-400" /> {TACHE_DURATION[activeTache]}
-                            </span>
-                          </div>
-                          <Star size={18} className="text-gray-300" />
-                        </div>
-                        <p className="mt-3 text-sm leading-relaxed text-gray-800">{q.prompt_text}</p>
-                        <button onClick={() => recordQuestion(q)}
-                          className="btn-primary mt-4 w-full justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600">
-                          <Microphone size={16} weight="fill" /> Record answer
-                        </button>
-                      </div>
+                      <QuestionCard
+                        key={q.question_id}
+                        q={q}
+                        duration={TACHE_DURATION[activeTache]}
+                        isActive={activeQid === q.question_id}
+                        onActivate={() => setActiveQid(q.question_id)}
+                        refreshUser={refreshUser}
+                        navigate={navigate}
+                      />
                     ))}
                   </div>
                 )}
@@ -209,7 +462,6 @@ export default function SpeakingTasks() {
                 No themes available for this task yet.
               </div>
             ) : (
-              /* THEME GRID */
               <div>
                 <h2 className="mb-4 font-heading text-lg font-extrabold text-gray-900">
                   Choose a theme — Tâche {activeTache}
