@@ -40,7 +40,6 @@ function QuestionCard({ q, duration, isActive, onActivate, refreshUser, navigate
   const timerRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // If another card becomes active, stop & reset this one
   useEffect(() => {
     if (!isActive) {
       if (mediaRecorderRef.current && recording) {
@@ -162,7 +161,6 @@ function QuestionCard({ q, duration, isActive, onActivate, refreshUser, navigate
 
       <input ref={fileInputRef} type="file" accept="audio/*" onChange={handleFile} className="hidden" />
 
-      {/* Two action buttons */}
       {!showActions && (
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
           <button onClick={startRecording}
@@ -175,7 +173,6 @@ function QuestionCard({ q, duration, isActive, onActivate, refreshUser, navigate
         </div>
       )}
 
-      {/* Inline recorder / playback / analyze */}
       {showActions && (
         <div className="mt-4 rounded-2xl border border-violet-100 bg-violet-50/30 p-5 text-center">
           {recording ? (
@@ -207,7 +204,6 @@ function QuestionCard({ q, duration, isActive, onActivate, refreshUser, navigate
         </div>
       )}
 
-      {/* Inline results */}
       {result && (
         <div className="mt-4 space-y-3">
           <div className="rounded-2xl border border-violet-100 bg-white p-4">
