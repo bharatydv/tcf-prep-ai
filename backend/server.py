@@ -58,6 +58,9 @@ FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+ASSEMBLYAI_API_KEY = os.environ.get("ASSEMBLYAI_API_KEY", "")
 
 # ---- Per-task AI provider selection (you decide which API does which task) ----
 # Grading providers: "anthropic" | "openai" | "gemini"
@@ -72,6 +75,16 @@ OPENAI_GRADER_MODEL = os.environ.get("OPENAI_GRADER_MODEL", "gpt-4o-mini")
 GEMINI_GRADER_MODEL = os.environ.get("GEMINI_GRADER_MODEL", "gemini-2.5-flash-lite")
 OPENAI_TRANSCRIBE_MODEL = os.environ.get("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-transcribe")
 GEMINI_TRANSCRIBE_MODEL = os.environ.get("GEMINI_TRANSCRIBE_MODEL", "gemini-2.5-flash")
+# Groq: Whisper transcription + fast LLM grading (OpenAI-compatible API)
+GROQ_GRADER_MODEL = os.environ.get("GROQ_GRADER_MODEL", "llama-3.3-70b-versatile")
+GROQ_TRANSCRIBE_MODEL = os.environ.get("GROQ_TRANSCRIBE_MODEL", "whisper-large-v3")
+GROQ_BASE_URL = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+# DeepSeek: text grading only (OpenAI-compatible API, no transcription)
+DEEPSEEK_GRADER_MODEL = os.environ.get("DEEPSEEK_GRADER_MODEL", "deepseek-v4-flash")
+DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+# AssemblyAI: file transcription (upload -> submit -> poll)
+ASSEMBLYAI_BASE_URL = os.environ.get("ASSEMBLYAI_BASE_URL", "https://api.assemblyai.com")
+ASSEMBLYAI_LANGUAGE = os.environ.get("ASSEMBLYAI_LANGUAGE", "fr")
 FREE_MONTHLY_LIMIT = 5
 FREE_MODEL_ANSWER_LIMIT = 3
 
@@ -552,12 +565,42 @@ def _call_gemini(model: str, system_prompt: str, user_text: str) -> str:
     return resp.text or ""
 
 
+def _call_openai_compatible(base_url: str, api_key: str, model: str,
+                            system_prompt: str, user_text: str) -> str:
+    """Shared adapter for any OpenAI-compatible endpoint (Groq, DeepSeek)."""
+    from openai import OpenAI
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    resp = client.chat.completions.create(
+        model=model,
+        max_tokens=2000,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_text},
+        ],
+    )
+    return resp.choices[0].message.content or ""
+
+
+def _call_groq(model: str, system_prompt: str, user_text: str) -> str:
+    return _call_openai_compatible(GROQ_BASE_URL, GROQ_API_KEY, model,
+                                   system_prompt, user_text)
+
+
+def _call_deepseek(model: str, system_prompt: str, user_text: str) -> str:
+    return _call_openai_compatible(DEEPSEEK_BASE_URL, DEEPSEEK_API_KEY, model,
+                                   system_prompt, user_text)
+
+
 # provider -> (callable, key, model) for GRADING tasks
 def _grader_backend(provider: str):
     if provider == "openai":
         return _call_openai, OPENAI_API_KEY, OPENAI_GRADER_MODEL
     if provider == "gemini":
         return _call_gemini, GEMINI_API_KEY, GEMINI_GRADER_MODEL
+    if provider == "groq":
+        return _call_groq, GROQ_API_KEY, GROQ_GRADER_MODEL
+    if provider == "deepseek":
+        return _call_deepseek, DEEPSEEK_API_KEY, DEEPSEEK_GRADER_MODEL
     # default anthropic
     return _call_anthropic, ANTHROPIC_API_KEY, ANTHROPIC_MODEL
 
@@ -799,11 +842,58 @@ def _transcribe_gemini(audio_bytes: bytes, filename: str) -> str:
     return (resp.text or "").strip()
 
 
+def _transcribe_groq(audio_bytes: bytes, filename: str) -> str:
+    """Transcribe with Groq Whisper (OpenAI-compatible audio endpoint)."""
+    import io
+    from openai import OpenAI
+    client = OpenAI(api_key=GROQ_API_KEY, base_url=GROQ_BASE_URL)
+    buf = io.BytesIO(audio_bytes)
+    buf.name = filename or "audio.webm"
+    resp = client.audio.transcriptions.create(
+        model=GROQ_TRANSCRIBE_MODEL, file=buf, language="fr")
+    return (resp.text or "").strip()
+
+
+def _transcribe_assemblyai(audio_bytes: bytes, filename: str) -> str:
+    """Transcribe with AssemblyAI: upload bytes, submit job, poll for result."""
+    import time
+    import requests
+    headers = {"authorization": ASSEMBLYAI_API_KEY}
+    # 1. Upload the raw audio bytes
+    up = requests.post(f"{ASSEMBLYAI_BASE_URL}/v2/upload",
+                       headers=headers, data=audio_bytes, timeout=60)
+    up.raise_for_status()
+    audio_url = up.json()["upload_url"]
+    # 2. Submit the transcription job (French)
+    body = {"audio_url": audio_url, "language_code": ASSEMBLYAI_LANGUAGE}
+    sub = requests.post(f"{ASSEMBLYAI_BASE_URL}/v2/transcript",
+                        json=body, headers=headers, timeout=30)
+    sub.raise_for_status()
+    tid = sub.json()["id"]
+    # 3. Poll until complete (max ~60s)
+    poll_url = f"{ASSEMBLYAI_BASE_URL}/v2/transcript/{tid}"
+    for _ in range(40):
+        pr = requests.get(poll_url, headers=headers, timeout=30)
+        pr.raise_for_status()
+        data = pr.json()
+        status = data.get("status")
+        if status == "completed":
+            return (data.get("text") or "").strip()
+        if status == "error":
+            raise RuntimeError(data.get("error", "AssemblyAI transcription error"))
+        time.sleep(1.5)
+    raise RuntimeError("AssemblyAI transcription timed out")
+
+
 async def transcribe_audio(audio_bytes: bytes, filename: str) -> str:
-    """Transcribe using the configured TRANSCRIBE_PROVIDER (openai | gemini)."""
+    """Transcribe using the configured TRANSCRIBE_PROVIDER (openai | groq | gemini)."""
     provider = TRANSCRIBE_PROVIDER
     if provider == "gemini":
         fn, key = _transcribe_gemini, GEMINI_API_KEY
+    elif provider == "groq":
+        fn, key = _transcribe_groq, GROQ_API_KEY
+    elif provider == "assemblyai":
+        fn, key = _transcribe_assemblyai, ASSEMBLYAI_API_KEY
     else:
         fn, key = _transcribe_openai, OPENAI_API_KEY
         provider = "openai"
@@ -1112,6 +1202,31 @@ async def run_seeds():
             log.info("Seeded %d speaking themes and %d speaking questions",
                      len(SEED_SPEAKING_THEMES), len(SEED_SPEAKING_QUESTIONS))
 
+        # Seed Task 2 (Exercice en Interaction) speaking questions onto the
+        # existing speaking themes. Runs independently so it can be added even
+        # if the speaking themes were seeded earlier.
+        t2_count = await db.scalar(
+            select(func.count()).select_from(ThemeQuestion)
+            .join(Theme, Theme.theme_id == ThemeQuestion.theme_id)
+            .where(Theme.skill == "speaking", ThemeQuestion.task_type == 2))
+        if not t2_count:
+            # Map speaking theme names -> id
+            res = await db.execute(
+                select(Theme).where(Theme.skill == "speaking"))
+            sp_themes = {t.name: t.theme_id for t in res.scalars().all()}
+            added = 0
+            for theme_name, task_type, prompt_text in SEED_SPEAKING_QUESTIONS_T2:
+                tid = sp_themes.get(theme_name)
+                if not tid:
+                    continue
+                db.add(ThemeQuestion(
+                    question_id=new_id("tq"), theme_id=tid, task_type=task_type,
+                    prompt_text=prompt_text, is_active=True,
+                    created_at=now_utc()))
+                added += 1
+            await db.commit()
+            log.info("Seeded %d speaking Task 2 questions", added)
+
 
 # ----------------------------------------------------------------------------
 # Lifespan: create tables + seed
@@ -1146,6 +1261,54 @@ async def root():
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/api/speaking/diag")
+async def speaking_diag():
+    """Diagnostics for the speaking pipeline: which providers are configured
+    and whether their SDKs are importable. Visit /api/speaking/diag to debug.
+    Does NOT reveal key values — only whether they are set."""
+    def pkg_ok(mod: str) -> bool:
+        try:
+            __import__(mod)
+            return True
+        except Exception:
+            return False
+
+    return {
+        "transcribe_provider": TRANSCRIBE_PROVIDER,
+        "speaking_grader_provider": SPEAKING_GRADER_PROVIDER,
+        "keys_set": {
+            "openai": bool(OPENAI_API_KEY),
+            "anthropic": bool(ANTHROPIC_API_KEY),
+            "gemini": bool(GEMINI_API_KEY),
+            "groq": bool(GROQ_API_KEY),
+            "deepseek": bool(DEEPSEEK_API_KEY),
+            "assemblyai": bool(ASSEMBLYAI_API_KEY),
+        },
+        "packages_installed": {
+            "openai": pkg_ok("openai"),
+            "anthropic": pkg_ok("anthropic"),
+            "google-genai": pkg_ok("google.genai"),
+            "python-multipart": pkg_ok("multipart"),
+            "requests": pkg_ok("requests"),
+        },
+        "models": {
+            "openai_transcribe": OPENAI_TRANSCRIBE_MODEL,
+            "groq_transcribe": GROQ_TRANSCRIBE_MODEL,
+            "anthropic": ANTHROPIC_MODEL,
+            "groq_grader": GROQ_GRADER_MODEL,
+            "deepseek_grader": DEEPSEEK_GRADER_MODEL,
+        },
+        "ready_for_speaking": (
+            (bool(OPENAI_API_KEY) if TRANSCRIBE_PROVIDER == "openai"
+             else bool(GROQ_API_KEY) if TRANSCRIBE_PROVIDER == "groq"
+             else bool(ASSEMBLYAI_API_KEY) if TRANSCRIBE_PROVIDER == "assemblyai"
+             else bool(GEMINI_API_KEY))
+            and bool(_grader_backend(SPEAKING_GRADER_PROVIDER)[1])
+            and pkg_ok("multipart")
+        ),
+    }
 
 
 # ----------------------------------------------------------------------------
@@ -2666,6 +2829,170 @@ SEED_SPEAKING_QUESTIONS = [
     ('Vie Sociale, Famille et Démographie', 3, 'Les applications de communication modernes ont-elles détruit la spontanéité des relations humaines ?'),
     ('Vie Sociale, Famille et Démographie', 3, "L'instauration d'un service citoyen obligatoire pour renforcer le sentiment d'appartenance nationale."),
     ('Vie Sociale, Famille et Démographie', 3, 'Écrire un court message pour proposer de garder les animaux de compagnie de votre voisin pendant ses vacances.'),
+]
+
+# Task 2 speaking questions (task_type=2) for the same 10 speaking themes.
+SEED_SPEAKING_QUESTIONS_T2 = [
+    # --- Immigration et Intégration ---
+    ('Immigration et Intégration', 2, "Vous voulez vous inscrire à un programme de parrainage de bénévoles locaux pour vous aider à vous installer. Vous interrogez l'agent d'un centre d'accueil pour nouveaux arrivants. (critères d'éligibilité, durée de l'accompagnement, activités proposées, etc.)"),
+    ('Immigration et Intégration', 2, "Vous souhaitez participer à un atelier de préparation aux entretiens d'embauche au Canada. Vous demandez les détails d'organisation à l’organisateur. (dates disponibles, documents à apporter, profil des formateurs, etc.)"),
+    ('Immigration et Intégration', 2, "Une association propose des cours de perfectionnement de la langue française pour les professionnels étrangers. Vous demandez des précisions sur les critères d'accès. (niveau linguistique requis, horaires des cours, examens de niveau, etc.)"),
+    ('Immigration et Intégration', 2, "Vous êtes intéressé(e) par une séance d'information gratuite sur les démarches administratives d'immigration. Vous posez des questions sur le contenu et l'inscription. (plateforme de diffusion, thèmes abordés, limite d'inscriptions, etc.)"),
+    ('Immigration et Intégration', 2, 'Vous souhaitez rejoindre un club de discussion interculturel dans votre nouvelle ville. Vous demandez au responsable comment se déroulent les réunions. (fréquence des rencontres, taille des groupes, thèmes de conversation, etc.)'),
+    ('Immigration et Intégration', 2, "Vous voulez obtenir l’aide d’un conseiller pour faire évaluer vos diplômes étrangers. Vous appelez un organisme d'aide à l'intégration. (délais de traitement, frais administratifs, équivalences obtenues, etc.)"),
+    ('Immigration et Intégration', 2, 'Une fête des voisins multiculturelle est organisée dans votre quartier. Vous demandez au coordinateur comment vous pouvez participer et aider. (lieu de rassemblement, plats à apporter, matériel à fournir, etc.)'),
+    ('Immigration et Intégration', 2, "Vous cherchez des informations sur les bourses d'études disponibles pour les résidents permanents récemment arrivés. Vous vous renseignez auprès d'un conseiller académique. (montant de l'aide, conditions de ressources, date limite de dépôt, etc.)"),
+    ('Immigration et Intégration', 2, "Vous voulez inscrire vos enfants à un programme d'intégration scolaire d'été. Vous interrogez le directeur du centre communautaire. (tranches d'âge acceptées, activités au programme, tarifs des inscriptions, etc.)"),
+    ('Immigration et Intégration', 2, 'Une association locale organise une sortie culturelle pour faire découvrir la région aux nouveaux arrivants. Vous demandez les modalités pratiques. (moyen de transport, itinéraire prévu, équipement à prévoir, etc.)'),
+    ('Immigration et Intégration', 2, "Vous lisez une annonce pour un atelier d'aide administrative pour remplir les formulaires de visa. Vous posez vos questions au secrétariat. (tarifs de l'atelier, durée de la séance, rendez-vous individuels, etc.)"),
+    ('Immigration et Intégration', 2, 'Vous souhaitez devenir bénévole pour une association qui aide les expatriés. Vous interrogez le responsable sur les tâches à accomplir. (disponibilité hebdomadaire requise, formations internes fournies, types de public aidés, etc.)'),
+    ('Immigration et Intégration', 2, "Vous voulez louer un stand lors d’un festival culturel pour présenter l'artisanat de votre pays. Vous vous renseignez auprès des organisateurs. (dimensions de l'emplacement, prix de la location, matériel technique fourni, etc.)"),
+    ('Immigration et Intégration', 2, "Vous cherchez un avocat en immigration pour un conseil juridique. Vous appelez un cabinet d'avocats pour connaître leurs tarifs et services. (coût de la consultation, spécialités du cabinet, délais de rendez-vous, etc.)"),
+    ('Immigration et Intégration', 2, "Vous êtes intéressé(e) par une colocation avec d'autres étudiants internationaux. Vous contactez la personne qui a posté l'annonce pour poser vos questions sur l'ambiance et les règles. (montant des charges, partage des tâches, taille de la chambre, etc.)"),
+    # --- Monde du Travail et Économie ---
+    ('Monde du Travail et Économie', 2, "Vous voyez une offre de stage en marketing au sein d'une start-up locale. Vous appelez le recruteur pour obtenir des précisions sur le poste. (missions confiées, montant de l'indemnité, perspectives d'embauche, etc.)"),
+    ('Monde du Travail et Économie', 2, "Vous êtes intéressé(e) par un espace de coworking dans votre quartier. Vous interrogez le gérant sur les tarifs et les équipements disponibles. (vitesse internet, accès aux salles, formules d'abonnement, etc.)"),
+    ('Monde du Travail et Économie', 2, 'Vous souhaitez suivre une formation professionnelle pour apprendre à utiliser un nouveau logiciel de gestion. Vous demandez les modalités au centre de formation. (durée du programme, prérequis nécessaires, certifications obtenues, etc.)'),
+    ('Monde du Travail et Économie', 2, "Vous voulez postuler à une offre d'emploi à temps partiel dans une librairie. Vous interrogez le responsable du magasin sur les horaires et les missions. (jours de travail, tâches quotidiennes, flexibilité du planning, etc.)"),
+    ('Monde du Travail et Économie', 2, "Vous souhaitez organiser une réunion d'information syndicale ou professionnelle dans votre entreprise. Vous demandez l'autorisation et les détails logistiques au directeur des ressources humaines. (disponibilité des salles, horaires autorisés, matériel de projection, etc.)"),
+    ('Monde du Travail et Économie', 2, "Vous voulez lancer votre micro-entreprise et cherchez un accompagnement. Vous interrogez un conseiller d'un organisme d'aide aux jeunes entrepreneurs. (subventions disponibles, ateliers juridiques proposés, suivi individuel, etc.)"),
+    ('Monde du Travail et Économie', 2, "Vous êtes invité(e) à participer à un salon de l'emploi et du recrutement. Vous contactez l'organisateur pour savoir comment optimiser votre visite. (liste des entreprises, ateliers de coaching, badges d'accès, etc.)"),
+    ('Monde du Travail et Économie', 2, 'Vous souhaitez négocier une formule de télétravail hybride avec votre employeur. Vous demandez un entretien avec votre manager pour poser vos conditions. (nombre de jours, matériel fourni, horaires de présence, etc.)'),
+    ('Monde du Travail et Économie', 2, "Vous recherchez un mentor professionnel dans votre domaine d'activité. Vous interrogez le responsable d'un réseau de mise en relation d'affaires. (critères de sélection, fréquence des rendez-vous, objectifs du programme, etc.)"),
+    ('Monde du Travail et Économie', 2, "Vous souhaitez louer une salle de conférence pour présenter un projet à des clients. Vous appelez un hôtel pour connaître les prestations. (capacité d'accueil, service de restauration, équipements techniques, etc.)"),
+    ('Monde du Travail et Économie', 2, "Une agence d'intérim propose des missions courtes dans votre secteur. Vous demandez à un conseiller comment fonctionne leur plateforme de placement. (délais de paiement, types de contrats, réactivité des offres, etc.)"),
+    ('Monde du Travail et Économie', 2, "Vous souhaitez participer à un atelier de rédaction de CV et de lettre de motivation. Vous vous renseignez auprès de l'accueil de votre club de recherche d'emploi. (nombre de participants, correction individuelle, tarifs d'inscription, etc.)"),
+    ('Monde du Travail et Économie', 2, "Vous voulez vendre des créations artisanales sur les marchés de votre région. Vous interrogez le responsable de la mairie sur l'obtention d'un permis de vente. (coût de la place, documents administratifs, calendrier des marchés, etc.)"),
+    ('Monde du Travail et Économie', 2, 'Vous cherchez à sous-traiter la comptabilité de votre petite entreprise. Vous interrogez un comptable indépendant sur ses méthodes et ses honoraires. (tarifs mensuels, logiciels compatibles, délais de bilan, etc.)'),
+    ('Monde du Travail et Économie', 2, "Vous postulez pour un poste d'assistant de direction bilingue. Vous contactez l'agence de recrutement pour obtenir des détails complémentaires sur l'entreprise qui recrute. (secteur d'activité, taille de l'équipe, avantages sociaux, etc.)"),
+    # --- Environnement et Transition Écologique ---
+    ('Environnement et Transition Écologique', 2, 'Votre municipalité met en place un nouveau système de compostage obligatoire dans les immeubles. Vous appelez le service environnement de la mairie pour savoir comment obtenir votre bac. (délais de livraison, consignes de tri, entretien du bac, etc.)'),
+    ('Environnement et Transition Écologique', 2, "Vous souhaitez participer à une journée bénévole de nettoyage d'une forêt locale. Vous interrogez l'association organisatrice sur le point de rendez-vous et le matériel à apporter. (horaires exacts, gants fournis, repas du midi, etc.)"),
+    ('Environnement et Transition Écologique', 2, "Vous voulez installer des panneaux solaires sur le toit de votre maison. Vous interrogez un technicien spécialisé sur le coût, les subventions et les délais de pose. (prix de l'installation, aides financières, rendement énergétique, etc.)"),
+    ('Environnement et Transition Écologique', 2, 'Une épicerie "zéro déchet" vient d\'ouvrir près de chez vous. Vous demandez au gérant comment fonctionne l\'achat en vrac et s\'il faut apporter ses propres contenants. (types de produits, pesée des sacs, tarifs au kilo, etc.)'),
+    ('Environnement et Transition Écologique', 2, "Vous souhaitez acheter un vélo électrique grâce à une aide financière de la ville. Vous vous renseignez auprès d'un conseiller municipal sur la procédure de remboursement. (montant de la prime, critères d'éligibilité, factures à fournir, etc.)"),
+    ('Environnement et Transition Écologique', 2, 'Vous voulez proposer un projet de covoiturage à vos collègues de bureau. Vous interrogez le responsable des transports de votre entreprise pour obtenir son soutien logistique. (plateforme interne, places de parking, partage des frais, etc.)'),
+    ('Environnement et Transition Écologique', 2, "Vous êtes intéressé(e) par un abonnement à un service de voitures partagées (autopartage). Vous demandez au conseiller client les conditions d'utilisation et les prix. (tarifs horaires, assurance comprise, localisation des stations, etc.)"),
+    ('Environnement et Transition Écologique', 2, "Vous souhaitez inscrire votre enfant à un stage d'été axé sur la découverte de la nature et de la biodiversité. Vous interrogez le responsable de la ferme pédagogique. (âge minimum, thèmes des journées, encadrement des animateurs, etc.)"),
+    ('Environnement et Transition Écologique', 2, "Vous voulez faire auditer l'isolation thermique de votre appartement. Vous contactez une agence de rénovation énergétique pour connaître le déroulement du diagnostic. (coût du bilan, durée de l'intervention, solutions proposées, etc.)"),
+    ('Environnement et Transition Écologique', 2, "Une association propose des ateliers gratuits pour apprendre à réparer ses appareils électroménagers en panne. Vous demandez les détails d'inscription au bénévole d'accueil. (outils disponibles, types d'appareils acceptés, calendrier des sessions, etc.)"),
+    ('Environnement et Transition Écologique', 2, "Vous voulez participer à la création d'un potager partagé dans votre quartier. Vous interrogez le président du comité de riverains sur la répartition des tâches. (outils nécessaires, planning d'arrosage, partage des récoltes, etc.)"),
+    ('Environnement et Transition Écologique', 2, 'Vous souhaitez acheter des produits alimentaires en circuit court directement auprès des agriculteurs (système AMAP). Vous vous renseignez auprès du responsable du point de distribution. (prix du panier, jours de retrait, engagement annuel, etc.)'),
+    ('Environnement et Transition Écologique', 2, 'Votre entreprise organise un défi "zéro plastique" pendant un mois. Vous demandez à la chargée de communication interne quels sont les critères de participation. (règles du jeu, récompenses prévues, pesée des déchets, etc.)'),
+    ('Environnement et Transition Écologique', 2, "Vous voulez remplacer votre ancienne chaudière par un système de chauffage écologique. Vous posez vos questions à un conseiller en énergie. (crédits d'impôt, économies réalisées, durée des travaux, etc.)"),
+    ('Environnement et Transition Écologique', 2, "Vous préparez des vacances écotouristiques en pleine nature. Vous appelez le guide d'une réserve naturelle pour connaître les règles d'impact environnemental minimum à respecter. (gestion des déchets, campings autorisés, restrictions de sentiers, etc.)"),
+    # --- Éducation et Jeunesse ---
+    ('Éducation et Jeunesse', 2, "Vous souhaitez inscrire votre enfant à des cours de soutien scolaire en mathématiques. Vous interrogez le directeur d'une agence de tutorat à domicile. (tarifs horaires, profil des tuteurs, suivi pédagogique, etc.)"),
+    ('Éducation et Jeunesse', 2, "Une école de musique propose des cours d'éveil musical pour les jeunes enfants. Vous demandez au secrétariat quels sont les instruments étudiés et les tarifs. (durée de la séance, coût annuel, location d'instruments, etc.)"),
+    ('Éducation et Jeunesse', 2, "Vous voulez obtenir des informations sur le programme d'échange universitaire Erasmus ou international. Vous posez vos questions au bureau des relations internationales de la faculté. (bourses d'études, pays partenaires, niveau de langue requis, etc.)"),
+    ('Éducation et Jeunesse', 2, "Vous cherchez une place en crèche ou chez une assistante maternelle pour votre bébé. Vous interrogez la responsable du relais petite enfance de votre commune. (délais d'attente, horaires d'ouverture, justificatifs de revenus, etc.)"),
+    ('Éducation et Jeunesse', 2, "Vous souhaitez que votre adolescent participe à un camp de vacances linguistique à l'étranger. Vous demandez des détails sur l'encadrement à l'agent de voyage spécialisé. (hébergement en famille, nombre de cours, activités sportives, etc.)"),
+    ('Éducation et Jeunesse', 2, "Une association propose des ateliers de codage et d'informatique pour les collégiens. Vous demandez au formateur quel est le niveau requis pour débuter. (logiciels utilisés, matériel à fournir, projets réalisés, etc.)"),
+    ('Éducation et Jeunesse', 2, "Vous voulez inscrire votre enfant à l'aide aux devoirs organisée après l'école. Vous interrogez l'instituteur ou le directeur de l'établissement scolaire. (jours de la semaine, nombre d'encadrants, tarifs mensuels, etc.)"),
+    ('Éducation et Jeunesse', 2, "Vous souhaitez inscrire votre adolescent à un club de théâtre pour développer sa confiance en soi. Vous demandez au professeur comment se déroulent les auditions. (pièces étudiées, jours de répétition, spectacle de fin d'année, etc.)"),
+    ('Éducation et Jeunesse', 2, "Vous voulez vous renseigner sur les modalités d'inscription au baccalauréat en candidat libre. Vous appelez le rectorat ou le centre des examens. (frais de dossier, date limite d'envoi, épreuves obligatoires, etc.)"),
+    ('Éducation et Jeunesse', 2, "Une école alternative (type Montessori) ouvre ses portes dans votre ville. Vous interrogez l'équipe pédagogique lors de la journée portes ouvertes sur leur méthode. (rythme de l'enfant, effectifs par classe, coût de la scolarité, etc.)"),
+    ('Éducation et Jeunesse', 2, "Vous souhaitez financer les études de votre enfant grâce à un prêt étudiant. Vous interrogez votre conseiller bancaire sur les taux d'intérêt et les modalités de remboursement. (durée du différé, garanties exigées, montant maximum, etc.)"),
+    ('Éducation et Jeunesse', 2, "Vous voulez participer en tant que parent bénévole à l'organisation de la kermesse de fin d'année. Vous demandez au président de l'association de parents d'élèves ce qu'il reste à faire. (stands à installer, horaires d'ouverture, collecte de lots, etc.)"),
+    ('Éducation et Jeunesse', 2, "Votre enfant souhaite intégrer une section sport-études de football. Vous interrogez l'entraîneur sur le rythme des entraînements et le niveau scolaire exigé. (critères sportifs, aménagement du planning, hébergement en internat, etc.)"),
+    ('Éducation et Jeunesse', 2, "Vous cherchez une formation en alternance pour votre enfant de 16 ans. Vous posez des questions à un conseiller d'orientation du Centre de Formation des Apprentis (CFA). (entreprises partenaires, rythme des cours, rémunération prévue, etc.)"),
+    ('Éducation et Jeunesse', 2, "Vous voulez louer une chambre d'étudiant dans une résidence universitaire. Vous vous renseignez auprès du secrétariat du CROUS ou du gestionnaire sur les critères d'attribution. (montant du loyer, éligibilité aux aides, mobilier inclus, etc.)"),
+    # --- Nouvelles Technologies et Réseaux Sociaux ---
+    ('Nouvelles Technologies et Réseaux Sociaux', 2, 'Vous rencontrez un problème avec votre nouvel abonnement à la fibre internet. Vous appelez le service technique de votre opérateur pour obtenir une assistance immédiate. (délais de dépannage, nature de la panne, dédommagement prévu, etc.)'),
+    ('Nouvelles Technologies et Réseaux Sociaux', 2, 'Vous souhaitez participer à une formation pour seniors intitulée "Maîtriser les outils numériques de base". Vous demandez les horaires à l’animateur du centre social. (nombre de séances, thèmes abordés, niveau requis, etc.)'),
+    ('Nouvelles Technologies et Réseaux Sociaux', 2, "Vous voulez faire réparer l'écran cassé de votre smartphone. Vous interrogez un technicien en boutique de réparation sur le coût, la garantie et le délai d’attente. (prix des pièces, durée de réparation, prêt de téléphone, etc.)"),
+    ('Nouvelles Technologies et Réseaux Sociaux', 2, "Vous êtes intéressé(e) par l’achat d’un ordinateur portable d’occasion reconditionné. Vous demandez au vendeur des détails sur l’état de la batterie et les logiciels inclus. (durée de la garantie, prix d'origine, accessoires fournis, etc.)"),
+    ('Nouvelles Technologies et Réseaux Sociaux', 2, 'Vous souhaitez installer un système de domotique (maison connectée) chez vous. Vous interrogez un installateur professionnel sur la sécurité des données et les fonctionnalités. (coût global, application de contrôle, pannes de courant, etc.)'),
+    ('Nouvelles Technologies et Réseaux Sociaux', 2, "Une agence propose un service de protection de la réputation en ligne et de suppression des données privées. Vous demandez à un conseiller comment se déroule l’audit. (tarifs des services, délais d'effacement, résultats garantis, etc.)"),
+    ('Nouvelles Technologies et Réseaux Sociaux', 2, "Vous souhaitez inscrire votre enfant à un atelier de création de jeux vidéo simples. Vous interrogez le responsable du club d'informatique sur le matériel requis. (âge minimum, logiciels utilisés, jours de l'atelier, etc.)"),
+    ('Nouvelles Technologies et Réseaux Sociaux', 2, "Vous envisagez de louer un casque de réalité virtuelle pour une soirée d'anniversaire. Vous demandez les tarifs et le catalogue de jeux au gérant de la boutique de location. (montant de la caution, durée de location, câbles fournis, etc.)"),
+    ('Nouvelles Technologies et Réseaux Sociaux', 2, 'Vous voulez créer un site internet professionnel pour votre activité et cherchez un hébergeur web. Vous posez des questions au support technique sur les différentes formules. (espace de stockage, adresses courriel incluses, prix annuel, etc.)'),
+    ('Nouvelles Technologies et Réseaux Sociaux', 2, "Vous voulez participer à une conférence en ligne (webinaire) sur les dangers du cyberharcèlement chez les jeunes. Vous demandez les modalités d'accès à l'organisateur. (lien de connexion, horaire exact, intervenants présents, etc.)"),
+    ('Nouvelles Technologies et Réseaux Sociaux', 2, 'Vous souhaitez utiliser une application bancaire sur votre téléphone mais craignez pour la sécurité. Vous interrogez votre conseiller bancaire sur les protocoles de protection. (double authentification, blocage de carte, assurance piratage, etc.)'),
+    ('Nouvelles Technologies et Réseaux Sociaux', 2, 'Vous souhaitez parrainer un projet de financement participatif (crowdfunding) pour un gadget innovant. Vous contactez le créateur du projet pour en savoir plus sur la date de livraison. (contreparties offertes, risques financiers, étapes de fabrication, etc.)'),
+    ('Nouvelles Technologies et Réseaux Sociaux', 2, "Vous cherchez un logiciel de contrôle parental efficace pour les tablettes de vos enfants. Vous demandez des conseils à un conseiller de vente en magasin spécialisé. (limite de temps, blocage de sites, prix de l'abonnement, etc.)"),
+    ('Nouvelles Technologies et Réseaux Sociaux', 2, "Vous souhaitez configurer un réseau Wi-Fi sécurisé pour vos clients dans votre café. Vous appelez un technicien réseau pour obtenir un devis d’installation. (coût de la main-d'œuvre, couverture du signal, conformité légale, etc.)"),
+    ('Nouvelles Technologies et Réseaux Sociaux', 2, "Vous voulez vous inscrire sur une plateforme de cours de langue en ligne avec des tuteurs natifs. Vous demandez au service client comment fonctionne la politique d’annulation des cours. (délais de remboursement, choix du professeur, durée d'une leçon, etc.)"),
+    # --- Voyages, Tourisme et Transport ---
+    ('Voyages, Tourisme et Transport', 2, 'Vous lisez une annonce pour une excursion de deux jours en canoë-kayak dans un parc naturel. Vous contactez le guide pour connaître le niveau physique requis. (matériel fourni, repas inclus, lieu de bivouac, etc.)'),
+    ('Voyages, Tourisme et Transport', 2, "Vous êtes à l'hôtel et votre chambre ne correspond pas à votre réservation (pas de climatisation, vue sur rue). Vous descendez à la réception pour régler le problème. (changement de chambre, geste commercial, surclassement disponible, etc.)"),
+    ('Voyages, Tourisme et Transport', 2, "Vous voulez acheter une carte d'abonnement annuel pour les trains régionaux. Vous interrogez l'agent au guichet de la gare sur les réductions applicables. (justificatifs à fournir, prix annuel, validité le week-end, etc.)"),
+    ('Voyages, Tourisme et Transport', 2, 'Vous souhaitez louer un camping-car pour vos prochaines vacances en famille. Vous demandez au loueur des précisions sur le permis requis et les assurances incluses. (montant de la caution, kilométrage autorisé, équipements de cuisine, etc.)'),
+    ('Voyages, Tourisme et Transport', 2, "Vous visitez une ville et cherchez une visite guidée historique à pied. Vous demandez les horaires, les tarifs et les langues parlées à l'agent de l'Office de Tourisme. (point de départ, durée du parcours, réservation obligatoire, etc.)"),
+    ('Voyages, Tourisme et Transport', 2, "Vous voulez organiser un voyage de groupe pour 15 personnes et louer un minibus avec chauffeur. Vous demandez un devis détaillé à une compagnie de transport. (tarif à la journée, frais d'essence, pauses prévues, etc.)"),
+    ('Voyages, Tourisme et Transport', 2, "Vous avez perdu votre sac de voyage dans l'autobus de la ville. Vous appelez le service des objets trouvés de la compagnie de transport pour savoir s'il a été rapporté. (description du sac, numéro de la ligne, horaires de retrait, etc.)"),
+    ('Voyages, Tourisme et Transport', 2, "Vous souhaitez séjourner dans une maison d'hôtes rurale (un gîte). Vous contactez le propriétaire pour savoir si les repas du soir sont faits maison et inclus. (prix de la nuitée, activités aux alentours, présence d'animaux, etc.)"),
+    ('Voyages, Tourisme et Transport', 2, "Vous voulez réserver un billet d'avion multi-destinations complexe. Vous vous rendez dans une agence de voyages pour demander conseil sur les escales les plus économiques. (compagnies aériennes, temps d'escale, conditions d'annulation, etc.)"),
+    ('Voyages, Tourisme et Transport', 2, 'Vous préparez un voyage à vélo le long d\'un canal et cherchez des hébergements labellisés "Accueil Vélo". Vous posez vos questions à l\'association de cyclotourisme. (services de réparation, abris sécurisés, cartes des pistes, etc.)'),
+    ('Voyages, Tourisme et Transport', 2, "Vous devez annuler un séjour à cause d'un imprévu médical. Vous appelez le service client de la plateforme de réservation pour connaître les conditions de remboursement. (frais de dossier, justificatif de médecin, délais bancaires, etc.)"),
+    ('Voyages, Tourisme et Transport', 2, "Vous souhaitez passer un week-end sur une île et prendre le ferry avec votre voiture. Vous vous renseignez au guichet maritime sur les formalités d'embarquement. (heure d'arrivée conseillée, suppléments bagages, tarifs véhicule, etc.)"),
+    ('Voyages, Tourisme et Transport', 2, "Vous cherchez un hôtel qui accepte les animaux de compagnie de grande taille. Vous contactez l'établissement pour vérifier les conditions et les frais supplémentaires. (supplément par nuit, accès au restaurant, espaces verts à proximité, etc.)"),
+    ('Voyages, Tourisme et Transport', 2, "Vous voulez faire un safari photo éco-responsable. Vous interrogez l'agence de voyage sur l'engagement de leurs guides envers la protection de la faune sauvage. (taille du groupe, véhicules utilisés, labels environnementaux, etc.)"),
+    ('Voyages, Tourisme et Transport', 2, 'Vous souhaitez louer un bateau sans permis pour une journée sur un lac. Vous demandez au loueur des consignes de sécurité et la carte des zones de navigation. (tarifs de location, gilets de sauvetage, carburant inclus, etc.)'),
+    # --- Société et Consommation ---
+    ('Société et Consommation', 2, "Vous voulez résilier votre contrat d'abonnement à une salle de sport car vous déménagez. Vous demandez au gérant la procédure à suivre et le délai de préavis. (frais de résiliation, pièces justificatives, restitution du badge, etc.)"),
+    ('Société et Consommation', 2, "Vous avez acheté un appareil électroménager qui est tombé en panne après seulement deux semaines d'utilisation. Vous retournez au magasin pour demander un échange ou un remboursement sous garantie. (ticket de caisse, délais de réparation, modèle de remplacement, etc.)"),
+    ('Société et Consommation', 2, "Vous souhaitez faire l'acquisition d'un vêtement sur mesure pour un événement important. Vous interrogez un couturier indépendant sur ses délais de fabrication et ses tarifs. (choix des tissus, nombre d'essayages, acompte demandé, etc.)"),
+    ('Société et Consommation', 2, "Vous êtes intéressé(e) par l'achat d'un panier de légumes hebdomadaire vendu directement par un groupement de producteurs locaux (AMAP). Vous interrogez le coordinateur de l'association sur l'abonnement. (prix du panier, lieu de distribution, variété des légumes, etc.)"),
+    ('Société et Consommation', 2, "Vous voulez organiser un vide-grenier ou une brocante de quartier dans votre rue. Vous appelez le service d'urbanisme de votre mairie pour connaître les autorisations administratives nécessaires. (frais d'occupation, date limite d'inscription, métrage maximum, etc.)"),
+    ('Société et Consommation', 2, "Vous souhaitez faire des dons de vêtements et de meubles à une association caritative (type Emmaüs). Vous appelez le centre pour savoir s'ils effectuent des collectes gratuites à domicile. (jours de passage, état des meubles requis, prise de rendez-vous, etc.)"),
+    ('Société et Consommation', 2, "Vous constatez une erreur importante sur votre dernière facture d'électricité. Vous appelez le service client du fournisseur d'énergie pour contester le montant et demander une régularisation. (relevé de compteur, délais d'étude, mode de remboursement, etc.)"),
+    ('Société et Consommation', 2, "Vous souhaitez vous inscrire à un atelier de cuisine végétale ou végane. Vous interrogez le chef cuisinier de l'école de cuisine sur le calendrier des cours et les ingrédients utilisés. (durée de l'atelier, prix par personne, matériel de cuisine, etc.)"),
+    ('Société et Consommation', 2, 'Vous voulez offrir une carte-cadeau dans un institut de beauté pour l’anniversaire d’un proche. Vous demandez les différentes formules de soins disponibles à la réceptionniste. (durée de validité, tarifs des massages, prise de rendez-vous, etc.)'),
+    ('Société et Consommation', 2, "Vous cherchez à acheter des fournitures de bureau en grande quantité pour votre entreprise. Vous négociez une réduction tarifaire globale avec le responsable commercial d'un grossiste. (délais de livraison, franco de port, facilités de paiement, etc.)"),
+    ('Société et Consommation', 2, 'Vous souhaitez louer un costume ou une tenue de soirée de créateur pour un gala. Vous posez des questions sur le montant de la caution et les frais de nettoyage à sec au gérant de la boutique. (durée de location, retouches possibles, pénalités de retard, etc.)'),
+    ('Société et Consommation', 2, "Vous voulez participer à une coopérative d'achat alimentaire autogérée par les consommateurs. Vous demandez à un membre actif comment fonctionne l'obligation de bénévolat mensuel. (horaires d'ouverture, types de produits, parts sociales à acheter, etc.)"),
+    ('Société et Consommation', 2, "Vous avez commandé un article en ligne qui est arrivé endommagé. Vous contactez le service après-vente (SAV) de la plateforme e-commerce pour organiser un retour gratuit. (photos du colis, étiquette de transport, délais d'échange, etc.)"),
+    ('Société et Consommation', 2, "Vous cherchez un artisan ébéniste pour restaurer un meuble ancien de famille. Vous l'interrogez sur sa méthode de travail, le type de vernis utilisé et la durée des travaux. (coût du devis, transport du meuble, techniques traditionnelles, etc.)"),
+    ('Société et Consommation', 2, 'Vous souhaitez adhérer à une association locale d’échange local de services (système SEL). Vous demandez au secrétaire de l\'association comment fonctionne le système de comptabilisation en "temps" ou "points". (frais d\'adhésion, catalogue des offres, réunions d\'accueil, etc.)'),
+    # --- Culture, Langue et Patrimoine ---
+    ('Culture, Langue et Patrimoine', 2, "Vous souhaitez organiser une visite privée d’un musée d’art pour un groupe d’étudiants. Vous interrogez le responsable des réservations du musée sur les tarifs et la présence d'un guide. (taille maximale du groupe, durée de la visite, gratuité enseignants, etc.)"),
+    ('Culture, Langue et Patrimoine', 2, "Vous êtes intéressé(e) par un abonnement annuel au théâtre municipal. Vous demandez à la billetterie les avantages inclus. (choix des sièges, réductions abonnés, politique d'annulation, etc.)"),
+    ('Culture, Langue et Patrimoine', 2, "Vous voulez inscrire votre groupe de musique amateur à un tremplin ou festival musical local. Vous demandez au programmateur culturel les conditions techniques de sélection. (date limite d'envoi, matériel sono fourni, durée du concert, etc.)"),
+    ('Culture, Langue et Patrimoine', 2, 'Vous souhaitez louer une salle dans un château ou un monument historique pour organiser une réception privée. Vous contactez le gestionnaire du patrimoine pour obtenir le règlement intérieur. (capacité de la salle, horaires de fermeture, prestataires imposés, etc.)'),
+    ('Culture, Langue et Patrimoine', 2, "Vous voulez suivre des cours du soir d'histoire de l’art ou d’archéologie. Vous interrogez le secrétariat de l'université populaire sur le programme et l’évaluation. (tarifs du trimestre, jours de cours, diplômes délivrés, etc.)"),
+    ('Culture, Langue et Patrimoine', 2, "Une association propose d’apprendre les danses traditionnelles de votre région d’accueil. Vous demandez au professeur s'il faut venir en couple et quelle tenue est recommandée. (âge minimum, niveau débutant accepté, calendrier des bals, etc.)"),
+    ('Culture, Langue et Patrimoine', 2, "Vous souhaitez faire un don de livres anciens à la bibliothèque municipale. Vous appelez le bibliothécaire pour savoir quels types d'ouvrages sont acceptés et s'ils manquent de place. (état des livres, genres recherchés, horaires de dépôt, etc.)"),
+    ('Culture, Langue et Patrimoine', 2, "Vous voulez participer en tant que figurant bénévole à un grand spectacle historique en plein air. Vous interrogez le directeur artistique sur le planning des répétitions durant l'été. (costumes fournis, profil recherché, disponibilité requise, etc.)"),
+    ('Culture, Langue et Patrimoine', 2, "Vous souhaitez inscrire votre enfant à un atelier de poterie ou de sculpture pendant les vacances. Vous posez des questions sur la sécurité et le matériel à l'artisan qui anime l'atelier. (tarifs de la semaine, nombre d'enfants, cuisson des pièces, etc.)"),
+    ('Culture, Langue et Patrimoine', 2, 'Vous cherchez un guide touristique conférencier privé pour faire visiter le centre historique de la ville à des amis étrangers. Vous contactez un professionnel indépendant pour fixer le parcours. (prix forfaitaire, langues de visite, durée de marche, etc.)'),
+    ('Culture, Langue et Patrimoine', 2, "Vous voulez emprunter des œuvres d'art originales dans une artothèque municipale. Vous demandez au responsable le fonctionnement de l'emprunt et les conditions d'assurance requises. (durée du prêt, abonnement annuel, transport des cadres, etc.)"),
+    ('Culture, Langue et Patrimoine', 2, 'Vous souhaitez participer à un club de lecture mensuel organisé dans une librairie indépendante. Vous interrogez le libraire sur la liste des prochains livres à lire. (horaires des rencontres, thèmes littéraires, participation financière, etc.)'),
+    ('Culture, Langue et Patrimoine', 2, "Vous apprenez qu’un bâtiment historique du quartier va être démoli. Vous interrogez le président d'une association de sauvegarde du patrimoine sur les actions de protestation en cours. (pétition en ligne, rassemblements prévus, recours juridiques, etc.)"),
+    ('Culture, Langue et Patrimoine', 2, "Vous souhaitez assister à une projection de cinéma en plein air, mais craignez les intempéries. Vous appelez les organisateurs pour savoir si une solution de repli en intérieur est prévue. (chaises fournies, tarifs d'entrée, buvette sur place, etc.)"),
+    ('Culture, Langue et Patrimoine', 2, "Vous voulez inscrire votre adolescent à un stage intensif de calligraphie ou d'écriture créative. Vous demandez des précisions sur le profil de l'animateur et les productions finales attendues. (fournitures incluses, horaires de journée, nombre de stagiaires, etc.)"),
+    # --- Santé, Sport et Bien-être ---
+    ('Santé, Sport et Bien-être', 2, 'Vous souhaitez vous inscrire à un club de randonnée en montagne. Vous demandez au guide de l’association quels équipements techniques (chaussures, bâtons) sont obligatoires. (difficulté des parcours, covoiturage organisé, certificat médical, etc.)'),
+    ('Santé, Sport et Bien-être', 2, "Vous voulez prendre rendez-vous avec un nutritionniste pour modifier votre alimentation. Vous l'interrogez par téléphone sur le déroulement de la première consultation et le suivi. (tarifs de la séance, remboursement mutuelle, analyses à apporter, etc.)"),
+    ('Santé, Sport et Bien-être', 2, 'Vous souhaitez inscrire votre enfant à des cours de natation individuels pour vaincre sa peur de l’eau. Vous posez des questions au maître-nageur de la piscine municipale. (durée de la leçon, nombre de séances, présence des parents, etc.)'),
+    ('Santé, Sport et Bien-être', 2, 'Vous êtes intéressé(e) par des séances de sophrologie ou de gestion du stress en groupe. Vous demandez des détails pratiques à la secrétaire du centre de bien-être. (horaires disponibles, taille du groupe, tapis fournis, etc.)'),
+    ('Santé, Sport et Bien-être', 2, 'Vous souhaitez louer un court de tennis de manière régulière dans un club privé. Vous interrogez le responsable du complexe sur les horaires de réservation prioritaires. (prix horaire, éclairage inclus, surface du terrain, etc.)'),
+    ('Santé, Sport et Bien-être', 2, "Vous voulez participer à une course à pied solidaire (marathon caritatif). Vous contactez le comité d'organisation pour savoir comment collecter des fonds auprès de vos proches. (frais d'inscription, retrait des dossards, ravitaillements prévus, etc.)"),
+    ('Santé, Sport et Bien-être', 2, 'Vous cherchez à acheter un vélo de course adapté à votre morphologie. Vous demandez conseil à un vendeur spécialisé en magasin de sport sur la taille du cadre et les réglages. (matériaux disponibles, poids du vélo, budget à prévoir, etc.)'),
+    ('Santé, Sport et Bien-être', 2, "Vous souhaitez faire une cure thermale ou de thalassothérapie d'une semaine. Vous appelez le centre pour obtenir des informations sur l'hébergement et la prise en charge des soins. (options de pension, planning des massages, accès au sauna, etc.)"),
+    ('Santé, Sport et Bien-être', 2, "Vous voulez introduire des séances de massage sur chaise (massage Amma assis) pour vos employés de bureau. Vous interrogez un praticien indépendant sur les tarifs entreprises. (durée d'un massage, matériel à installer, espace minimum requis, etc.)"),
+    ('Santé, Sport et Bien-être', 2, "Vous souhaitez acheter des compléments alimentaires naturels ou des plantes médicinales. Vous demandez des conseils d'utilisation personnalisés à un herboriste ou pharmacien. (contre-indications éventuelles, durée de la cure, posologie quotidienne, etc.)"),
+    ('Santé, Sport et Bien-être', 2, "Vous voulez inscrire votre enfant à des cours de judo ou de karaté. Vous interrogez le professeur du dojo sur les valeurs éducatives enseignées et le coût du kimono officiel. (jours d'entraînement, compétitions prévues, licence annuelle, etc.)"),
+    ('Santé, Sport et Bien-être', 2, "Vous cherchez un entraîneur personnel (coach sportif) à domicile pour vous remettre en forme après une blessure. Vous l'interrogez sur ses diplômes et sa méthode de réadaptation. (tarifs à l'heure, matériel apporté, fréquence conseillée, etc.)"),
+    ('Santé, Sport et Bien-être', 2, "Vous voulez organiser un tournoi de football amateur entre plusieurs entreprises locales. Vous demandez l'autorisation et les conditions de réservation des terrains à la mairie. (disponibilité des vestiaires, assurance requise, frais d'arbitrage, etc.)"),
+    ('Santé, Sport et Bien-être', 2, "Vous souhaitez participer à une retraite de yoga et méditation en silence pendant un week-end. Vous contactez le centre de gestion pour connaître l'emploi du temps quotidien. (type d'hébergement, repas végétariens, niveau de pratique exigé, etc.)"),
+    ('Santé, Sport et Bien-être', 2, "Vous voulez installer une station de fitness ou de street-workout en plein air dans le parc de votre copropriété. Vous interrogez le syndic de l'immeuble sur la faisabilité du projet. (coût des agrès, normes de sécurité, vote en assemblée, etc.)"),
+    # --- Vie Sociale, Famille et Démographie ---
+    ('Vie Sociale, Famille et Démographie', 2, 'Vous cherchez une baby-sitter de confiance pour garder vos enfants en soirée de manière régulière. Vous passez un entretien à une étudiante pour vérifier son expérience. (tarif horaire demandé, aides aux devoirs, références à fournir, etc.)'),
+    ('Vie Sociale, Famille et Démographie', 2, "Vous souhaitez inscrire votre parent âgé à des activités de loisirs dans un club du troisième âge. Vous interrogez l'animateur social sur les ateliers créatifs et les sorties. (prix de la cotisation, transport adapté, planning mensuel, etc.)"),
+    ('Vie Sociale, Famille et Démographie', 2, 'Vous voulez organiser une fête de quartier (fête des voisins) dans la cour commune de votre immeuble. Vous interrogez le syndic ou le concierge sur le règlement de sécurité. (horaire limite de bruit, tables à prêter, assurance obligatoire, etc.)'),
+    ('Vie Sociale, Famille et Démographie', 2, 'Vous êtes à la recherche d’une salle des fêtes à louer pour célébrer un anniversaire familial important (50 personnes). Vous contactez le secrétariat de la mairie pour connaître le tarif. (caution demandée, vaisselle incluse, parking disponible, etc.)'),
+    ('Vie Sociale, Famille et Démographie', 2, "Vous souhaitez adopter un animal de compagnie (un chien ou un chat) dans un refuge pour animaux (SPA). Vous interrogez l'agent d'accueil sur la procédure d'adoption et les frais vétérinaires. (justificatifs de logement, puce électronique incluse, période d'essai, etc.)"),
+    ('Vie Sociale, Famille et Démographie', 2, "Vous voulez organiser une pendaison de crémaillère surprise pour un ami proche qui vient de déménager. Vous contactez son colocataire pour planifier la logistique en secret. (nombre d'invités, liste de cadeaux, organisation du buffet, etc.)"),
+    ('Vie Sociale, Famille et Démographie', 2, "Vous souhaitez louer des jeux de société géants pour animer une fête de famille en extérieur. Vous demandez les tarifs de location et la caution au responsable d'une ludothèque. (durée du prêt, transport du matériel, pénalités de casse, etc.)"),
+    ('Vie Sociale, Famille et Démographie', 2, "Vous cherchez une solution de garde partagée pour votre enfant avec une autre famille du quartier. Vous rencontrez les parents pour discuter des horaires et du partage des frais. (lieu d'accueil alterné, salaire de la nounou, jours de vacances, etc.)"),
+    ('Vie Sociale, Famille et Démographie', 2, "Vous souhaitez devenir bénévole dans une association de parrainage de jeunes en difficulté scolaire. Vous interrogez le coordinateur sur le temps hebdomadaire nécessaire. (formations initiales, profil des enfants, réunions d'équipe, etc.)"),
+    ('Vie Sociale, Famille et Démographie', 2, 'Vous voulez réserver un gîte familial de grande capacité pour célébrer Noël en famille élargie. Vous contactez le propriétaire pour savoir si la cuisine est équipée pour 20 personnes. (supplément chauffage, draps fournis, présence de commerces, etc.)'),
+    ('Vie Sociale, Famille et Démographie', 2, "Vous apprenez qu’un de vos voisins âgés a des difficultés pour faire ses courses de première nécessité. Vous contactez l'assistante sociale de la commune pour proposer votre aide. (fréquence des visites, démarches administratives, coordination associative, etc.)"),
+    ('Vie Sociale, Famille et Démographie', 2, 'Vous souhaitez inscrire votre famille à un atelier d’artisanat parent-enfant (ex: fabrication de pain traditionnel). Vous demandez les disponibilités à l’animateur de l’atelier. (âge minimum des enfants, tarif familial, durée de la cuisson, etc.)'),
+    ('Vie Sociale, Famille et Démographie', 2, "Vous voulez organiser un voyage de retrouvailles avec vos anciens camarades de classe universitaire. Vous contactez un agent de voyage pour obtenir un tarif préférentiel pour les réservations d'hôtels groupées. (conditions d'annulation, activités communes, dates disponibles, etc.)"),
+    ('Vie Sociale, Famille et Démographie', 2, "Vous souhaitez réserver une table pour un grand repas de famille (30 personnes) dans un restaurant traditionnel. Vous négociez un menu unique fixe avec le directeur de l'établissement. (montant des arrhes, options végétariennes, boissons incluses, etc.)"),
+    ('Vie Sociale, Famille et Démographie', 2, "Vous voulez faire appel à un service de traiteur à domicile pour organiser un dîner important de célébration de mariage. Vous l'interrogez sur les options de menus pour les personnes ayant des régimes alimentaires spécifiques. (frais de service, vaisselle propre fournie, acompte de réservation, etc.)"),
 ]
 
 
