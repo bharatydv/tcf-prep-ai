@@ -88,6 +88,45 @@ ASSEMBLYAI_LANGUAGE = os.environ.get("ASSEMBLYAI_LANGUAGE", "fr")
 FREE_MONTHLY_LIMIT = 5
 FREE_MODEL_ANSWER_LIMIT = 3
 
+# ---- Runtime provider selection (Admin panel overrides the .env defaults) ----
+# .env values are the fallback defaults; the Admin panel can override them and
+# the choice is stored in the app_settings table under these keys.
+_ENV_PROVIDER_DEFAULTS = {
+    "transcribe_provider": TRANSCRIBE_PROVIDER,
+    "speaking_grader_provider": SPEAKING_GRADER_PROVIDER,
+    "writing_grader_provider": WRITING_GRADER_PROVIDER,
+}
+_provider_cache: dict = {}          # key -> value
+_provider_cache_ts: float = 0.0     # last refresh time
+_PROVIDER_CACHE_TTL = 10.0          # seconds
+
+
+async def get_provider(db: AsyncSession, key: str) -> str:
+    """Return the active provider for a task key, DB setting first then .env.
+
+    Cached briefly so we don't hit the DB on every grade call, but still pick
+    up Admin-panel changes within ~10 seconds.
+    """
+    global _provider_cache, _provider_cache_ts
+    import time as _t
+    now = _t.time()
+    if now - _provider_cache_ts > _PROVIDER_CACHE_TTL:
+        try:
+            res = await db.execute(select(AppSetting))
+            _provider_cache = {r.key: r.value for r in res.scalars().all()}
+        except Exception:  # noqa: BLE001
+            _provider_cache = {}
+        _provider_cache_ts = now
+    val = _provider_cache.get(key)
+    if val:
+        return val.lower()
+    return _ENV_PROVIDER_DEFAULTS.get(key, "").lower()
+
+
+def _invalidate_provider_cache():
+    global _provider_cache_ts
+    _provider_cache_ts = 0.0
+
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("tcf-prep-ai")
 
@@ -147,6 +186,16 @@ class Prompt(Base):
     level: Mapped[str] = mapped_column(String(8), default="C1")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AppSetting(Base):
+    """Simple key-value store for runtime-editable settings (e.g. which AI
+    provider is active for each task). Overrides the .env defaults when set."""
+    __tablename__ = "app_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    value: Mapped[str] = mapped_column(String(128))
 
 
 class Submission(Base):
@@ -655,11 +704,11 @@ def _validate_analysis(data: dict) -> dict:
     }
 
 
-async def analyze_text_with_ai(text: str, topic: Optional[str] = None) -> dict:
-    """Grade writing using the configured WRITING_GRADER_PROVIDER."""
+async def analyze_text_with_ai(text: str, topic: Optional[str] = None, db=None) -> dict:
+    """Grade writing using the active provider (Admin panel overrides .env)."""
     prompt = (f"Topic/consigne: {topic}\n\nText to grade:\n{text}"
               if topic else f"Text to grade:\n{text}")
-    provider = WRITING_GRADER_PROVIDER
+    provider = (await get_provider(db, "writing_grader_provider")) if db is not None else WRITING_GRADER_PROVIDER
     raw = await _grade_with_provider(provider, GRADER_SYSTEM, prompt)
     if raw is None:
         return dict(FALLBACK_ANALYSIS)
@@ -885,9 +934,9 @@ def _transcribe_assemblyai(audio_bytes: bytes, filename: str) -> str:
     raise RuntimeError("AssemblyAI transcription timed out")
 
 
-async def transcribe_audio(audio_bytes: bytes, filename: str) -> str:
-    """Transcribe using the configured TRANSCRIBE_PROVIDER (openai | groq | gemini)."""
-    provider = TRANSCRIBE_PROVIDER
+async def transcribe_audio(audio_bytes: bytes, filename: str, db=None) -> str:
+    """Transcribe using the active provider (Admin panel overrides .env)."""
+    provider = (await get_provider(db, "transcribe_provider")) if db is not None else TRANSCRIBE_PROVIDER
     if provider == "gemini":
         fn, key = _transcribe_gemini, GEMINI_API_KEY
     elif provider == "groq":
@@ -916,15 +965,15 @@ def _validate_speaking(data: dict) -> dict:
     return base
 
 
-async def analyze_speaking_with_ai(transcript: str, question: str) -> dict:
-    """Grade a spoken answer using the configured SPEAKING_GRADER_PROVIDER."""
+async def analyze_speaking_with_ai(transcript: str, question: str, db=None) -> dict:
+    """Grade a spoken answer using the active provider (Admin overrides .env)."""
     if not transcript.strip():
         return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
                 "relevance_comment": "No speech was detected in the recording.",
                 "suggestions": []}
     prompt = (f"QUESTION (task):\n{question}\n\n"
               f"TRANSCRIPT of the candidate's spoken answer:\n{transcript}")
-    provider = SPEAKING_GRADER_PROVIDER
+    provider = (await get_provider(db, "speaking_grader_provider")) if db is not None else SPEAKING_GRADER_PROVIDER
     raw = await _grade_with_provider(provider, SPEAKING_GRADER_SYSTEM, prompt)
     if raw is None:
         return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
@@ -1422,7 +1471,7 @@ async def analyze_stream(body: AnalyzeIn,
     async def gen():
         try:
             task = asyncio.create_task(
-                analyze_text_with_ai(body.text, body.topic or body.label))
+                analyze_text_with_ai(body.text, body.topic or body.label, db=db))
             for stage in STAGES:
                 yield _sse("stage", {"stage": stage})
                 await asyncio.sleep(0.6)
@@ -1449,7 +1498,7 @@ async def create_submission(body: AnalyzeIn,
                             db: AsyncSession = Depends(get_db)):
     user = await enforce_free_limit(db, user)
     source = body.source if body.source in {"practice", "paste"} else "practice"
-    analysis = await analyze_text_with_ai(body.text, body.topic or body.label)
+    analysis = await analyze_text_with_ai(body.text, body.topic or body.label, db=db)
     sub = await persist_submission(db, user, body.text, body.prompt_id,
                                    analysis, source=source)
     return sub
@@ -1515,7 +1564,7 @@ async def simulator_submit(body: SimulatorSubmitIn,
     level_order = ["A1", "A2", "B1", "B2", "C1", "C2"]
     for i, task in ((1, body.task1), (2, body.task2), (3, body.task3)):
         if task.text.strip():
-            analysis = await analyze_text_with_ai(task.text, task.prompt)
+            analysis = await analyze_text_with_ai(task.text, task.prompt, db=db)
         else:
             analysis = dict(FALLBACK_ANALYSIS)
         tasks_out[f"task{i}"] = {
@@ -1853,8 +1902,8 @@ async def speaking_analyze(question: str = Form(...),
     audio_bytes = await audio.read()
     if not audio_bytes:
         raise HTTPException(status_code=400, detail="Empty audio upload")
-    transcript = await transcribe_audio(audio_bytes, audio.filename or "audio.webm")
-    analysis = await analyze_speaking_with_ai(transcript, question)
+    transcript = await transcribe_audio(audio_bytes, audio.filename or "audio.webm", db=db)
+    analysis = await analyze_speaking_with_ai(transcript, question, db=db)
     analysis["transcript"] = transcript
     sub = await persist_submission(
         db, user, transcript or "(no speech detected)", None, analysis,
@@ -1916,6 +1965,70 @@ async def recent_topic(topic_id: str,
 # ----------------------------------------------------------------------------
 # Admin
 # ----------------------------------------------------------------------------
+# Allowed providers per task (for validation + to drive the Admin UI dropdowns)
+PROVIDER_OPTIONS = {
+    "transcribe_provider": ["groq", "assemblyai", "openai", "gemini"],
+    "speaking_grader_provider": ["deepseek", "groq", "anthropic", "openai", "gemini"],
+    "writing_grader_provider": ["deepseek", "groq", "anthropic", "openai", "gemini"],
+}
+
+
+def _provider_key_present(provider: str) -> bool:
+    return {
+        "openai": bool(OPENAI_API_KEY),
+        "anthropic": bool(ANTHROPIC_API_KEY),
+        "gemini": bool(GEMINI_API_KEY),
+        "groq": bool(GROQ_API_KEY),
+        "deepseek": bool(DEEPSEEK_API_KEY),
+        "assemblyai": bool(ASSEMBLYAI_API_KEY),
+    }.get(provider, False)
+
+
+@app.get("/api/admin/ai-providers")
+async def admin_get_ai_providers(admin: User = Depends(get_admin_user),
+                                 db: AsyncSession = Depends(get_db)):
+    """Return current active provider per task, the available options, and
+    which providers have an API key present in the environment."""
+    current = {}
+    for key in PROVIDER_OPTIONS:
+        current[key] = await get_provider(db, key)
+    keys_present = {
+        p: _provider_key_present(p)
+        for opts in PROVIDER_OPTIONS.values() for p in opts
+    }
+    return {
+        "current": current,
+        "options": PROVIDER_OPTIONS,
+        "keys_present": keys_present,
+        "env_defaults": _ENV_PROVIDER_DEFAULTS,
+    }
+
+
+@app.post("/api/admin/ai-providers")
+async def admin_set_ai_providers(body: dict,
+                                 admin: User = Depends(get_admin_user),
+                                 db: AsyncSession = Depends(get_db)):
+    """Save the active provider per task. Body: {transcribe_provider, ...}."""
+    saved = {}
+    for key, allowed in PROVIDER_OPTIONS.items():
+        if key not in body:
+            continue
+        value = str(body[key]).lower().strip()
+        if value not in allowed:
+            raise HTTPException(status_code=400,
+                                detail=f"Invalid {key}: {value}")
+        res = await db.execute(select(AppSetting).where(AppSetting.key == key))
+        row = res.scalar_one_or_none()
+        if row:
+            row.value = value
+        else:
+            db.add(AppSetting(key=key, value=value))
+        saved[key] = value
+    await db.commit()
+    _invalidate_provider_cache()
+    return {"saved": saved, "ok": True}
+
+
 @app.get("/api/admin/users")
 async def admin_users(admin: User = Depends(get_admin_user),
                       db: AsyncSession = Depends(get_db)):

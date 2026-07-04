@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import { api, errMsg, CATEGORY_META } from '../lib/api';
 
-const TABS = ['Analytics', 'Users', 'Submissions', 'Prompts', 'Exam Questions', 'Recent Topics', 'Simulator Prompts', 'Blog'];
+const TABS = ['Analytics', 'Users', 'Submissions', 'Prompts', 'Exam Questions', 'Recent Topics', 'Simulator Prompts', 'Blog', 'AI Providers'];
 
 export default function Admin() {
   const [tab, setTab] = useState('Analytics');
@@ -27,6 +27,7 @@ export default function Admin() {
         {tab === 'Recent Topics' && <Topics />}
         {tab === 'Simulator Prompts' && <SimPrompts />}
         {tab === 'Blog' && <Blog />}
+        {tab === 'AI Providers' && <AIProviders />}
       </div>
     </main>
   );
@@ -73,6 +74,90 @@ const Stat = ({ label, value }) => (
   <div className="card p-5"><p className="text-sm text-gray-500">{label}</p><p className="mt-1 font-heading text-3xl font-bold">{value}</p></div>
 );
 const Spinner = () => <div className="flex justify-center py-16"><div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" /></div>;
+
+/* -------------------------------------------------------- AI Providers ---- */
+const AI_LABELS = {
+  transcribe_provider: 'Transcription (audio → text)',
+  speaking_grader_provider: 'Speaking analysis',
+  writing_grader_provider: 'Writing analysis',
+};
+
+function AIProviders() {
+  const [data, setData] = useState(null);
+  const [sel, setSel] = useState({});
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(() => {
+    api.get('/api/admin/ai-providers')
+      .then((r) => { setData(r.data); setSel(r.data.current || {}); })
+      .catch((e) => toast.error(errMsg(e)));
+  }, []);
+  useEffect(load, [load]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.post('/api/admin/ai-providers', sel);
+      toast.success('AI providers updated');
+      load();
+    } catch (e) { toast.error(errMsg(e)); }
+    finally { setSaving(false); }
+  };
+
+  if (!data) return <Spinner />;
+  const dirty = Object.keys(sel).some((k) => sel[k] !== data.current[k]);
+
+  return (
+    <div className="space-y-6">
+      <section className="card space-y-5 p-6">
+        <div>
+          <h2 className="font-heading font-semibold">AI Providers</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            Choose which AI service handles each task. API keys are configured on the server; this only selects the active provider.
+          </p>
+        </div>
+
+        {Object.keys(data.options).map((key) => (
+          <div key={key}>
+            <label className="block text-sm font-semibold text-gray-800">{AI_LABELS[key] || key}</label>
+            <select
+              value={sel[key] || ''}
+              onChange={(e) => setSel((s) => ({ ...s, [key]: e.target.value }))}
+              className="input mt-2 max-w-md"
+              data-testid={`ai-select-${key}`}>
+              {data.options[key].map((p) => (
+                <option key={p} value={p} disabled={!data.keys_present[p]}>
+                  {p}{!data.keys_present[p] ? ' — no API key set' : ''}{p === data.env_defaults[key] ? '  (default)' : ''}
+                </option>
+              ))}
+            </select>
+            {sel[key] && !data.keys_present[sel[key]] && (
+              <p className="mt-1 text-sm font-semibold text-red-600">No API key for “{sel[key]}” on the server — analysis will fail.</p>
+            )}
+          </div>
+        ))}
+
+        <div className="flex items-center gap-3">
+          <button onClick={save} disabled={!dirty || saving} className="btn-primary disabled:opacity-50" data-testid="ai-save">
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
+          {dirty && <span className="text-sm text-amber-600">Unsaved changes</span>}
+        </div>
+      </section>
+
+      <section className="card p-6">
+        <h2 className="font-heading font-semibold">API keys available on server</h2>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {Object.keys(data.keys_present).map((p) => (
+            <span key={p} className={`pill ${data.keys_present[p] ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
+              {p} {data.keys_present[p] ? '✓' : '✗'}
+            </span>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
 
 /* ---------------------------------------------------------------- Users ---- */
 function Users() {
