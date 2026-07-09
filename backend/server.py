@@ -735,18 +735,23 @@ STATIC_DISTRACTORS = {
 
 
 async def generate_distractor(error_text: str, correction: str,
-                              category: str) -> str:
-    """Batch-time MCQ distractor; falls back to a static map."""
+                              category: str, db=None) -> str:
+    """Batch-time MCQ distractor; falls back to a static map.
+
+    Uses the active grader provider (e.g. Groq) rather than a hardcoded slow
+    model, so it doesn't bottleneck speaking/writing analysis.
+    """
     prompt = (f'A French learner wrote: "{error_text}". The correction is '
               f'"{correction}". Produce ONE plausible but INCORRECT alternative '
               f"a learner might choose (same length/style). Return ONLY the "
               f"alternative text, nothing else.")
-    loop = asyncio.get_event_loop()
     try:
-        if ANTHROPIC_API_KEY:
-            raw = await loop.run_in_executor(
-                None, _call_anthropic, ANTHROPIC_MODEL,
-                "You generate plausible incorrect French answer options.", prompt)
+        provider = (await get_provider(db, "writing_grader_provider")
+                    if db is not None else WRITING_GRADER_PROVIDER)
+        raw = await _grade_with_provider(
+            provider, "You generate plausible incorrect French answer options.",
+            prompt)
+        if raw:
             raw = _strip_fences(raw).strip().strip('"')
             if raw and raw.lower() != correction.lower():
                 return raw[:200]
@@ -785,7 +790,7 @@ async def record_mistakes(db: AsyncSession, user_id: str, source: str,
                                             "réponse incorrecte")
         if generate_distractors:
             distractor = await generate_distractor(
-                err["error"], err["correction"], err["category"])
+                err["error"], err["correction"], err["category"], db=db)
         db.add(Mistake(
             mistake_id=new_id("mst"),
             user_id=user_id,
