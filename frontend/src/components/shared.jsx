@@ -184,22 +184,31 @@ export async function streamAnalysis(backendUrl, payload, { onStage, onComplete,
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buf = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    const events = buf.split('\n\n');
-    buf = events.pop();
-    for (const ev of events) {
-      const type = (ev.match(/^event: (.+)$/m) || [])[1];
-      const data = (ev.match(/^data: (.+)$/m) || [])[1];
-      if (!type || !data) continue;
-      const parsed = JSON.parse(data);
-      if (type === 'stage') onStage?.(parsed.stage);
-      else if (type === 'complete') onComplete?.(parsed);
-      else if (type === 'error') onError?.(parsed.detail);
+  let settled = false;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const events = buf.split('\n\n');
+      buf = events.pop();
+      for (const ev of events) {
+        const type = (ev.match(/^event: (.+)$/m) || [])[1];
+        const data = (ev.match(/^data: (.+)$/m) || [])[1];
+        if (!type || !data) continue; // keep-alive comments land here
+        const parsed = JSON.parse(data);
+        if (type === 'stage') onStage?.(parsed.stage);
+        else if (type === 'complete') { settled = true; onComplete?.(parsed); }
+        else if (type === 'error') { settled = true; onError?.(parsed.detail, parsed.status); }
+      }
     }
+  } catch (e) {
+    if (!settled) { settled = true; onError?.('Connexion interrompue pendant l’analyse. Réessayez.'); }
+    return;
   }
+  // Stream closed with no result event — a proxy timeout or a dropped
+  // connection. Without this the caller stays stuck on the progress spinner.
+  if (!settled) onError?.('L’analyse s’est interrompue avant la fin. Réessayez.');
 }
 
 /* ----------------------------------------------- ErrorHighlightedText ---- */

@@ -550,6 +550,9 @@ Hard capping rules:
 
 improvement_suggestions: 3-5 concrete English tips. linking_words: French connectors the writer should use. vocabulary_suggestions: French words/phrases to enrich the text."""
 
+AI_UNAVAILABLE_DETAIL = ("Correction indisponible : le service d'analyse IA ne "
+                         "répond pas. Réessayez dans un instant.")
+
 FALLBACK_ANALYSIS = {
     "errors": [],
     "overall_score": 0,
@@ -654,12 +657,24 @@ def _grader_backend(provider: str):
     return _call_anthropic, ANTHROPIC_API_KEY, ANTHROPIC_MODEL
 
 
+_PLACEHOLDER_KEY_HINTS = ("your_", "your-", "_here", "changeme", "xxxx")
+
+
+def _key_is_usable(key: str) -> bool:
+    """False for an empty key or an obvious .env placeholder value."""
+    k = (key or "").strip().lower()
+    if not k:
+        return False
+    return not any(h in k for h in _PLACEHOLDER_KEY_HINTS)
+
+
 async def _grade_with_provider(provider: str, system_prompt: str,
                                user_text: str) -> Optional[str]:
     """Run a grading call on the chosen provider. Returns raw text or None."""
     fn, key, model = _grader_backend(provider)
-    if not key:
-        log.warning("No API key set for grading provider '%s'", provider)
+    if not _key_is_usable(key):
+        log.warning("Missing or placeholder API key for grading provider '%s' "
+                    "- set a real key in backend/.env", provider)
         return None
     loop = asyncio.get_event_loop()
     for attempt in range(2):
@@ -1460,6 +1475,8 @@ async def get_prompt(prompt_id: str, db: AsyncSession = Depends(get_db)):
 # Analysis: streaming SSE + legacy
 # ----------------------------------------------------------------------------
 STAGES = ["parsing", "grammar", "spelling", "conjugation", "style", "generating"]
+STREAM_PING_SECONDS = 10.0
+STREAM_MAX_WAIT_SECONDS = 180.0
 
 
 def _sse(event: str, data: Any) -> str:
@@ -1480,7 +1497,31 @@ async def analyze_stream(body: AnalyzeIn,
             for stage in STAGES:
                 yield _sse("stage", {"stage": stage})
                 await asyncio.sleep(0.6)
-            analysis = await task
+            # The stages take ~4s; the model can take far longer. Nginx and the
+            # GCP load balancer drop an upstream that goes silent (default
+            # proxy_read_timeout 60s), which would strand the client on the
+            # spinner, so ping while we wait.
+            waited = 0.0
+            while True:
+                try:
+                    analysis = await asyncio.wait_for(
+                        asyncio.shield(task), timeout=STREAM_PING_SECONDS)
+                    break
+                except asyncio.TimeoutError:
+                    waited += STREAM_PING_SECONDS
+                    if waited >= STREAM_MAX_WAIT_SECONDS:
+                        task.cancel()
+                        log.warning("Grading exceeded %ss - giving up",
+                                    STREAM_MAX_WAIT_SECONDS)
+                        yield _sse("error", {"detail": AI_UNAVAILABLE_DETAIL,
+                                             "status": 504})
+                        return
+                    yield ": keep-alive\n\n"
+            if analysis.get("ai_unavailable"):
+                # Don't persist an empty correction or burn a credit for it.
+                yield _sse("error", {"detail": AI_UNAVAILABLE_DETAIL,
+                                     "status": 503})
+                return
             sub = await persist_submission(
                 db, user, body.text, body.prompt_id, analysis, source=source)
             yield _sse("complete", sub)
@@ -1504,6 +1545,8 @@ async def create_submission(body: AnalyzeIn,
     user = await enforce_free_limit(db, user)
     source = body.source if body.source in {"practice", "paste"} else "practice"
     analysis = await analyze_text_with_ai(body.text, body.topic or body.label, db=db)
+    if analysis.get("ai_unavailable"):
+        raise HTTPException(status_code=503, detail=AI_UNAVAILABLE_DETAIL)
     sub = await persist_submission(db, user, body.text, body.prompt_id,
                                    analysis, source=source)
     return sub
