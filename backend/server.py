@@ -550,8 +550,11 @@ Hard capping rules:
 
 improvement_suggestions: 3-5 concrete English tips. linking_words: French connectors the writer should use. vocabulary_suggestions: French words/phrases to enrich the text."""
 
-AI_UNAVAILABLE_DETAIL = ("Correction indisponible : le service d'analyse IA ne "
-                         "répond pas. Réessayez dans un instant.")
+AI_UNAVAILABLE_DETAIL = ("Correction indisponible : le correcteur IA a refusé la "
+                         "requête (clé API ou quota du fournisseur). "
+                         "Réessayez dans un instant.")
+AI_TIMEOUT_DETAIL = ("Correction indisponible : l'analyse a dépassé le délai "
+                     "maximum. Réessayez dans un instant.")
 
 FALLBACK_ANALYSIS = {
     "errors": [],
@@ -657,7 +660,9 @@ def _grader_backend(provider: str):
     return _call_anthropic, ANTHROPIC_API_KEY, ANTHROPIC_MODEL
 
 
-_PLACEHOLDER_KEY_HINTS = ("your_", "your-", "_here", "changeme", "xxxx")
+# Substrings that cannot occur in a real provider key (they are alphanumeric
+# plus dashes), so matching one means the .env value is still a template.
+_PLACEHOLDER_KEY_HINTS = ("your_", "your-", "_here", "changeme", "replace_me")
 
 
 def _key_is_usable(key: str) -> bool:
@@ -1513,7 +1518,7 @@ async def analyze_stream(body: AnalyzeIn,
                         task.cancel()
                         log.warning("Grading exceeded %ss - giving up",
                                     STREAM_MAX_WAIT_SECONDS)
-                        yield _sse("error", {"detail": AI_UNAVAILABLE_DETAIL,
+                        yield _sse("error", {"detail": AI_TIMEOUT_DETAIL,
                                              "status": 504})
                         return
                     yield ": keep-alive\n\n"
