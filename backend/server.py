@@ -87,6 +87,9 @@ ASSEMBLYAI_BASE_URL = os.environ.get("ASSEMBLYAI_BASE_URL", "https://api.assembl
 ASSEMBLYAI_LANGUAGE = os.environ.get("ASSEMBLYAI_LANGUAGE", "fr")
 FREE_MONTHLY_LIMIT = 5
 FREE_MODEL_ANSWER_LIMIT = 3
+# Open-ended "talk to the AI" practice is cheaper to allow than a graded task,
+# but still costs tokens, so free users get a small monthly allowance.
+FREE_CONVERSATION_LIMIT = 2
 
 # ---- Runtime provider selection (Admin panel overrides the .env defaults) ----
 # .env values are the fallback defaults; the Admin panel can override them and
@@ -476,6 +479,29 @@ async def enforce_free_limit(db: AsyncSession, user: User) -> User:
     return user
 
 
+async def enforce_free_conversation_limit(db: AsyncSession, user: User) -> User:
+    """Free-conversation allowance, counted from the conversations already
+    graded this month. Derived from the submissions table rather than a new
+    user column, so this needs no migration on an existing database."""
+    user = await check_and_reset_monthly(db, user)
+    if user.subscription_status == "premium":
+        return user
+    now = now_utc()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    used = await db.scalar(
+        select(func.count()).select_from(Submission).where(
+            Submission.user_id == user.user_id,
+            Submission.source == "conversation",
+            Submission.created_at >= month_start,
+        ))
+    if (used or 0) >= FREE_CONVERSATION_LIMIT:
+        raise HTTPException(
+            status_code=402,
+            detail=(f"Vous avez utilisé vos {FREE_CONVERSATION_LIMIT} conversations "
+                    "gratuites ce mois-ci. Passez à la version Pro pour continuer."))
+    return user
+
+
 async def consume_credit(db: AsyncSession, user_id: str):
     await db.execute(
         sa_update(User).where(User.user_id == user_id)
@@ -835,7 +861,10 @@ async def record_mistakes(db: AsyncSession, user_id: str, source: str,
 
 async def persist_submission(db: AsyncSession, user: User, text: str,
                              prompt_id: Optional[str], analysis: dict,
-                             source: str = "practice") -> dict:
+                             source: str = "practice",
+                             consume: bool = True) -> dict:
+    """Save a graded piece of work. `consume=False` for flows metered by their
+    own allowance, so they do not also spend a monthly AI credit."""
     sub = Submission(
         submission_id=new_id("sub"),
         user_id=user.user_id,
@@ -854,7 +883,8 @@ async def persist_submission(db: AsyncSession, user: User, text: str,
     db.add(sub)
     await db.commit()
     await record_mistakes(db, user.user_id, source, sub.submission_id, analysis)
-    await consume_credit(db, user.user_id)
+    if consume:
+        await consume_credit(db, user.user_id)
     streak = await update_streak(db, user.user_id)
     out = _row_to_dict(sub)
     out["streak"] = streak
@@ -1141,6 +1171,9 @@ class ConverseIn(BaseModel):
 class ConverseGradeIn(BaseModel):
     consigne: str = Field(min_length=1, max_length=4000)
     history: List[DialogueTurn] = Field(default_factory=list, max_length=MAX_DIALOGUE_TURNS)
+    # "tache2" spends a normal AI credit; "free" draws on the small
+    # open-ended-conversation allowance instead.
+    mode: str = Field(default="tache2", pattern="^(tache2|free)$")
 
 
 class AnalyzeIn(BaseModel):
@@ -2110,8 +2143,13 @@ async def speaking_converse(body: ConverseIn,
 async def speaking_converse_grade(body: ConverseGradeIn,
                                   user: User = Depends(get_current_user),
                                   db: AsyncSession = Depends(get_db)):
-    """Grade a finished Tache 2 conversation. One credit per conversation."""
-    user = await enforce_free_limit(db, user)
+    """Grade a finished conversation. Tache 2 spends one AI credit; open-ended
+    practice draws on the separate free-conversation allowance."""
+    free_mode = body.mode == "free"
+    if free_mode:
+        user = await enforce_free_conversation_limit(db, user)
+    else:
+        user = await enforce_free_limit(db, user)
     history = [t.model_dump() for t in body.history]
     analysis = await grade_interaction(body.consigne, history, db=db)
     transcript = "\n".join(
@@ -2120,7 +2158,8 @@ async def speaking_converse_grade(body: ConverseGradeIn,
     analysis["transcript"] = transcript
     sub = await persist_submission(
         db, user, transcript or "(no speech detected)", None, analysis,
-        source="speaking")
+        source="conversation" if free_mode else "speaking",
+        consume=not free_mode)
     analysis["submission_id"] = sub.get("submission_id")
     analysis["streak"] = sub.get("streak")
     return analysis

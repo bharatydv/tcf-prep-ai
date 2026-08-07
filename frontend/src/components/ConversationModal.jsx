@@ -9,8 +9,9 @@ import { api, errMsg } from '../lib/api';
 /* Tache 2 is a live roleplay: the candidate asks, an examiner answers. This
    modal plays that examiner - live speech in, AI reply spoken back out. */
 
-const PREP_SECONDS = 120;   // the 2 min of preparation the task includes
-const SPEAK_SECONDS = 210;  // the remainder of the 5 min 30 s budget
+const TACHE2_PREP_SECONDS = 120;   // the 2 min of preparation the task includes
+const TACHE2_SPEAK_SECONDS = 210;  // the remainder of the 5 min 30 s budget
+const FREE_TALK_SECONDS = 600;     // open practice: a longer, unpressured window
 
 const fmt = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
@@ -21,7 +22,15 @@ const SpeechRec = typeof window !== 'undefined'
   : null;
 const HAS_LIVE_STT = Boolean(SpeechRec);
 
-export default function ConversationModal({ consigne, tacheTitle, onCancel, onGraded }) {
+export default function ConversationModal({
+  consigne, tacheTitle, onCancel, onGraded, mode = 'tache2',
+}) {
+  // Free practice has no exam framing: no preparation, a longer window, and it
+  // is metered by its own monthly allowance rather than an AI credit.
+  const isFree = mode === 'free';
+  const PREP_SECONDS = isFree ? 0 : TACHE2_PREP_SECONDS;
+  const SPEAK_SECONDS = isFree ? FREE_TALK_SECONDS : TACHE2_SPEAK_SECONDS;
+
   const [phase, setPhase] = useState('brief');      // brief | prep | live | grading
   const [prepLeft, setPrepLeft] = useState(PREP_SECONDS);
   const [left, setLeft] = useState(SPEAK_SECONDS);
@@ -45,6 +54,7 @@ export default function ConversationModal({ consigne, tacheTitle, onCancel, onGr
   // other, and a plain const would capture a stale version.
   const sendTurnRef = useRef(null);
   const listenRef = useRef(null);
+  const goLiveRef = useRef(null);
 
   useEffect(() => { turnsRef.current = turns; }, [turns]);
   useEffect(() => { mutedRef.current = muted; }, [muted]);
@@ -227,13 +237,15 @@ export default function ConversationModal({ consigne, tacheTitle, onCancel, onGr
       return toast.error("Impossible d'accéder au microphone. Vérifiez les autorisations.");
     }
     setChecking(false);
-    setPhase('prep');
+    if (PREP_SECONDS > 0) setPhase('prep');
+    else goLiveRef.current?.();
   };
 
   const goLive = useCallback(() => {
     setPhase('live');
     exchange([]);            // the agent opens the scene in character
   }, [exchange]);
+  useEffect(() => { goLiveRef.current = goLive; }, [goLive]);
 
   const finish = useCallback(async () => {
     if (doneRef.current && phase === 'grading') return;
@@ -241,7 +253,7 @@ export default function ConversationModal({ consigne, tacheTitle, onCancel, onGr
     setPhase('grading');
     try {
       const { data } = await api.post('/api/speaking/converse/grade', {
-        consigne, history: turnsRef.current,
+        consigne, history: turnsRef.current, mode,
       });
       onGraded(data);
     } catch (err) {
@@ -291,7 +303,9 @@ export default function ConversationModal({ consigne, tacheTitle, onCancel, onGr
           <div className="min-w-0 flex-1">
             <p className="font-heading text-sm font-bold leading-snug">{tacheTitle}</p>
             <p className="text-[11px] text-white/80">
-              Conversation en direct · Préparation : {fmt(PREP_SECONDS)} · Échange : {fmt(SPEAK_SECONDS)}
+              {isFree
+                ? `Conversation libre · ${fmt(SPEAK_SECONDS)}`
+                : `Conversation en direct · Préparation : ${fmt(PREP_SECONDS)} · Échange : ${fmt(SPEAK_SECONDS)}`}
             </p>
           </div>
           {phase === 'live' && (
@@ -320,8 +334,13 @@ export default function ConversationModal({ consigne, tacheTitle, onCancel, onGr
         {phase === 'brief' && (
           <div className="px-6 py-6 text-center">
             <p className="text-sm leading-relaxed text-gray-600">
-              C'est un échange à deux : <strong>vous posez les questions</strong>, l'agent vous répond.
-              Vous aurez {fmt(PREP_SECONDS)} de préparation, puis {fmt(SPEAK_SECONDS)} de conversation.
+              {isFree ? (
+                <>Parlez librement en français avec l'IA — elle vous répond et relance la
+                  conversation. Vous avez {fmt(SPEAK_SECONDS)}, et vous pouvez arrêter quand vous voulez.</>
+              ) : (
+                <>C'est un échange à deux : <strong>vous posez les questions</strong>, l'agent vous répond.
+                  Vous aurez {fmt(PREP_SECONDS)} de préparation, puis {fmt(SPEAK_SECONDS)} de conversation.</>
+              )}
             </p>
             {!HAS_LIVE_STT && (
               <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">
@@ -334,7 +353,8 @@ export default function ConversationModal({ consigne, tacheTitle, onCancel, onGr
                 className="btn-primary flex-1 justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600 disabled:opacity-60">
                 {checking
                   ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> Micro…</>
-                  : <><Microphone size={16} weight="fill" /> Commencer la préparation</>}
+                  : <><Microphone size={16} weight="fill" />
+                      {isFree ? 'Commencer à parler' : 'Commencer la préparation'}</>}
               </button>
               <button onClick={cancel} className="btn-outline flex-1 justify-center">Annuler</button>
             </div>
