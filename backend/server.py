@@ -883,6 +883,104 @@ If the answer does not address the task, cap the score at B1.
 suggestions: 3-5 concrete English tips to improve THIS spoken answer. vocabulary_suggestions: French words/phrases to enrich it. You are grading a transcript, so do NOT comment on pronunciation or accent."""
 
 
+# ----------------------------------------------------------------------------
+# Tache 2 - Exercice en Interaction: live two-way roleplay
+# ----------------------------------------------------------------------------
+# In the real exam the candidate ASKS the questions and an examiner plays the
+# other party. The agent below is that other party, not a tutor: it must never
+# correct the candidate mid-conversation (that happens in the grade afterwards).
+INTERACTION_AGENT_SYSTEM = """Tu joues le rôle de l'interlocuteur dans un jeu de rôle de l'épreuve d'expression orale du TCF Canada (Tâche 2 : Exercice en Interaction).
+
+Le candidat doit TE poser des questions pour obtenir des informations. Tu es la personne décrite dans la consigne (agent d'accueil, organisateur, employé, voisin, etc.).
+
+RÈGLES ABSOLUES :
+- Réponds UNIQUEMENT par ta réplique, en français parlé naturel. Jamais de préfixe de nom, jamais de guillemets, jamais de commentaire, jamais de JSON.
+- Reste toujours dans le personnage. Ne corrige JAMAIS le français du candidat et ne parle jamais de son niveau : tu es un personnage, pas un professeur.
+- Sois BREF : 1 à 3 phrases, comme dans une vraie conversation orale.
+- Donne l'information PARTIELLEMENT, de façon plausible : invente des détails concrets (horaires, prix, dates, documents) mais n'énumère pas tout d'un coup. Le candidat doit devoir poser d'autres questions.
+- Vouvoie le candidat, sauf si la consigne décrit clairement une situation informelle (ami, famille) — dans ce cas tutoie.
+- Si le candidat te salue, réponds à la salutation puis invite-le à poser sa question.
+- Si le candidat se tait, dit quelque chose d'incompréhensible ou s'écarte du sujet, relance-le gentiment DANS le personnage (« Pardon, je n'ai pas bien entendu, vous pouvez répéter ? », « Vous avez d'autres questions ? »).
+- Ne pose pas toi-même une longue série de questions : c'est le candidat qui mène l'échange.
+- N'utilise jamais l'anglais."""
+
+INTERACTION_GRADER_SYSTEM = """You are a certified TCF Canada examiner grading Tâche 2 (Exercice en Interaction) - a two-way roleplay in which the CANDIDATE had to ask questions to obtain information from an agent.
+
+You receive the CONSIGNE (the scenario) and the full DIALOGUE. Grade ONLY the candidate's turns. The transcript comes from speech recognition, so judge charitably where a word is clearly a transcription artifact rather than a learner error.
+
+Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
+{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate obtained the information the consigne asked for", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"]}
+
+Because this task is INTERACTION, weigh these alongside grammar and vocabulary:
+1. QUESTION QUALITY - did the candidate actually ask questions, and were they well formed? Flat statements, or questions built only by raising intonation ("vous avez des places ?") where inversion or est-ce que is expected, are the single most common Tâche 2 weakness. Report them as errors.
+2. COVERAGE - did the candidate obtain every piece of information the consigne listed? Set answers_question false if points were missed, and say which in relevance_comment.
+3. REGISTER - consistent vouvoiement in a formal scenario (or tutoiement in an informal one), plus politeness formulas (bonjour, s'il vous plaît, je voudrais savoir, merci).
+4. INTERACTION - did the candidate react to the agent's answers and follow up, or ignore them and read a list?
+
+CEFR scoring (overall_score 0-100, tcf_level one of A1,A2,B1,B2,C1,C2):
+- A1 (5-19) A2 (20-39) B1 (40-54) B2 (55-69) C1 (70-84) C2 (85-100).
+Cap the score at B1 if the candidate asked fewer than three real questions or missed most of the required information.
+
+suggestions: 3-5 concrete English tips for THIS conversation. vocabulary_suggestions: French phrases that would have made the asking more idiomatic. You are grading a transcript, so do NOT comment on pronunciation or accent."""
+
+# Keeps one exchange bounded so a runaway session cannot grow the prompt forever.
+MAX_DIALOGUE_TURNS = 40
+
+
+def _render_dialogue(history: list, consigne: str) -> str:
+    """Flatten the dialogue into the (system_prompt, user_text) shape every
+    provider adapter already accepts, so no new multi-turn adapter is needed."""
+    lines = [f"CONSIGNE (le scénario du jeu de rôle) :\n{consigne}", "", "DIALOGUE :"]
+    for turn in history[-MAX_DIALOGUE_TURNS:]:
+        who = "Candidat" if turn.get("role") == "candidate" else "Agent"
+        text = str(turn.get("text", "")).strip()
+        if text:
+            lines.append(f"{who} : {text}")
+    return "\n".join(lines)
+
+
+async def interaction_reply(consigne: str, history: list, db=None) -> str:
+    """Next in-character line from the agent. Empty string on provider failure."""
+    prompt = (_render_dialogue(history, consigne) +
+              "\n\nDonne maintenant la prochaine réplique de l'Agent, et rien d'autre.")
+    provider = (await get_provider(db, "speaking_grader_provider")) if db is not None else SPEAKING_GRADER_PROVIDER
+    raw = await _grade_with_provider(provider, INTERACTION_AGENT_SYSTEM, prompt)
+    if not raw:
+        return ""
+    reply = _strip_fences(raw).strip()
+    # Models occasionally prefix the speaker label despite the instruction.
+    for prefix in ("Agent :", "Agent:", "AGENT :", "AGENT:"):
+        if reply.startswith(prefix):
+            reply = reply[len(prefix):].strip()
+    return reply[:600]
+
+
+async def grade_interaction(consigne: str, history: list, db=None) -> dict:
+    """Grade a finished Tache 2 dialogue, returning the same shape as
+    analyze_speaking_with_ai so the existing result UI renders unchanged."""
+    said = [t for t in history if t.get("role") == "candidate" and str(t.get("text", "")).strip()]
+    if not said:
+        return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
+                "relevance_comment": "No speech was detected during the conversation.",
+                "suggestions": []}
+    provider = (await get_provider(db, "speaking_grader_provider")) if db is not None else SPEAKING_GRADER_PROVIDER
+    raw = await _grade_with_provider(provider, INTERACTION_GRADER_SYSTEM,
+                                     _render_dialogue(history, consigne))
+    if raw is None:
+        return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
+                "relevance_comment": "", "suggestions": []}
+    try:
+        result = _validate_speaking(json.loads(_strip_fences(raw)))
+        _, _, model = _grader_backend(provider)
+        result["ai_provider"] = provider
+        result["ai_model"] = model
+        return result
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not parse interaction JSON (%s): %s", provider, exc)
+        return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
+                "relevance_comment": "", "suggestions": []}
+
+
 def _transcribe_openai(audio_bytes: bytes, filename: str) -> str:
     import io
     from openai import OpenAI
@@ -1028,6 +1126,21 @@ class RegisterIn(BaseModel):
 class LoginIn(BaseModel):
     email: EmailStr
     password: str
+
+
+class DialogueTurn(BaseModel):
+    role: str = Field(pattern="^(candidate|agent)$")
+    text: str = Field(max_length=2000)
+
+
+class ConverseIn(BaseModel):
+    consigne: str = Field(min_length=1, max_length=4000)
+    history: List[DialogueTurn] = Field(default_factory=list, max_length=MAX_DIALOGUE_TURNS)
+
+
+class ConverseGradeIn(BaseModel):
+    consigne: str = Field(min_length=1, max_length=4000)
+    history: List[DialogueTurn] = Field(default_factory=list, max_length=MAX_DIALOGUE_TURNS)
 
 
 class AnalyzeIn(BaseModel):
@@ -1957,6 +2070,53 @@ async def speaking_analyze(question: str = Form(...),
         raise HTTPException(status_code=400, detail="Empty audio upload")
     transcript = await transcribe_audio(audio_bytes, audio.filename or "audio.webm", db=db)
     analysis = await analyze_speaking_with_ai(transcript, question, db=db)
+    analysis["transcript"] = transcript
+    sub = await persist_submission(
+        db, user, transcript or "(no speech detected)", None, analysis,
+        source="speaking")
+    analysis["submission_id"] = sub.get("submission_id")
+    analysis["streak"] = sub.get("streak")
+    return analysis
+
+
+@app.post("/api/speaking/turn/transcribe")
+async def speaking_turn_transcribe(audio: UploadFile = File(...),
+                                   user: User = Depends(get_current_user),
+                                   db: AsyncSession = Depends(get_db)):
+    """Transcribe a single conversational turn. Used by browsers without live
+    speech recognition; costs no credit because the graded unit is the whole
+    conversation, not the turn."""
+    audio_bytes = await audio.read()
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio upload")
+    text = await transcribe_audio(audio_bytes, audio.filename or "turn.webm", db=db)
+    return {"text": text}
+
+
+@app.post("/api/speaking/converse")
+async def speaking_converse(body: ConverseIn,
+                            user: User = Depends(get_current_user),
+                            db: AsyncSession = Depends(get_db)):
+    """One in-character reply from the roleplay partner (Tache 2)."""
+    history = [t.model_dump() for t in body.history]
+    reply = await interaction_reply(body.consigne, history, db=db)
+    if not reply:
+        raise HTTPException(status_code=503,
+                            detail="L'interlocuteur IA est momentanément indisponible.")
+    return {"reply": reply}
+
+
+@app.post("/api/speaking/converse/grade")
+async def speaking_converse_grade(body: ConverseGradeIn,
+                                  user: User = Depends(get_current_user),
+                                  db: AsyncSession = Depends(get_db)):
+    """Grade a finished Tache 2 conversation. One credit per conversation."""
+    user = await enforce_free_limit(db, user)
+    history = [t.model_dump() for t in body.history]
+    analysis = await grade_interaction(body.consigne, history, db=db)
+    transcript = "\n".join(
+        f"{'Candidat' if t['role'] == 'candidate' else 'Agent'} : {t['text']}"
+        for t in history if str(t.get("text", "")).strip())
     analysis["transcript"] = transcript
     sub = await persist_submission(
         db, user, transcript or "(no speech detected)", None, analysis,

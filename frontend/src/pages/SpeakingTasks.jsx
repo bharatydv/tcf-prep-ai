@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import {
   ChatText, Handshake, Scales, ClockCountdown, ArrowLeft,
   Lock, CaretRight, BookOpen, Microphone, Star, Clock,
-  Stop, ArrowClockwise, UploadSimple, Lightning, CheckCircle, XCircle, X,
+  Stop, ArrowClockwise, UploadSimple, Lightning, CheckCircle, XCircle, X, ChatsCircle,
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
+import ConversationModal from '../components/ConversationModal';
 
 const TACHES = [
   { n: 1, title: 'Tâche 1 : Entretien Dirigé (Guided Interview)', meta: '2 minutes',
@@ -241,7 +242,10 @@ function RecorderModal({ question, tacheNum, tacheTitle, onCancel, onComplete })
 
 /* ---- Inline recorder/uploader + analysis for a single question ---- */
 function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate, refreshUser, navigate }) {
+  // Tache 2 is an interaction: it opens a live conversation instead of a monologue.
+  const isInteraction = tacheNum === 2;
   const [modalOpen, setModalOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [audioBlob, setAudioBlob] = useState(null);
   const [audioUrl, setAudioUrl] = useState('');
   const [audioName, setAudioName] = useState('answer.webm');
@@ -253,7 +257,7 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
 
   // Only one question may be open at a time.
   useEffect(() => {
-    if (!isActive) setModalOpen(false);
+    if (!isActive) { setModalOpen(false); setChatOpen(false); }
   }, [isActive]);
 
   useEffect(() => () => {
@@ -272,7 +276,17 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
   const openRecorder = () => {
     onActivate();
     reset();
-    setModalOpen(true);
+    if (isInteraction) setChatOpen(true);
+    else setModalOpen(true);
+  };
+
+  // The conversation grades itself, so it hands back a finished analysis.
+  const handleGraded = async (analysis) => {
+    setChatOpen(false);
+    setResult(analysis);
+    await refreshUser();
+    if (!analysis?.transcript) toast.error('Aucune parole détectée pendant la conversation.');
+    else toast.success(`Analyse terminée — niveau ${analysis.tcf_level}`);
   };
 
   // Handed the finished take by the modal; the analysis path below is unchanged.
@@ -357,11 +371,22 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
         />
       )}
 
+      {chatOpen && (
+        <ConversationModal
+          consigne={q.prompt_text}
+          tacheTitle={tacheTitle}
+          onCancel={() => setChatOpen(false)}
+          onGraded={handleGraded}
+        />
+      )}
+
       {!showActions && (
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
           <button onClick={openRecorder}
             className="btn-primary flex-1 justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600">
-            <Microphone size={16} weight="fill" /> Record answer
+            {isInteraction
+              ? <><ChatsCircle size={16} weight="fill" /> Start conversation</>
+              : <><Microphone size={16} weight="fill" /> Record answer</>}
           </button>
           <button onClick={openFilePicker} className="btn-outline flex-1 justify-center">
             <UploadSimple size={16} weight="bold" /> Upload recording
