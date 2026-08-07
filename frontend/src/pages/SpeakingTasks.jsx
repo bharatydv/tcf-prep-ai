@@ -552,11 +552,6 @@ export default function SpeakingTasks() {
       .finally(() => setLoadingQuestions(false));
   };
 
-  const startSimulator = () => {
-    if (!user) return navigate('/login');
-    navigate('/exam-simulator');
-  };
-
   const startFreeTalk = () => {
     if (!user) return navigate('/login');
     setFreeTalkOpen(true);
@@ -627,65 +622,52 @@ export default function SpeakingTasks() {
           {/* RIGHT — simulator / themes / questions */}
           <div className="min-h-[360px]">
             {activeTache === null ? (
-              <div className="flex h-full flex-col justify-center rounded-3xl border border-pink-100 bg-gradient-to-br from-pink-50 to-fuchsia-50 p-8 shadow-soft">
-                <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-pink-100 text-pink-700">
-                  <ClockCountdown size={28} weight="fill" />
+              <div className="flex h-full flex-col justify-center rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-8 shadow-soft">
+                <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-100 text-primary">
+                  <ChatsCircle size={28} weight="fill" />
                 </span>
-                <h2 className="mt-4 font-heading text-xl font-extrabold text-gray-900">AI Exam Simulator</h2>
+                <h2 className="mt-4 font-heading text-xl font-extrabold text-gray-900">Parler avec l'IA</h2>
                 <p className="mt-2 max-w-md text-sm leading-relaxed text-gray-600">
-                  Sit all three tâches under one continuous 12-minute timer, exactly like exam day, and get a CLB score prediction for your complete test.
+                  Une vraie conversation en français : vous parlez, l'IA vous répond à voix haute et
+                  relance l'échange, exactement comme la Tâche 2 — mais sans consigne imposée.
                 </p>
                 <ul className="mt-4 space-y-2 text-sm text-gray-600">
-                  <li className="flex items-center gap-2"><CaretRight size={14} weight="bold" className="text-pink-600" /> Timed, back-to-back tasks</li>
-                  <li className="flex items-center gap-2"><CaretRight size={14} weight="bold" className="text-pink-600" /> Real exam conditions</li>
-                  <li className="flex items-center gap-2"><CaretRight size={14} weight="bold" className="text-pink-600" /> CLB score prediction</li>
+                  <li className="flex items-center gap-2"><CaretRight size={14} weight="bold" className="text-primary" /> Échange à deux, en direct</li>
+                  <li className="flex items-center gap-2"><CaretRight size={14} weight="bold" className="text-primary" /> L'IA répond à voix haute</li>
+                  <li className="flex items-center gap-2"><CaretRight size={14} weight="bold" className="text-primary" /> Correction et niveau à la fin</li>
                 </ul>
-                <button onClick={startSimulator}
-                  className="btn-primary mt-6 w-fit !bg-gradient-to-r !from-pink-600 !to-fuchsia-600">
-                  <ClockCountdown size={18} weight="fill" /> Start Exam Simulator
+                <button onClick={startFreeTalk}
+                  className="btn-primary mt-6 w-fit !bg-gradient-to-r !from-primary !to-fuchsia-600">
+                  <ChatsCircle size={18} weight="fill" /> Commencer à parler
                 </button>
+                <p className="mt-3 text-xs text-gray-400">
+                  {FREE_TALK_LIMIT} conversations gratuites par mois.
+                </p>
 
-                <div className="mt-6 rounded-2xl border border-violet-100 bg-white/70 p-5">
-                  <div className="flex items-center gap-2.5">
-                    <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-100 text-primary">
-                      <ChatsCircle size={18} weight="fill" />
-                    </span>
-                    <h3 className="font-heading text-base font-bold text-gray-900">Parler avec l'IA</h3>
-                  </div>
-                  <p className="mt-2 text-sm leading-relaxed text-gray-600">
-                    Une conversation libre en français avec l'IA, sans consigne et sans chronomètre —
-                    comme la Tâche 2, mais vous choisissez le sujet. {FREE_TALK_LIMIT} conversations gratuites par mois.
-                  </p>
-                  <button onClick={startFreeTalk}
-                    className="btn-outline mt-4 w-fit !py-2 text-sm">
-                    <ChatsCircle size={16} weight="fill" /> Commencer à parler
-                  </button>
-
-                  {freeTalkResult && (
-                    <div className="mt-4 rounded-xl border border-violet-100 bg-violet-50/50 p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-xs font-bold text-gray-900">Dernière conversation</p>
-                        <p className="font-heading text-lg font-extrabold text-primary">
-                          {freeTalkResult.tcf_level}
-                          <span className="ml-1 text-[10px] font-semibold text-gray-400">
-                            {freeTalkResult.overall_score}/100
-                          </span>
-                        </p>
-                      </div>
-                      {freeTalkResult.relevance_comment && (
-                        <p className="mt-1 text-[11px] leading-relaxed text-gray-600">
-                          {freeTalkResult.relevance_comment}
-                        </p>
-                      )}
-                      {freeTalkResult.submission_id && (
-                        <button onClick={() => navigate(`/feedback/${freeTalkResult.submission_id}`)}
-                          className="mt-2 text-[11px] font-bold text-primary hover:underline">
-                          Voir le détail →
-                        </button>
-                      )}
+                {freeTalkResult && (
+                  <div className="mt-5 rounded-2xl border border-violet-100 bg-white/70 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs font-bold text-gray-900">Dernière conversation</p>
+                      <p className="font-heading text-lg font-extrabold text-primary">
+                        {freeTalkResult.tcf_level}
+                        <span className="ml-1 text-[10px] font-semibold text-gray-400">
+                          {freeTalkResult.overall_score}/100
+                        </span>
+                      </p>
                     </div>
-                  )}
-                </div>
+                    {freeTalkResult.relevance_comment && (
+                      <p className="mt-1 text-[11px] leading-relaxed text-gray-600">
+                        {freeTalkResult.relevance_comment}
+                      </p>
+                    )}
+                    {freeTalkResult.submission_id && (
+                      <button onClick={() => navigate(`/feedback/${freeTalkResult.submission_id}`)}
+                        className="mt-2 text-[11px] font-bold text-primary hover:underline">
+                        Voir le détail →
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 <p className="mt-5 text-xs text-gray-400">Or pick a task on the left to practice one at a time.</p>
               </div>
