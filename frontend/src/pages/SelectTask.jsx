@@ -25,32 +25,24 @@ export default function SelectTask() {
   const [themes, setThemes] = useState([]);
   const [loadingThemes, setLoadingThemes] = useState(false);
 
-  // Own-question mode: writing on a topic the learner brings themselves. It is
-  // also what the page leads with, so it shows whenever no tâche is selected.
-  const [ownMode, setOwnMode] = useState(true);
+  // Writing on a topic the learner brings themselves. This is what the page
+  // leads with, so it shows whenever no tâche is selected.
   const [ownQuestion, setOwnQuestion] = useState('');
   const [ownText, setOwnText] = useState('');
+  const ownMode = activeTache === null;
 
   const isPremiumUser = user?.subscription_status === 'premium';
 
-  // Arriving from the landing simulator: open own-question mode, prefilled.
+  // Arriving from the landing simulator: prefill the topic and answer.
   const { state: navState } = useLocation();
   useEffect(() => {
     if (!navState) return;
     if (navState.ownQuestion || navState.text) {
-      setOwnMode(true);
       setActiveTache(null);
       setOwnQuestion(navState.ownQuestion || '');
       setOwnText(navState.text || '');
     }
   }, [navState]);
-
-  const selectOwn = () => {
-    if (!user) return navigate('/login');
-    setOwnMode(true);
-    setActiveTache(null);
-    setThemes([]);
-  };
 
   const startOwn = () => {
     if (!user) return navigate('/login');
@@ -68,7 +60,6 @@ export default function SelectTask() {
 
   const selectTache = (t) => {
     if (!user) return navigate('/login');
-    setOwnMode(false);
     setActiveTache(t.n);
     setThemes([]);
     setLoadingThemes(true);
@@ -105,27 +96,6 @@ export default function SelectTask() {
         <div className="grid gap-6 lg:grid-cols-[minmax(0,360px)_1fr]">
           {/* LEFT — task list (fixed) */}
           <div className="flex flex-col gap-3">
-            <button onClick={selectOwn}
-              className={`flex w-full flex-col rounded-2xl border p-5 text-left shadow-soft transition hover:shadow-lg hover:shadow-violet-200/50 ${
-                ownMode ? 'border-primary bg-violet-50/60 ring-2 ring-primary/30' : 'border-violet-100 bg-white'
-              }`}>
-              <div className="flex items-center gap-3">
-                <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-                  ownMode ? 'bg-primary text-white' : 'bg-violet-100 text-primary'
-                }`}>
-                  <PenNib size={20} weight="fill" />
-                </span>
-                <div className="min-w-0">
-                  <h3 className="font-heading text-sm font-bold leading-snug text-gray-900">Your own question</h3>
-                  <p className="mt-0.5 text-xs font-semibold text-primary">Type a topic and write on it</p>
-                </div>
-                <CaretRight size={18} className={`ml-auto shrink-0 ${ownMode ? 'text-primary' : 'text-gray-300'}`} />
-              </div>
-              <p className="mt-2 text-xs leading-relaxed text-gray-500">
-                Bring any topic — paste a real exam consigne or invent one — and get the same AI correction.
-              </p>
-            </button>
-
             {TACHES.map((t) => {
               const Icon = t.icon;
               const active = activeTache === t.n;
@@ -201,6 +171,10 @@ export default function SelectTask() {
               </div>
             ) : (
               <div>
+                <button onClick={() => { setActiveTache(null); setThemes([]); }}
+                  className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline">
+                  <ArrowLeft size={16} /> Écrire sur mon propre sujet
+                </button>
                 <h2 className="mb-4 font-heading text-lg font-extrabold text-gray-900">
                   Choose a theme — Tâche {activeTache}
                 </h2>
