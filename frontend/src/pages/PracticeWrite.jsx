@@ -1,25 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Timer, Lightning, PenNib, Sparkle, BookOpen, ListChecks, ArrowRight, ArrowLeft,
+  Lightning, PenNib, Sparkle, BookOpen, ArrowRight, ArrowLeft,
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, BACKEND_URL } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { AccentToolbar, AnalysisProgress, streamAnalysis } from '../components/shared';
 
-const TACHE_INFO = {
-  1: { title: 'Tâche 1 : Écrire un message', range: '60 – 120 mots' },
-  2: { title: 'Tâche 2 : Rédiger un article', range: '120 – 150 mots' },
-  3: { title: 'Tâche 3 : Comparer deux avis', range: '120 – 180 mots' },
-};
-
 export default function PracticeWrite() {
   const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const tacheNum = parseInt(searchParams.get('tache'), 10);
-  const tache = TACHE_INFO[tacheNum] || null;
+  // No ?tache= in the URL means Tâche 1, the default writing task.
+  const tacheNum = parseInt(searchParams.get('tache'), 10) || 1;
   const themeId = searchParams.get('theme');
   const [themeQuestion, setThemeQuestion] = useState('');
 
@@ -28,8 +22,6 @@ export default function PracticeWrite() {
   const [ownQuestion, setOwnQuestion] = useState('');
   const [text, setText] = useState('');
   const [stage, setStage] = useState(null);
-  const [timerOn, setTimerOn] = useState(false);
-  const [seconds, setSeconds] = useState(60 * 60);
   const taRef = useRef(null);
 
   // Carried in from the landing simulator or the own-question panel.
@@ -55,18 +47,11 @@ export default function PracticeWrite() {
       .catch(() => {});
   }, [themeId, tacheNum]);
 
-  useEffect(() => {
-    if (!timerOn) return;
-    const id = setInterval(() => setSeconds((s) => Math.max(0, s - 1)), 1000);
-    return () => clearInterval(id);
-  }, [timerOn]);
-
   const freeMode = activePrompt === null;
 
   const selectPrompt = (p) => {
     if (!user) return navigate('/login');
     setActivePrompt(p || null);
-    setSeconds(60 * 60);
     setTimeout(() => taRef.current?.focus(), 50);
   };
 
@@ -116,8 +101,6 @@ export default function PracticeWrite() {
   if (stage) return <main className="px-4 py-16"><AnalysisProgress current={stage} /></main>;
 
   const words = text.trim() ? text.trim().split(/\s+/).length : 0;
-  const mm = String(Math.floor(seconds / 60)).padStart(2, '0');
-  const ss = String(seconds % 60).padStart(2, '0');
 
   return (
     <main className="overflow-x-clip bg-white">
@@ -168,49 +151,7 @@ export default function PracticeWrite() {
 
           {/* RIGHT: writing panel */}
           <div className="rounded-3xl border border-violet-100 bg-white p-5 shadow-xl shadow-violet-200/40 sm:p-6">
-            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-violet-100 pb-4">
-              <div className="min-w-0 flex-1">
-                {freeMode ? (
-                  <>
-                    {tache && (
-                      <span className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-3 py-1 text-xs font-bold text-primary" data-testid="chosen-tache">
-                        {tache.title} · {tache.range}
-                      </span>
-                    )}
-                    <label className="flex items-center gap-2 font-heading text-sm font-bold text-gray-900">
-                      <ListChecks size={16} weight="duotone" className="text-primary" /> Your question / topic
-                    </label>
-                    <input
-                      value={ownQuestion}
-                      maxLength={1000}
-                      onChange={(e) => setOwnQuestion(e.target.value)}
-                      className="input !rounded-xl mt-2 text-sm"
-                      placeholder="Type the question you want to write about\u2026"
-                      data-testid="own-question-input"
-                    />
-                  </>
-                ) : (
-                  <>
-                    <h2 className="font-heading text-lg font-bold text-gray-900">{activePrompt.title}</h2>
-                    <p className="mt-1 max-w-2xl text-sm leading-relaxed text-gray-600">{activePrompt.description}</p>
-                  </>
-                )}
-              </div>
-              <div className="flex shrink-0 items-center gap-2.5">
-                <span className="rounded-xl bg-violet-50 px-3 py-1.5 text-xs font-semibold text-primary" data-testid="word-count">
-                  {words} mots
-                </span>
-                <button
-                  className={`btn-outline !py-1.5 text-sm ${timerOn ? '!border-primary !text-primary' : ''}`}
-                  onClick={() => setTimerOn(!timerOn)}
-                  data-testid="timer-toggle"
-                >
-                  <Timer size={16} /> {timerOn ? `${mm}:${ss}` : '60 min'}
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-4">
+            <div>
               <AccentToolbar textareaRef={taRef} onInsert={(_c, next) => setText(next)} />
               <textarea
                 ref={taRef}
