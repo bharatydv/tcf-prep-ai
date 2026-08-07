@@ -101,6 +101,8 @@ export default function PracticeWrite() {
   if (stage) return <main className="px-4 py-16"><AnalysisProgress current={stage} /></main>;
 
   const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  // What the learner is writing about: their own topic, or the selected test's consigne.
+  const question = freeMode ? ownQuestion.trim() : (activePrompt?.description || '');
 
   return (
     <main className="overflow-x-clip bg-white">
@@ -151,6 +153,15 @@ export default function PracticeWrite() {
 
           {/* RIGHT: writing panel */}
           <div className="rounded-3xl border border-violet-100 bg-white p-5 shadow-xl shadow-violet-200/40 sm:p-6">
+            {question && (
+              <div className="mb-4 rounded-2xl border border-violet-100 bg-violet-50/40 p-4" data-testid="question-display">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-primary">
+                  {freeMode ? 'Votre question' : activePrompt.title}
+                </p>
+                <p className="mt-1 text-sm leading-relaxed text-gray-800">{question}</p>
+              </div>
+            )}
+
             <div>
               <AccentToolbar textareaRef={taRef} onInsert={(_c, next) => setText(next)} />
               <textarea
@@ -160,7 +171,7 @@ export default function PracticeWrite() {
                 onDrop={(e) => e.preventDefault()}
                 lang="fr"
                 className="input paper-textarea mt-3 min-h-[340px] p-6 shadow-card"
-                placeholder="Commencez \u00e0 \u00e9crire en fran\u00e7ais\u2026"
+                placeholder="Commencez à écrire en français…"
                 data-testid="writing-textarea"
               />
             </div>
