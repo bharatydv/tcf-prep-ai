@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  ChatText, Article, Scales, ClockCountdown, ArrowLeft,
+  ChatText, Article, Scales, ArrowLeft,
   Lock, CaretRight, BookOpen, PenNib, Lightning,
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
@@ -25,8 +25,9 @@ export default function SelectTask() {
   const [themes, setThemes] = useState([]);
   const [loadingThemes, setLoadingThemes] = useState(false);
 
-  // Own-question mode: writing on a topic the learner brings themselves.
-  const [ownMode, setOwnMode] = useState(false);
+  // Own-question mode: writing on a topic the learner brings themselves. It is
+  // also what the page leads with, so it shows whenever no tâche is selected.
+  const [ownMode, setOwnMode] = useState(true);
   const [ownQuestion, setOwnQuestion] = useState('');
   const [ownText, setOwnText] = useState('');
 
@@ -84,11 +85,6 @@ export default function SelectTask() {
       return navigate('/pricing');
     }
     navigate(`/practice/write?tache=${activeTache}&theme=${t.theme_id}`);
-  };
-
-  const startSimulator = () => {
-    if (!user) return navigate('/login');
-    navigate('/exam-simulator');
   };
 
   return (
@@ -194,26 +190,6 @@ export default function SelectTask() {
                   {ownText.trim() ? 'Analyser mon texte' : 'Commencer à écrire'}
                 </button>
                 <p className="mt-4 text-xs text-gray-400">Or pick a tâche on the left to practice a real exam format.</p>
-              </div>
-            ) : activeTache === null ? (
-              <div className="flex h-full flex-col justify-center rounded-3xl border border-pink-100 bg-gradient-to-br from-pink-50 to-fuchsia-50 p-8 shadow-soft">
-                <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-pink-100 text-pink-700">
-                  <ClockCountdown size={28} weight="fill" />
-                </span>
-                <h2 className="mt-4 font-heading text-xl font-extrabold text-gray-900">AI Exam Simulator</h2>
-                <p className="mt-2 max-w-md text-sm leading-relaxed text-gray-600">
-                  Sit all three tâches under one continuous 60-minute timer, exactly like exam day, and get a CLB score prediction for your complete test.
-                </p>
-                <ul className="mt-4 space-y-2 text-sm text-gray-600">
-                  <li className="flex items-center gap-2"><CaretRight size={14} weight="bold" className="text-pink-600" /> Timed, back-to-back tasks</li>
-                  <li className="flex items-center gap-2"><CaretRight size={14} weight="bold" className="text-pink-600" /> Real exam conditions</li>
-                  <li className="flex items-center gap-2"><CaretRight size={14} weight="bold" className="text-pink-600" /> CLB score prediction</li>
-                </ul>
-                <button onClick={startSimulator}
-                  className="btn-primary mt-6 w-fit !bg-gradient-to-r !from-pink-600 !to-fuchsia-600">
-                  <ClockCountdown size={18} weight="fill" /> Start Exam Simulator
-                </button>
-                <p className="mt-5 text-xs text-gray-400">Or pick a task on the left to practice one at a time.</p>
               </div>
             ) : loadingThemes ? (
               <div className="flex h-full items-center justify-center rounded-3xl border border-violet-100 bg-white p-8">
