@@ -27,10 +27,20 @@ export default function PracticeWrite() {
   // Carried in from the landing simulator or the own-question panel.
   const { state: navState } = useLocation();
   const autoStartedRef = useRef(false);
+  const defaultedRef = useRef(false);
 
   useEffect(() => {
     api.get('/api/prompts').then(({ data }) => setPrompts(data.prompts)).catch(() => {});
   }, []);
+
+  // Open on Test 1 so the page always shows a question, unless the learner
+  // brought their own topic (landing simulator, own-question panel, a theme).
+  useEffect(() => {
+    if (defaultedRef.current || !prompts.length) return;
+    if (themeId || navState?.ownQuestion || navState?.text) return;
+    defaultedRef.current = true;
+    setActivePrompt(prompts[0]);
+  }, [prompts, themeId, navState]);
 
   // Load a random question from the chosen theme + tâche
   useEffect(() => {
