@@ -137,25 +137,7 @@ export default function PracticeWrite() {
               <BookOpen size={18} weight="duotone" className="text-primary" /> Writing tests
             </p>
 
-            <button
-              onClick={() => selectPrompt(null)}
-              data-testid="start-writing-button"
-              className={`mt-4 flex h-[68px] w-full items-center gap-3 rounded-2xl border px-4 text-left transition ${
-                freeMode
-                  ? 'border-primary bg-white shadow-md shadow-violet-200/60 ring-1 ring-primary'
-                  : 'border-violet-100 bg-white/70 hover:bg-white hover:shadow-sm'
-              }`}
-            >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-primary">
-                <PenNib size={17} weight="fill" />
-              </span>
-              <span className="min-w-0">
-                <span className="block font-heading text-sm font-bold text-gray-900">Your own question</span>
-                <span className="block text-xs text-gray-500">Type a topic and write on it</span>
-              </span>
-            </button>
-
-            <div className="mt-3 space-y-2.5">
+            <div className="mt-4 space-y-2.5">
               {prompts.map((p, i) => {
                 const active = activePrompt?.prompt_id === p.prompt_id;
                 return (
