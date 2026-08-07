@@ -91,7 +91,11 @@ export default function Landing() {
 
   const startSimulator = () => {
     if (!user) { toast.info('Create your free account to run the simulator — 5 free attempts included.'); return navigate('/register'); }
-    navigate('/check-writing', { state: { label: simTopic.trim() || null, prefill: simAnswer.trim() || null } });
+    // Land on the writing task overview with the own-question panel already
+    // filled in, rather than the separate check-writing page.
+    navigate('/practice/tasks', {
+      state: { ownQuestion: simTopic.trim(), text: simAnswer.trim() },
+    });
   };
 
   const plans = [

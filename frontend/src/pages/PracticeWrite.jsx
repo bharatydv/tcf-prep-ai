@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Timer, Lightning, PenNib, Sparkle, BookOpen, ListChecks, ArrowRight, ArrowLeft,
 } from '@phosphor-icons/react';
@@ -31,6 +31,10 @@ export default function PracticeWrite() {
   const [timerOn, setTimerOn] = useState(false);
   const [seconds, setSeconds] = useState(60 * 60);
   const taRef = useRef(null);
+
+  // Carried in from the landing simulator or the own-question panel.
+  const { state: navState } = useLocation();
+  const autoStartedRef = useRef(false);
 
   useEffect(() => {
     api.get('/api/prompts').then(({ data }) => setPrompts(data.prompts)).catch(() => {});
@@ -90,6 +94,24 @@ export default function PracticeWrite() {
       },
     });
   };
+
+  // Prefill the question and answer when arriving from the landing simulator
+  // or the own-question panel on the task overview.
+  useEffect(() => {
+    if (!navState) return;
+    if (navState.ownQuestion) setOwnQuestion(navState.ownQuestion);
+    if (navState.text) setText(navState.text);
+  }, [navState]);
+
+  // ...and analyse straight away when they already wrote their answer there,
+  // so "Start Simulator" is one click to the result rather than two.
+  useEffect(() => {
+    if (!navState?.autostart || autoStartedRef.current) return;
+    if (!user || !text.trim()) return;
+    autoStartedRef.current = true;
+    submit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navState, user, text]);
 
   if (stage) return <main className="px-4 py-16"><AnalysisProgress current={stage} /></main>;
 
