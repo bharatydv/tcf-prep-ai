@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   ChatText, Handshake, Scales, ClockCountdown, ArrowLeft,
   Lock, CaretRight, BookOpen, Microphone, Star, Clock,
-  Stop, ArrowClockwise, UploadSimple, Lightning, CheckCircle, XCircle,
+  Stop, ArrowClockwise, UploadSimple, Lightning, CheckCircle, XCircle, X,
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api } from '../lib/api';
@@ -20,14 +20,228 @@ const TACHES = [
 
 const TACHE_DURATION = { 1: '2 min', 2: '5 min 30 s', 3: '4 min 30 s' };
 
+// Tâche 2's 5 min 30 s already includes 2 min of preparation, so speaking time is the remainder.
+const TACHE_PREP_SECONDS = { 1: 0, 2: 120, 3: 0 };
+const TACHE_SPEAK_SECONDS = { 1: 120, 2: 210, 3: 270 };
+
+const fmt = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+
 const CAT_LABELS = {
   prepositions: 'Prépositions', spelling: 'Orthographe', conjugation: 'Conjugaison',
   gender_number: 'Accord', anglicism: 'Anglicismes', improvement: 'Améliorations C1',
 };
 
+/* ---- Recording modal: brief → preparation → 3·2·1 → recording ---- */
+function RecorderModal({ question, tacheNum, tacheTitle, onCancel, onComplete }) {
+  const prepSeconds = TACHE_PREP_SECONDS[tacheNum] || 0;
+  const speakSeconds = TACHE_SPEAK_SECONDS[tacheNum] || 120;
+
+  const [phase, setPhase] = useState('brief');   // brief | prep | countdown | recording
+  const [prepLeft, setPrepLeft] = useState(prepSeconds);
+  const [tick, setTick] = useState(3);
+  const [left, setLeft] = useState(speakSeconds);
+  const [checking, setChecking] = useState(false);
+
+  const mrRef = useRef(null);
+  const chunksRef = useRef([]);
+  const streamRef = useRef(null);
+  const canceledRef = useRef(false);
+  const leftRef = useRef(speakSeconds);
+
+  useEffect(() => { leftRef.current = left; }, [left]);
+
+  const releaseStream = () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  };
+
+  const cancel = () => {
+    canceledRef.current = true;
+    try { if (mrRef.current?.state === 'recording') mrRef.current.stop(); } catch (e) {}
+    releaseStream();
+    onCancel();
+  };
+
+  const finish = () => {
+    try { if (mrRef.current?.state === 'recording') mrRef.current.stop(); } catch (e) {}
+  };
+
+  // Lock page scroll while open; Escape abandons the attempt.
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e) => { if (e.key === 'Escape') cancel(); };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', onKey);
+      canceledRef.current = true;
+      releaseStream();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Ask for the mic up front so a denied permission surfaces before the prep timer runs.
+  const begin = async () => {
+    setChecking(true);
+    try {
+      const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+      probe.getTracks().forEach((t) => t.stop());
+    } catch (err) {
+      setChecking(false);
+      return toast.error("Impossible d'accéder au microphone. Vérifiez les autorisations.");
+    }
+    setChecking(false);
+    setPhase(prepSeconds > 0 ? 'prep' : 'countdown');
+  };
+
+  const beginRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mr = new MediaRecorder(stream);
+      chunksRef.current = [];
+      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      mr.onstop = () => {
+        releaseStream();
+        if (canceledRef.current) return;
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        onComplete(blob, speakSeconds - leftRef.current);
+      };
+      mr.start();
+      mrRef.current = mr;
+      setPhase('recording');
+    } catch (err) {
+      toast.error("Impossible d'accéder au microphone. Vérifiez les autorisations.");
+      cancel();
+    }
+  };
+
+  useEffect(() => {
+    if (phase !== 'prep') return;
+    if (prepLeft <= 0) { setPhase('countdown'); return; }
+    const id = setTimeout(() => setPrepLeft((s) => s - 1), 1000);
+    return () => clearTimeout(id);
+  }, [phase, prepLeft]);
+
+  useEffect(() => {
+    if (phase !== 'countdown') return;
+    if (tick <= 0) { beginRecording(); return; }
+    const id = setTimeout(() => setTick((t) => t - 1), 850);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, tick]);
+
+  useEffect(() => {
+    if (phase !== 'recording') return;
+    if (left <= 0) { finish(); return; }
+    const id = setTimeout(() => setLeft((s) => s - 1), 1000);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, left]);
+
+  const spoken = speakSeconds - left;
+  const progress = Math.min(100, (spoken / speakSeconds) * 100);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 p-4 backdrop-blur-sm"
+      role="dialog" aria-modal="true" aria-label="Enregistrement">
+      <div className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl">
+        {/* HEADER */}
+        <div className="flex items-start gap-3 bg-gradient-to-r from-primary to-fuchsia-600 px-6 py-4 text-white">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/20">
+            <Microphone size={18} weight="fill" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="font-heading text-sm font-bold leading-snug">{tacheTitle}</p>
+            <p className="text-[11px] text-white/80">
+              Préparation : {prepSeconds ? fmt(prepSeconds) : 'aucune'} · Parole : {fmt(speakSeconds)}
+            </p>
+          </div>
+          {phase !== 'recording' && (
+            <button onClick={cancel} aria-label="Fermer"
+              className="rounded-lg p-1 text-white/80 transition hover:bg-white/20 hover:text-white">
+              <X size={18} weight="bold" />
+            </button>
+          )}
+        </div>
+
+        {/* QUESTION — always visible except during the 3·2·1 */}
+        {phase !== 'countdown' && (
+          <div className="border-b border-violet-100 bg-violet-50/40 px-6 py-4">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-primary">Consigne</p>
+            <p className="mt-1 text-sm leading-relaxed text-gray-800">{question}</p>
+          </div>
+        )}
+
+        {/* BODY */}
+        <div className="px-6 py-6 text-center">
+          {phase === 'brief' && (
+            <>
+              <p className="text-sm leading-relaxed text-gray-600">
+                {prepSeconds
+                  ? `Vous aurez ${fmt(prepSeconds)} de préparation, puis ${fmt(speakSeconds)} pour répondre.`
+                  : `Vous aurez ${fmt(speakSeconds)} pour répondre. L'enregistrement démarre après un décompte de 3 secondes.`}
+              </p>
+              <div className="mt-5 flex flex-col gap-2 sm:flex-row-reverse">
+                <button onClick={begin} disabled={checking}
+                  className="btn-primary flex-1 justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600 disabled:opacity-60">
+                  {checking
+                    ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> Micro…</>
+                    : <><Microphone size={16} weight="fill" /> {prepSeconds ? 'Commencer la préparation' : "Commencer l'enregistrement"}</>}
+                </button>
+                <button onClick={cancel} className="btn-outline flex-1 justify-center">Annuler</button>
+              </div>
+            </>
+          )}
+
+          {phase === 'prep' && (
+            <>
+              <p className="font-heading text-5xl font-extrabold tabular-nums text-primary">{fmt(prepLeft)}</p>
+              <p className="mt-2 font-heading text-sm font-bold text-gray-900">Préparation</p>
+              <p className="mt-1 text-xs text-gray-500">Prenez des notes — ne parlez pas encore.</p>
+              <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-violet-100">
+                <div className="h-full rounded-full bg-gradient-to-r from-primary to-fuchsia-600 transition-all duration-1000"
+                  style={{ width: `${((prepSeconds - prepLeft) / prepSeconds) * 100}%` }} />
+              </div>
+              <button onClick={() => setPhase('countdown')} className="btn-outline mt-5 w-full justify-center">
+                Passer la préparation
+              </button>
+            </>
+          )}
+
+          {phase === 'countdown' && (
+            <div className="py-8">
+              <p key={tick} className="font-heading text-7xl font-extrabold text-primary animate-pulse">
+                {tick > 0 ? tick : 'GO !'}
+              </p>
+              <p className="mt-4 text-sm font-semibold text-gray-600">Préparez-vous à parler…</p>
+            </div>
+          )}
+
+          {phase === 'recording' && (
+            <>
+              <button onClick={finish}
+                className="mx-auto flex h-20 w-20 animate-pulse items-center justify-center rounded-full bg-gradient-to-br from-red-500 to-rose-600 text-white shadow-lg">
+                <Stop size={30} weight="fill" />
+              </button>
+              <p className="mt-4 font-heading text-3xl font-extrabold tabular-nums text-gray-900">{fmt(left)}</p>
+              <p className="mt-1 text-xs text-gray-500">Temps restant · appuyez pour terminer</p>
+              <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-red-100">
+                <div className="h-full rounded-full bg-gradient-to-r from-red-500 to-rose-600 transition-all duration-1000"
+                  style={{ width: `${progress}%` }} />
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---- Inline recorder/uploader + analysis for a single question ---- */
-function QuestionCard({ q, duration, isActive, onActivate, refreshUser, navigate }) {
-  const [recording, setRecording] = useState(false);
+function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate, refreshUser, navigate }) {
+  const [modalOpen, setModalOpen] = useState(false);
   const [audioBlob, setAudioBlob] = useState(null);
   const [audioUrl, setAudioUrl] = useState('');
   const [audioName, setAudioName] = useState('answer.webm');
@@ -35,24 +249,14 @@ function QuestionCard({ q, duration, isActive, onActivate, refreshUser, navigate
   const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState(null);
 
-  const mediaRecorderRef = useRef(null);
-  const chunksRef = useRef([]);
-  const timerRef = useRef(null);
   const fileInputRef = useRef(null);
 
+  // Only one question may be open at a time.
   useEffect(() => {
-    if (!isActive) {
-      if (mediaRecorderRef.current && recording) {
-        try { mediaRecorderRef.current.stop(); } catch (e) {}
-      }
-      if (timerRef.current) clearInterval(timerRef.current);
-      setRecording(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!isActive) setModalOpen(false);
   }, [isActive]);
 
   useEffect(() => () => {
-    if (timerRef.current) clearInterval(timerRef.current);
     if (audioUrl) URL.revokeObjectURL(audioUrl);
   }, [audioUrl]);
 
@@ -65,37 +269,19 @@ function QuestionCard({ q, duration, isActive, onActivate, refreshUser, navigate
     setResult(null);
   };
 
-  const startRecording = async () => {
+  const openRecorder = () => {
     onActivate();
     reset();
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream);
-      chunksRef.current = [];
-      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      mr.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        setAudioBlob(blob);
-        setAudioName('answer.webm');
-        setAudioUrl(URL.createObjectURL(blob));
-        stream.getTracks().forEach((t) => t.stop());
-      };
-      mr.start();
-      mediaRecorderRef.current = mr;
-      setRecording(true);
-      setElapsed(0);
-      timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
-    } catch (err) {
-      toast.error("Impossible d'accéder au microphone. Vérifiez les autorisations.");
-    }
+    setModalOpen(true);
   };
 
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && recording) {
-      mediaRecorderRef.current.stop();
-      setRecording(false);
-      if (timerRef.current) clearInterval(timerRef.current);
-    }
+  // Handed the finished take by the modal; the analysis path below is unchanged.
+  const handleRecorded = (blob, seconds) => {
+    setModalOpen(false);
+    setAudioBlob(blob);
+    setAudioName('answer.webm');
+    setAudioUrl(URL.createObjectURL(blob));
+    setElapsed(seconds);
   };
 
   const openFilePicker = () => {
@@ -145,7 +331,7 @@ function QuestionCard({ q, duration, isActive, onActivate, refreshUser, navigate
 
   const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
   const ss = String(elapsed % 60).padStart(2, '0');
-  const showActions = isActive && (recording || audioBlob || analyzing || result);
+  const showActions = isActive && (audioBlob || analyzing || result);
 
   return (
     <div className={`rounded-2xl border bg-white p-5 shadow-soft transition ${
@@ -161,9 +347,19 @@ function QuestionCard({ q, duration, isActive, onActivate, refreshUser, navigate
 
       <input ref={fileInputRef} type="file" accept="audio/*" onChange={handleFile} className="hidden" />
 
+      {modalOpen && (
+        <RecorderModal
+          question={q.prompt_text}
+          tacheNum={tacheNum}
+          tacheTitle={tacheTitle}
+          onCancel={() => setModalOpen(false)}
+          onComplete={handleRecorded}
+        />
+      )}
+
       {!showActions && (
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-          <button onClick={startRecording}
+          <button onClick={openRecorder}
             className="btn-primary flex-1 justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600">
             <Microphone size={16} weight="fill" /> Record answer
           </button>
@@ -175,16 +371,7 @@ function QuestionCard({ q, duration, isActive, onActivate, refreshUser, navigate
 
       {showActions && (
         <div className="mt-4 rounded-2xl border border-violet-100 bg-violet-50/30 p-5 text-center">
-          {recording ? (
-            <>
-              <button onClick={stopRecording}
-                className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-red-500 to-rose-600 text-white shadow-lg animate-pulse">
-                <Stop size={26} weight="fill" />
-              </button>
-              <p className="mt-3 font-heading text-sm font-bold text-gray-900">Enregistrement… {mm}:{ss}</p>
-              <p className="text-xs text-gray-500">Appuyez pour arrêter.</p>
-            </>
-          ) : audioBlob ? (
+          {audioBlob ? (
             <>
               <p className="font-heading text-sm font-bold text-gray-900">
                 {audioName === 'answer.webm' ? `Votre enregistrement (${mm}:${ss})` : `Fichier : ${audioName}`}
@@ -420,7 +607,7 @@ export default function SpeakingTasks() {
                       {activeTheme.emoji ? `${activeTheme.emoji} ` : ''}{activeTheme.name}
                     </h2>
                     <p className="text-xs font-semibold text-primary">
-                      {activeTacheObj?.title.split(' (')[0]} · Preparation: None · Duration: {TACHE_DURATION[activeTache]}
+                      {activeTacheObj?.title.split(' (')[0]} · Preparation: {TACHE_PREP_SECONDS[activeTache] ? fmt(TACHE_PREP_SECONDS[activeTache]) : 'None'} · Duration: {TACHE_DURATION[activeTache]}
                     </p>
                   </div>
                 </div>
@@ -440,6 +627,8 @@ export default function SpeakingTasks() {
                         key={q.question_id}
                         q={q}
                         duration={TACHE_DURATION[activeTache]}
+                        tacheNum={activeTache}
+                        tacheTitle={activeTacheObj?.title || `Tâche ${activeTache}`}
                         isActive={activeQid === q.question_id}
                         onActivate={() => setActiveQid(q.question_id)}
                         refreshUser={refreshUser}
