@@ -125,41 +125,47 @@ export default function SelectTask() {
           {/* RIGHT — own question, simulator by default, or themes */}
           <div className="min-h-[360px]">
             {ownMode ? (
-              <div className="flex h-full flex-col rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-6 shadow-soft sm:p-8">
-                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-100 text-primary">
-                  <PenNib size={24} weight="fill" />
-                </span>
-                <h2 className="mt-4 font-heading text-xl font-extrabold text-gray-900">Your own question</h2>
-                <p className="mt-1.5 text-sm leading-relaxed text-gray-600">
-                  Paste the topic you want to write on, then your answer. Leave the answer empty to write it on the next page.
-                </p>
+              <div className="flex h-full flex-col rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-5 shadow-soft sm:p-6">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-primary">
+                    <PenNib size={22} weight="fill" />
+                  </span>
+                  <div className="min-w-0">
+                    <h2 className="font-heading text-xl font-extrabold leading-tight text-gray-900">Your own question</h2>
+                    <p className="text-xs leading-snug text-gray-600">
+                      Paste the topic you want to write on, then your answer. Leave the answer empty to write it on the next page.
+                    </p>
+                  </div>
+                </div>
 
-                <label className="mt-5 block text-xs font-bold uppercase tracking-wide text-primary">Question</label>
+                <label className="mt-4 block text-xs font-bold uppercase tracking-wide text-primary">Question</label>
                 <input
-                  className="input !rounded-xl mt-1.5 text-sm" maxLength={1000}
+                  className="input !rounded-xl mt-1 text-sm" maxLength={1000}
                   placeholder="Paste your topic or question here…"
                   value={ownQuestion} onChange={(e) => setOwnQuestion(e.target.value)}
                   data-testid="own-question-input"
                 />
-                <p className="mt-1 text-right text-[11px] text-gray-400">{ownQuestion.length} / 1000</p>
+                <p className="mt-0.5 text-right text-[11px] text-gray-400">{ownQuestion.length} / 1000</p>
 
-                <label className="mt-3 block text-xs font-bold uppercase tracking-wide text-primary">Answer</label>
+                <label className="mt-2 block text-xs font-bold uppercase tracking-wide text-primary">Answer</label>
                 <textarea
-                  className="input !rounded-xl mt-1.5 resize-none text-sm" rows={7} maxLength={3000}
+                  className="input !rounded-xl mt-1 resize-none text-sm" rows={5} maxLength={3000}
                   placeholder="Write your answer here… (optional — leave blank to start fresh on the next page)"
                   value={ownText} onChange={(e) => setOwnText(e.target.value)}
                   data-testid="own-answer-input"
                 />
-                <p className="mt-1 text-right text-[11px] text-gray-400">
+                <p className="mt-0.5 text-right text-[11px] text-gray-400">
                   {ownText.trim() ? ownText.trim().split(/\s+/).length : 0} mots · {ownText.length} / 3000
                 </p>
 
-                <button onClick={startOwn} data-testid="own-start-button"
-                  className="btn-primary mt-4 w-fit !bg-gradient-to-r !from-primary !to-fuchsia-600">
-                  <Lightning size={18} weight="fill" />
-                  {ownText.trim() ? 'Analyser mon texte' : 'Commencer à écrire'}
-                </button>
-                <p className="mt-4 text-xs text-gray-400">Or pick a tâche on the left to practice a real exam format.</p>
+                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <button onClick={startOwn} data-testid="own-start-button"
+                    className="btn-primary w-fit !bg-gradient-to-r !from-primary !to-fuchsia-600">
+                    <Lightning size={18} weight="fill" />
+                    {ownText.trim() ? 'Analyser mon texte' : 'Commencer à écrire'}
+                  </button>
+                  <p className="text-xs text-gray-400">Or pick a tâche on the left to practice a real exam format.</p>
+                </div>
               </div>
             ) : loadingThemes ? (
               <div className="flex h-full items-center justify-center rounded-3xl border border-violet-100 bg-white p-8">
