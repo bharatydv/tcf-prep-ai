@@ -127,44 +127,52 @@ export default function SelectTask() {
             {ownMode ? (
               <div className="flex h-full flex-col rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-5 shadow-soft sm:p-6">
                 <div className="flex items-center gap-3">
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-primary">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-fuchsia-600 text-white shadow-md shadow-violet-300/50">
                     <PenNib size={22} weight="fill" />
                   </span>
                   <div className="min-w-0">
                     <h2 className="font-heading text-xl font-extrabold leading-tight text-gray-900">Your own question</h2>
-                    <p className="text-xs leading-snug text-gray-600">
-                      Paste the topic you want to write on, then your answer. Leave the answer empty to write it on the next page.
+                    <p className="mt-0.5 text-[13px] leading-snug text-gray-600">
+                      Paste your topic, then your answer — or leave it blank to write on the next page.
                     </p>
                   </div>
                 </div>
 
-                <label className="mt-4 block text-xs font-bold uppercase tracking-wide text-primary">Question</label>
+                <div className="mt-5 flex items-baseline justify-between gap-3">
+                  <label htmlFor="own-question" className="text-xs font-bold uppercase tracking-wide text-primary">Question</label>
+                  <span className="text-[11px] tabular-nums text-gray-400">{ownQuestion.length} / 1000</span>
+                </div>
                 <input
-                  className="input !rounded-xl mt-1 text-sm" maxLength={1000}
+                  id="own-question"
+                  className="input !rounded-xl mt-1.5 text-sm" maxLength={1000}
                   placeholder="Paste your topic or question here…"
                   value={ownQuestion} onChange={(e) => setOwnQuestion(e.target.value)}
                   data-testid="own-question-input"
                 />
-                <p className="mt-0.5 text-right text-[11px] text-gray-400">{ownQuestion.length} / 1000</p>
 
-                <label className="mt-2 block text-xs font-bold uppercase tracking-wide text-primary">Answer</label>
+                <div className="mt-4 flex items-baseline justify-between gap-3">
+                  <label htmlFor="own-answer" className="text-xs font-bold uppercase tracking-wide text-primary">
+                    Answer <span className="font-semibold normal-case tracking-normal text-gray-400">· optional</span>
+                  </label>
+                  <span className="text-[11px] tabular-nums text-gray-400">
+                    {ownText.trim() ? ownText.trim().split(/\s+/).length : 0} mots · {ownText.length} / 3000
+                  </span>
+                </div>
                 <textarea
-                  className="input !rounded-xl mt-1 resize-none text-sm" rows={5} maxLength={3000}
-                  placeholder="Write your answer here… (optional — leave blank to start fresh on the next page)"
+                  id="own-answer"
+                  className="input !rounded-xl mt-1.5 min-h-[150px] flex-1 resize-none text-sm" maxLength={3000}
+                  placeholder="Write your answer here… (leave blank to start fresh on the next page)"
                   value={ownText} onChange={(e) => setOwnText(e.target.value)}
                   data-testid="own-answer-input"
                 />
-                <p className="mt-0.5 text-right text-[11px] text-gray-400">
-                  {ownText.trim() ? ownText.trim().split(/\s+/).length : 0} mots · {ownText.length} / 3000
-                </p>
 
-                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+                <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-violet-100 pt-4">
                   <button onClick={startOwn} data-testid="own-start-button"
-                    className="btn-primary w-fit !bg-gradient-to-r !from-primary !to-fuchsia-600">
+                    className="btn-primary w-fit !bg-gradient-to-r !from-primary !to-fuchsia-600 shadow-lg shadow-violet-300/50 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-violet-300/60">
                     <Lightning size={18} weight="fill" />
                     {ownText.trim() ? 'Analyser mon texte' : 'Commencer à écrire'}
                   </button>
-                  <p className="text-xs text-gray-400">Or pick a tâche on the left to practice a real exam format.</p>
+                  <p className="text-xs text-gray-500">Or pick a tâche on the left to practice a real exam format.</p>
                 </div>
               </div>
             ) : loadingThemes ? (
