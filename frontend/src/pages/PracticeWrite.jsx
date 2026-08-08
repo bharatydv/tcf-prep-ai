@@ -6,7 +6,7 @@ import {
 import { toast } from 'sonner';
 import { api, BACKEND_URL } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import { AccentToolbar, AnalysisProgress, streamAnalysis } from '../components/shared';
+import { AnalysisProgress, streamAnalysis } from '../components/shared';
 
 export default function PracticeWrite() {
   const { user, refreshUser } = useAuth();
@@ -173,14 +173,13 @@ export default function PracticeWrite() {
             )}
 
             <div>
-              <AccentToolbar textareaRef={taRef} onInsert={(_c, next) => setText(next)} />
               <textarea
                 ref={taRef}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onDrop={(e) => e.preventDefault()}
                 lang="fr"
-                className="input paper-textarea mt-3 min-h-[340px] p-6 shadow-card"
+                className="input paper-textarea min-h-[340px] p-6 shadow-card"
                 placeholder="Commencez à écrire en français…"
                 data-testid="writing-textarea"
               />
