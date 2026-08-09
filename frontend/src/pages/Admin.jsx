@@ -101,6 +101,8 @@ function AIProviders() {
   const [data, setData] = useState(null);
   const [sel, setSel] = useState({});
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [tests, setTests] = useState(null);
 
   const load = useCallback(() => {
     api.get('/api/admin/ai-providers')
@@ -108,6 +110,21 @@ function AIProviders() {
       .catch((e) => toast.error(errMsg(e)));
   }, []);
   useEffect(load, [load]);
+
+  /* A key can be present and still be rejected, out of credit, or pointed at a
+     retired model. Only a live call tells them apart. */
+  const runTests = async () => {
+    setTesting(true);
+    try {
+      const { data: res } = await api.post('/api/admin/ai-providers/test');
+      setTests(res.results);
+      const all = Object.values(res.results);
+      const ok = all.filter((r) => r.ok).length;
+      const msg = t('admin.testDone', { ok, total: all.length });
+      if (ok === all.length) toast.success(msg); else toast.error(msg);
+    } catch (e) { toast.error(errMsg(e)); }
+    finally { setTesting(false); }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -168,6 +185,42 @@ function AIProviders() {
             </span>
           ))}
         </div>
+      </section>
+
+      {/* A present key still fails if it is revoked, out of credit, or the
+          model was retired. Only a live call distinguishes those. */}
+      <section className="card p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-heading font-semibold">{t('admin.testResults')}</h2>
+            <p className="mt-1 text-sm text-gray-500">{t('admin.testHint')}</p>
+          </div>
+          <button onClick={runTests} disabled={testing}
+            className="btn-outline shrink-0 disabled:opacity-50" data-testid="ai-test">
+            {testing ? t('admin.testing') : t('admin.testAll')}
+          </button>
+        </div>
+
+        {(tests || Object.keys(data.last_errors || {}).length > 0) && (
+          <div className="mt-4 space-y-2">
+            {Object.entries(tests || {}).map(([p, r]) => (
+              <div key={p} data-testid={`ai-test-${p}`}
+                className={`rounded-xl border p-3 text-sm ${r.ok ? 'border-green-200 bg-green-50/60' : 'border-red-200 bg-red-50/60'}`}>
+                <p className="font-semibold text-gray-900">
+                  {r.ok ? '✓' : '✗'} {p}
+                  <span className="ml-2 font-mono text-xs font-normal text-gray-500">{r.model}</span>
+                </p>
+                {!r.ok && <p className="mt-1 break-words text-xs text-red-700">{r.error}</p>}
+              </div>
+            ))}
+            {!tests && Object.entries(data.last_errors || {}).map(([p, err]) => (
+              <div key={p} className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-sm">
+                <p className="font-semibold text-gray-900">{p}</p>
+                <p className="mt-1 break-words text-xs text-amber-800">{t('admin.lastError', { error: err })}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );

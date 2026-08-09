@@ -94,7 +94,10 @@ GEMINI_GRADER_MODEL = os.environ.get("GEMINI_GRADER_MODEL", "gemini-2.5-flash-li
 OPENAI_TRANSCRIBE_MODEL = os.environ.get("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-transcribe")
 GEMINI_TRANSCRIBE_MODEL = os.environ.get("GEMINI_TRANSCRIBE_MODEL", "gemini-2.5-flash")
 # Groq: Whisper transcription + fast LLM grading (OpenAI-compatible API)
-GROQ_GRADER_MODEL = os.environ.get("GROQ_GRADER_MODEL", "llama-3.3-70b-versatile")
+# llama-3.3-70b-versatile was deprecated by Groq on 2026-06-17 and stops being
+# served on 2026-08-16; gpt-oss-120b is their named replacement. Override with
+# GROQ_GRADER_MODEL if you have an enterprise contract that keeps llama alive.
+GROQ_GRADER_MODEL = os.environ.get("GROQ_GRADER_MODEL", "openai/gpt-oss-120b")
 GROQ_TRANSCRIBE_MODEL = os.environ.get("GROQ_TRANSCRIBE_MODEL", "whisper-large-v3")
 GROQ_BASE_URL = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 # DeepSeek: text grading only (OpenAI-compatible API, no transcription)
@@ -993,22 +996,46 @@ def _key_is_usable(key: str) -> bool:
     return not any(h in k for h in _PLACEHOLDER_KEY_HINTS)
 
 
+# Why each provider last failed, so the Admin panel can show the actual reason
+# instead of a bare "AI unavailable". Errors from a provider API can quote the
+# key back, so the text is scrubbed before it is ever returned over HTTP.
+_PROVIDER_LAST_ERROR: Dict[str, str] = {}
+
+
+def _scrub_secrets(text: str) -> str:
+    """Remove anything key-shaped from a provider error before showing it."""
+    out = str(text)
+    for key in (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,
+                GROQ_API_KEY, DEEPSEEK_API_KEY, ASSEMBLYAI_API_KEY):
+        if key and len(key) > 8:
+            out = out.replace(key, "***")
+    return re.sub(r"\b(sk|gsk)[-_][A-Za-z0-9\-_]{8,}", "***", out)[:400]
+
+
 async def _grade_with_provider(provider: str, system_prompt: str,
                                user_text: str) -> Optional[str]:
     """Run a grading call on the chosen provider. Returns raw text or None."""
     fn, key, model = _grader_backend(provider)
     if not _key_is_usable(key):
+        msg = ("No usable API key — the value in .env is empty or still a "
+               "placeholder such as 'your_..._key'.")
+        _PROVIDER_LAST_ERROR[provider] = msg
         log.warning("Missing or placeholder API key for grading provider '%s' "
-                    "- set a real key in backend/.env", provider)
+                    "- set a real key in .env", provider)
         return None
     loop = asyncio.get_event_loop()
+    last_exc = None
     for attempt in range(2):
         try:
-            return await loop.run_in_executor(None, fn, model, system_prompt, user_text)
+            out = await loop.run_in_executor(None, fn, model, system_prompt, user_text)
+            _PROVIDER_LAST_ERROR.pop(provider, None)
+            return out
         except Exception as exc:  # noqa: BLE001
+            last_exc = exc
             log.warning("Grading call failed (%s/%s attempt %s): %s",
                         provider, model, attempt + 1, exc)
             await asyncio.sleep(0.5)
+    _PROVIDER_LAST_ERROR[provider] = f"{type(last_exc).__name__}: {_scrub_secrets(last_exc)}"
     return None
 
 
@@ -1888,13 +1915,11 @@ async def speaking_diag(admin: User = Depends(get_admin_user)):
     return {
         "transcribe_provider": TRANSCRIBE_PROVIDER,
         "speaking_grader_provider": SPEAKING_GRADER_PROVIDER,
+        # _key_is_usable, not bool(): a placeholder left in .env is truthy and
+        # would otherwise be reported here as a configured key.
         "keys_set": {
-            "openai": bool(OPENAI_API_KEY),
-            "anthropic": bool(ANTHROPIC_API_KEY),
-            "gemini": bool(GEMINI_API_KEY),
-            "groq": bool(GROQ_API_KEY),
-            "deepseek": bool(DEEPSEEK_API_KEY),
-            "assemblyai": bool(ASSEMBLYAI_API_KEY),
+            p: _provider_key_present(p)
+            for p in ("openai", "anthropic", "gemini", "groq", "deepseek", "assemblyai")
         },
         "packages_installed": {
             "openai": pkg_ok("openai"),
@@ -2794,15 +2819,26 @@ PROVIDER_OPTIONS = {
 }
 
 
-def _provider_key_present(provider: str) -> bool:
+def _provider_key(provider: str) -> str:
     return {
-        "openai": bool(OPENAI_API_KEY),
-        "anthropic": bool(ANTHROPIC_API_KEY),
-        "gemini": bool(GEMINI_API_KEY),
-        "groq": bool(GROQ_API_KEY),
-        "deepseek": bool(DEEPSEEK_API_KEY),
-        "assemblyai": bool(ASSEMBLYAI_API_KEY),
-    }.get(provider, False)
+        "openai": OPENAI_API_KEY,
+        "anthropic": ANTHROPIC_API_KEY,
+        "gemini": GEMINI_API_KEY,
+        "groq": GROQ_API_KEY,
+        "deepseek": DEEPSEEK_API_KEY,
+        "assemblyai": ASSEMBLYAI_API_KEY,
+    }.get(provider, "")
+
+
+def _provider_key_present(provider: str) -> bool:
+    """Must agree with what grading actually accepts.
+
+    This used to be bool(KEY), but a .env left as `GROQ_API_KEY=your_new_key`
+    is a non-empty string and therefore truthy, so the Admin panel showed every
+    provider as configured while _key_is_usable() rejected the same value and
+    grading failed with no visible reason.
+    """
+    return _key_is_usable(_provider_key(provider))
 
 
 @app.get("/api/admin/ai-providers")
@@ -2822,6 +2858,9 @@ async def admin_get_ai_providers(admin: User = Depends(get_admin_user),
         "options": PROVIDER_OPTIONS,
         "keys_present": keys_present,
         "env_defaults": _ENV_PROVIDER_DEFAULTS,
+        "models": {p: _grader_backend(p)[2] for opts in PROVIDER_OPTIONS.values()
+                   for p in opts if p != "assemblyai"},
+        "last_errors": dict(_PROVIDER_LAST_ERROR),
     }
 
 
@@ -2848,6 +2887,48 @@ async def admin_set_ai_providers(body: dict,
     await db.commit()
     _invalidate_provider_cache()
     return {"saved": saved, "ok": True}
+
+
+@app.post("/api/admin/ai-providers/test")
+async def admin_test_ai_providers(admin: User = Depends(get_admin_user)):
+    """Live-check every grading provider and report exactly why each fails.
+
+    Without this, a misconfigured provider is invisible: grading just returns
+    503 and the reason is buried in container logs. Each check is one tiny
+    completion, so running it costs a fraction of a cent per provider.
+    """
+    async def check(provider: str) -> dict:
+        fn, key, model = _grader_backend(provider)
+        if not _key_is_usable(key):
+            return {"ok": False, "model": model,
+                    "error": "No usable API key — .env is empty or still holds "
+                             "a placeholder like 'your_..._key'."}
+        loop = asyncio.get_event_loop()
+        try:
+            out = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, fn, model,
+                    "Reply with the single word: ok",
+                    "Reply with the single word: ok"),
+                timeout=30)
+            return {"ok": True, "model": model, "sample": (out or "").strip()[:60]}
+        except asyncio.TimeoutError:
+            return {"ok": False, "model": model,
+                    "error": "Timed out after 30s — provider unreachable from this host."}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "model": model,
+                    "error": f"{type(exc).__name__}: {_scrub_secrets(exc)}"}
+
+    graders = sorted({p for k, opts in PROVIDER_OPTIONS.items()
+                      if k.endswith("grader_provider") for p in opts})
+    results = await asyncio.gather(*(check(p) for p in graders))
+    out = dict(zip(graders, results))
+    for provider, res in out.items():
+        if res["ok"]:
+            _PROVIDER_LAST_ERROR.pop(provider, None)
+        else:
+            _PROVIDER_LAST_ERROR[provider] = res["error"]
+    return {"results": out}
 
 
 @app.get("/api/admin/users")
