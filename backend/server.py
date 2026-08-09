@@ -873,6 +873,11 @@ If the consigne identifies a tâche and the text is under the minimum, say so in
 
 improvement_suggestions: 3-5 concrete English tips. linking_words: French connectors the writer should use. vocabulary_suggestions: French words/phrases to enrich the text."""
 
+# A full grading reply lists every error with an explanation, which can run
+# past 2000 tokens on a long Tache 3. Truncation lands mid-JSON, which used
+# to surface as a bare "AI unavailable" with the provider blamed.
+GRADER_MAX_TOKENS = int(os.environ.get("GRADER_MAX_TOKENS", "4000"))
+
 AI_UNAVAILABLE_DETAIL = ("Correction indisponible : le correcteur IA a refusé la "
                          "requête (clé API ou quota du fournisseur). "
                          "Réessayez dans un instant.")
@@ -897,6 +902,46 @@ def _strip_fences(text: str) -> str:
     return text.strip()
 
 
+def _extract_json(raw: str) -> dict:
+    """Parse a grader reply that is *meant* to be JSON but may not be clean.
+
+    _strip_fences alone only handles a reply that is exactly one fenced block.
+    Models routinely wrap the JSON in a sentence ("Here is the analysis:"), add
+    a trailing note, or emit a reasoning preamble — all of which made
+    json.loads throw, which the caller turned into a generic "AI unavailable"
+    with no clue that the provider had in fact answered. Falling back to the
+    outermost balanced {...} recovers those replies instead of discarding them.
+    """
+    cleaned = _strip_fences(raw)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+    # Pull out the first balanced object, ignoring braces inside strings.
+    start = cleaned.find("{")
+    if start == -1:
+        raise ValueError("grader reply contained no JSON object")
+    depth, in_str, esc = 0, False, False
+    for i, ch in enumerate(cleaned[start:], start):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return json.loads(cleaned[start:i + 1])
+    raise ValueError("grader reply ended mid-JSON (likely truncated by max_tokens)")
+
+
 # ----------------------------------------------------------------------------
 # Multi-provider AI adapters. Each takes (model, system_prompt, user_text) and
 # returns the raw text response. The grader dispatcher picks one by provider.
@@ -906,7 +951,7 @@ def _call_anthropic(model: str, system_prompt: str, user_text: str) -> str:
     aclient = Anthropic(api_key=ANTHROPIC_API_KEY)
     resp = aclient.messages.create(
         model=model,
-        max_tokens=2000,
+        max_tokens=GRADER_MAX_TOKENS,
         system=system_prompt,
         messages=[{"role": "user", "content": user_text}],
     )
@@ -919,7 +964,7 @@ def _call_openai(model: str, system_prompt: str, user_text: str) -> str:
     client = OpenAI(api_key=OPENAI_API_KEY)
     resp = client.chat.completions.create(
         model=model,
-        max_tokens=2000,
+        max_tokens=GRADER_MAX_TOKENS,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_text},
@@ -945,18 +990,48 @@ def _call_gemini(model: str, system_prompt: str, user_text: str) -> str:
 
 def _call_openai_compatible(base_url: str, api_key: str, model: str,
                             system_prompt: str, user_text: str) -> str:
-    """Shared adapter for any OpenAI-compatible endpoint (Groq, DeepSeek)."""
+    """Shared adapter for any OpenAI-compatible endpoint (Groq, DeepSeek).
+
+    A reasoning model can return HTTP 200 with an EMPTY content string: the
+    thinking tokens exhaust max_tokens before it writes the answer, and the
+    reply arrives with finish_reason='length' and content=''. Returning "" for
+    that made the caller report "the AI refused the request (API key or quota)"
+    while the key was fine and the request had succeeded. Never return an empty
+    string silently — raise with the reason so it reaches the log and the
+    Admin panel.
+    """
     from openai import OpenAI
     client = OpenAI(api_key=api_key, base_url=base_url)
     resp = client.chat.completions.create(
         model=model,
-        max_tokens=2000,
+        max_tokens=GRADER_MAX_TOKENS,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_text},
         ],
     )
-    return resp.choices[0].message.content or ""
+    choice = resp.choices[0]
+    content = (choice.message.content or "").strip()
+    if content:
+        return content
+
+    # Some providers put chain-of-thought in a sibling field and leave content
+    # empty; the JSON we want may be in there.
+    reasoning = (getattr(choice.message, "reasoning_content", None)
+                 or getattr(choice.message, "reasoning", None) or "").strip()
+    if reasoning:
+        log.warning("%s returned empty content; using reasoning_content "
+                    "(finish_reason=%s)", model, choice.finish_reason)
+        return reasoning
+
+    usage = getattr(resp, "usage", None)
+    hint = ""
+    if choice.finish_reason == "length":
+        hint = (f" The {GRADER_MAX_TOKENS}-token budget was used up before any "
+                f"answer was written — raise GRADER_MAX_TOKENS.")
+    raise RuntimeError(
+        f"{model} returned an empty completion "
+        f"(finish_reason={choice.finish_reason}, usage={usage}).{hint}")
 
 
 def _call_groq(model: str, system_prompt: str, user_text: str) -> str:
@@ -1093,7 +1168,7 @@ async def analyze_text_with_ai(text: str, topic: Optional[str] = None, db=None,
     if raw is None:
         return dict(FALLBACK_ANALYSIS)
     try:
-        data = json.loads(_strip_fences(raw))
+        data = _extract_json(raw)
         result = _validate_analysis(data)
         _, _, model = _grader_backend(provider)
         result["ai_provider"] = provider
@@ -1102,7 +1177,12 @@ async def analyze_text_with_ai(text: str, topic: Optional[str] = None, db=None,
         result = apply_writing_length_cap(result, text, task_type)
         return result
     except Exception as exc:  # noqa: BLE001
-        log.warning("Could not parse grading JSON (%s): %s", provider, exc)
+        # Log what actually came back. Without this the provider looks dead
+        # when in fact it replied and only the shape was wrong.
+        log.warning("Could not parse grading JSON (%s): %s | reply[:400]=%r",
+                    provider, exc, _scrub_secrets(raw)[:400])
+        _PROVIDER_LAST_ERROR[provider] = (
+            f"Replied, but the response could not be parsed: {exc}")
         return dict(FALLBACK_ANALYSIS)
 
 
@@ -1343,7 +1423,7 @@ async def grade_interaction(consigne: str, history: list, db=None) -> dict:
         return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
                 "relevance_comment": "", "suggestions": []}
     try:
-        result = _validate_speaking(json.loads(_strip_fences(raw)))
+        result = _validate_speaking(_extract_json(raw))
         _, _, model = _grader_backend(provider)
         result["ai_provider"] = provider
         result["ai_model"] = model
@@ -1486,14 +1566,17 @@ async def analyze_speaking_with_ai(transcript: str, question: str, db=None,
         return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
                 "relevance_comment": "", "suggestions": []}
     try:
-        data = json.loads(_strip_fences(raw))
+        data = _extract_json(raw)
         result = _validate_speaking(data)
         _, _, model = _grader_backend(provider)
         result["ai_provider"] = provider
         result["ai_model"] = model
         return apply_speaking_caps(result, transcript, task_type)
     except Exception as exc:  # noqa: BLE001
-        log.warning("Could not parse speaking JSON (%s): %s", provider, exc)
+        log.warning("Could not parse speaking JSON (%s): %s | reply[:400]=%r",
+                    provider, exc, _scrub_secrets(raw)[:400])
+        _PROVIDER_LAST_ERROR[provider] = (
+            f"Replied, but the response could not be parsed: {exc}")
         return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
                 "relevance_comment": "", "suggestions": []}
 
