@@ -990,7 +990,16 @@ def _call_gemini(model: str, system_prompt: str, user_text: str) -> str:
 
 def _call_openai_compatible(base_url: str, api_key: str, model: str,
                             system_prompt: str, user_text: str) -> str:
-    """Shared adapter for any OpenAI-compatible endpoint (Groq, DeepSeek)."""
+    """Shared adapter for any OpenAI-compatible endpoint (Groq, DeepSeek).
+
+    A reasoning model can return HTTP 200 with an EMPTY content string: the
+    thinking tokens exhaust max_tokens before it writes the answer, and the
+    reply arrives with finish_reason='length' and content=''. Returning "" for
+    that made the caller report "the AI refused the request (API key or quota)"
+    while the key was fine and the request had succeeded. Never return an empty
+    string silently — raise with the reason so it reaches the log and the
+    Admin panel.
+    """
     from openai import OpenAI
     client = OpenAI(api_key=api_key, base_url=base_url)
     resp = client.chat.completions.create(
@@ -1001,7 +1010,28 @@ def _call_openai_compatible(base_url: str, api_key: str, model: str,
             {"role": "user", "content": user_text},
         ],
     )
-    return resp.choices[0].message.content or ""
+    choice = resp.choices[0]
+    content = (choice.message.content or "").strip()
+    if content:
+        return content
+
+    # Some providers put chain-of-thought in a sibling field and leave content
+    # empty; the JSON we want may be in there.
+    reasoning = (getattr(choice.message, "reasoning_content", None)
+                 or getattr(choice.message, "reasoning", None) or "").strip()
+    if reasoning:
+        log.warning("%s returned empty content; using reasoning_content "
+                    "(finish_reason=%s)", model, choice.finish_reason)
+        return reasoning
+
+    usage = getattr(resp, "usage", None)
+    hint = ""
+    if choice.finish_reason == "length":
+        hint = (f" The {GRADER_MAX_TOKENS}-token budget was used up before any "
+                f"answer was written — raise GRADER_MAX_TOKENS.")
+    raise RuntimeError(
+        f"{model} returned an empty completion "
+        f"(finish_reason={choice.finish_reason}, usage={usage}).{hint}")
 
 
 def _call_groq(model: str, system_prompt: str, user_text: str) -> str:
