@@ -1,5 +1,5 @@
 """
-TCF Prep AI — FastAPI backend (PostgreSQL edition)
+monfrancais — FastAPI backend (PostgreSQL edition)
 French exam-preparation platform for TCF Canada.
 All routes are prefixed with /api.
 
@@ -26,7 +26,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, Field
 
 from sqlalchemy import (
-    String, Integer, Boolean, DateTime, Text, ForeignKey, func, select,
+    String, Integer, Float, Boolean, DateTime, Text, ForeignKey, func, select,
     update as sa_update, delete as sa_delete,
 )
 from sqlalchemy.dialects.postgresql import JSONB, ARRAY
@@ -48,13 +48,31 @@ RAW_DB_URL = os.environ.get(
 DATABASE_URL = RAW_DB_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
 DB_NAME = os.environ.get("DB_NAME", "tcf_prep_ai")
-JWT_SECRET = os.environ.get("JWT_SECRET", "change-me-in-prod")
+# "production" turns on Secure cookies and refuses to boot on default secrets.
+ENV = os.environ.get("ENV", "development").lower()
+IS_PROD = ENV in {"production", "prod"}
+_DEFAULT_JWT_SECRET = "change-me-in-prod"
+_DEFAULT_ADMIN_PASSWORD = "admin123!"
+JWT_SECRET = os.environ.get("JWT_SECRET", _DEFAULT_JWT_SECRET)
 JWT_ALG = "HS256"
 ACCESS_TTL_MIN = 60
 REFRESH_TTL_DAYS = 7
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@frenchcorrector.com").lower()
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123!")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", _DEFAULT_ADMIN_PASSWORD)
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+
+# A forgeable JWT secret or a published admin password in production is a full
+# account takeover, so fail at boot rather than serve traffic with either.
+if IS_PROD:
+    _bad = []
+    if JWT_SECRET == _DEFAULT_JWT_SECRET or len(JWT_SECRET) < 32:
+        _bad.append("JWT_SECRET (set a random value of 32+ characters)")
+    if ADMIN_PASSWORD == _DEFAULT_ADMIN_PASSWORD:
+        _bad.append("ADMIN_PASSWORD (still the built-in default)")
+    if _bad:
+        raise RuntimeError(
+            "Refusing to start with insecure production settings: "
+            + "; ".join(_bad))
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -87,6 +105,10 @@ ASSEMBLYAI_BASE_URL = os.environ.get("ASSEMBLYAI_BASE_URL", "https://api.assembl
 ASSEMBLYAI_LANGUAGE = os.environ.get("ASSEMBLYAI_LANGUAGE", "fr")
 FREE_MONTHLY_LIMIT = 5
 FREE_MODEL_ANSWER_LIMIT = 3
+# Cost controls. The longest TCF tâche is 180 words, so 6000 characters is far
+# above any legitimate answer while still bounding what one credit can spend.
+MAX_TEXT_CHARS = 6000
+MAX_AUDIO_BYTES = 25 * 1024 * 1024
 # Open-ended "talk to the AI" practice is cheaper to allow than a graded task,
 # but still costs tokens, so free users get a small monthly allowance.
 FREE_CONVERSATION_LIMIT = 2
@@ -176,6 +198,11 @@ class User(Base):
     model_answers_read: Mapped[int] = mapped_column(Integer, default=0)
     model_answer_topic_ids: Mapped[List[str]] = mapped_column(
         ARRAY(String), default=list)
+    # Streaks and the heatmap roll over at the learner's local midnight.
+    timezone: Mapped[str] = mapped_column(String(64), default="America/Toronto")
+    # One-off XP rewards already granted, so they are never paid twice.
+    awarded_bonuses: Mapped[List[str]] = mapped_column(
+        ARRAY(String), default=list)
 
 
 class Prompt(Base):
@@ -217,6 +244,9 @@ class Submission(Base):
     linking_words: Mapped[Any] = mapped_column(JSONB, default=list)
     vocabulary_suggestions: Mapped[Any] = mapped_column(JSONB, default=list)
     word_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Which TCF barème caps were applied, so the learner sees why the level
+    # was lowered instead of an unexplained score.
+    caps_applied: Mapped[Any] = mapped_column(JSONB, default=list)
     source: Mapped[str] = mapped_column(String(20), default="practice")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), index=True)
@@ -267,7 +297,8 @@ class ExamAttempt(Base):
     task1: Mapped[Any] = mapped_column(JSONB)
     task2: Mapped[Any] = mapped_column(JSONB)
     task3: Mapped[Any] = mapped_column(JSONB)
-    combined_score: Mapped[float] = mapped_column(Integer)
+    # Float: the combined score is the mean of three task scores, e.g. 72.3.
+    combined_score: Mapped[float] = mapped_column(Float)
     tcf_level: Mapped[str] = mapped_column(String(8))
     time_used_seconds: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -285,6 +316,23 @@ class ExamQuestion(Base):
     correct_answer: Mapped[str] = mapped_column(String(8))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MockExamAttempt(Base):
+    """A completed reading/listening mock exam, graded on the server."""
+    __tablename__ = "mock_exam_attempts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    mock_attempt_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.user_id"), index=True)
+    exam_type: Mapped[str] = mapped_column(String(40), index=True)
+    answers: Mapped[Any] = mapped_column(JSONB, default=dict)
+    score: Mapped[int] = mapped_column(Integer, default=0)
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    time_used_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True)
 
 
 class RecentTopic(Base):
@@ -350,6 +398,13 @@ def public_user(u: User) -> dict:
         "xp": u.xp or 0,
         "badges": u.badges or [],
         "model_answers_read": u.model_answers_read or 0,
+        "timezone": u.timezone or "America/Toronto",
+        # Shown before the editor, so nobody writes 150 words only to be told
+        # afterwards that they had no credits left.
+        "credits_remaining": (
+            None if (u.subscription_status or "free") == "premium"
+            else max(0, FREE_MONTHLY_LIMIT - (u.free_submissions_used or 0))),
+        "free_monthly_limit": FREE_MONTHLY_LIMIT,
     }
 
 
@@ -392,12 +447,19 @@ def decode_token(token: str, expected: str) -> Optional[str]:
         return None
 
 
-def set_auth_cookies(resp: Response, user_id: str):
-    access = make_token(user_id, "access", minutes=ACCESS_TTL_MIN)
-    refresh = make_token(user_id, "refresh", days=REFRESH_TTL_DAYS)
-    resp.set_cookie("access_token", access, httponly=True, samesite="lax",
+def _set_access_cookie(resp: Response, user_id: str):
+    """Secure in production so the cookie is never sent over plain HTTP."""
+    resp.set_cookie("access_token", make_token(user_id, "access",
+                                               minutes=ACCESS_TTL_MIN),
+                    httponly=True, samesite="lax", secure=IS_PROD,
                     path="/", max_age=ACCESS_TTL_MIN * 60)
-    resp.set_cookie("refresh_token", refresh, httponly=True, samesite="lax",
+
+
+def set_auth_cookies(resp: Response, user_id: str):
+    _set_access_cookie(resp, user_id)
+    resp.set_cookie("refresh_token",
+                    make_token(user_id, "refresh", days=REFRESH_TTL_DAYS),
+                    httponly=True, samesite="lax", secure=IS_PROD,
                     path="/", max_age=REFRESH_TTL_DAYS * 86400)
 
 
@@ -415,6 +477,50 @@ async def get_user_by_id(db: AsyncSession, user_id: str) -> Optional[User]:
 async def get_user_by_email(db: AsyncSession, email: str) -> Optional[User]:
     res = await db.execute(select(User).where(User.email == email))
     return res.scalar_one_or_none()
+
+
+# ----------------------------------------------------------------------------
+# Rate limiting
+# ----------------------------------------------------------------------------
+# A fixed-window counter held in process memory. Enough to stop credential
+# stuffing and runaway AI spend from one client; swap for Redis if the API is
+# ever run as more than one worker, since each worker keeps its own counts.
+_rate_buckets: Dict[str, List[float]] = {}
+
+
+def _client_key(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def rate_limit(bucket: str, limit: int, window_seconds: int):
+    """Dependency factory: at most `limit` calls per `window_seconds` per IP."""
+    async def dep(request: Request):
+        import time as _t
+        now = _t.time()
+        key = f"{bucket}:{_client_key(request)}"
+        hits = [t for t in _rate_buckets.get(key, []) if now - t < window_seconds]
+        if len(hits) >= limit:
+            retry = int(window_seconds - (now - hits[0])) + 1
+            raise HTTPException(
+                status_code=429,
+                detail="Trop de requêtes. Réessayez dans un instant.",
+                headers={"Retry-After": str(retry)})
+        hits.append(now)
+        _rate_buckets[key] = hits
+        # Opportunistic sweep so the dict cannot grow without bound.
+        if len(_rate_buckets) > 10_000:
+            for k in [k for k, v in _rate_buckets.items()
+                      if not v or now - v[-1] > window_seconds]:
+                _rate_buckets.pop(k, None)
+    return dep
+
+
+# Auth is brute-forceable; AI calls cost money. Both are capped per IP.
+auth_rate_limit = rate_limit("auth", limit=10, window_seconds=300)
+ai_rate_limit = rate_limit("ai", limit=20, window_seconds=300)
 
 
 # ----------------------------------------------------------------------------
@@ -469,6 +575,8 @@ async def check_and_reset_monthly(db: AsyncSession, user: User) -> User:
 
 
 async def enforce_free_limit(db: AsyncSession, user: User) -> User:
+    """Read-only check. Anything that will spend a credit must use
+    reserve_credit() instead, which claims it atomically."""
     user = await check_and_reset_monthly(db, user)
     if user.subscription_status == "premium":
         return user
@@ -509,10 +617,61 @@ async def consume_credit(db: AsyncSession, user_id: str):
     await db.commit()
 
 
+async def reserve_credit(db: AsyncSession, user: User) -> User:
+    """Atomically claim one free credit, or 402 if none are left.
+
+    Checking the count and incrementing it in two statements lets two parallel
+    requests both pass the check, so the increment carries the limit in its
+    WHERE clause and the row lock decides the winner.
+    """
+    user = await check_and_reset_monthly(db, user)
+    if user.subscription_status == "premium":
+        return user
+    res = await db.execute(
+        sa_update(User)
+        .where(User.user_id == user.user_id,
+               User.free_submissions_used < FREE_MONTHLY_LIMIT)
+        .values(free_submissions_used=User.free_submissions_used + 1)
+        .returning(User.free_submissions_used))
+    if res.scalar_one_or_none() is None:
+        await db.rollback()
+        raise HTTPException(
+            status_code=402,
+            detail="Free tier limit reached. Please upgrade to continue.")
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+async def refund_credit(db: AsyncSession, user: User):
+    """Give a reserved credit back when the work could not be graded."""
+    if user.subscription_status == "premium":
+        return
+    await db.execute(
+        sa_update(User)
+        .where(User.user_id == user.user_id, User.free_submissions_used > 0)
+        .values(free_submissions_used=User.free_submissions_used - 1))
+    await db.commit()
+
+
+def user_today(user: User) -> date:
+    """Today's date in the learner's own timezone.
+
+    A candidate in Montréal practising at 8pm is still on 'today'; using UTC
+    would roll their streak over five hours early and grey out the heatmap
+    square they just earned.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(user.timezone or "America/Toronto")).date()
+    except Exception:  # noqa: BLE001 - unknown tz name, fall back to UTC
+        return now_utc().date()
+
+
 async def update_streak(db: AsyncSession, user_id: str) -> dict:
     """A qualifying action happened today; update the streak."""
     user = await get_user_by_id(db, user_id)
-    today = now_utc().date()
+    today = user_today(user)
     last = user.last_activity_date
     if isinstance(last, datetime):
         last = last.date()
@@ -534,6 +693,8 @@ async def update_streak(db: AsyncSession, user_id: str) -> dict:
     longest = max(user.longest_streak or 0, current)
     user.current_streak = current
     user.longest_streak = longest
+    # Stored as the learner's local calendar day at midnight UTC, so reading it
+    # back with .date() returns the same day it was recorded as.
     user.last_activity_date = datetime(today.year, today.month, today.day,
                                        tzinfo=timezone.utc)
     await db.commit()
@@ -542,7 +703,133 @@ async def update_streak(db: AsyncSession, user_id: str) -> dict:
 
 
 # ----------------------------------------------------------------------------
-# AI grading  (unchanged logic)
+# Official TCF Canada task specifications
+# ----------------------------------------------------------------------------
+# These are the real exam constraints, not house rules. Every writing and
+# speaking surface enforces them, and the graders cap the level when a
+# candidate falls outside them — exactly as a real examiner would.
+#
+# Expression écrite: 60 minutes total for the three tâches.
+# Expression orale:  ~12 minutes total; tâches 2 and 3 include preparation time
+#                    during which the candidate does not speak.
+CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
+# Highest score still inside each level, used when a cap is applied.
+LEVEL_MAX_SCORE = {"A1": 19, "A2": 39, "B1": 54, "B2": 69, "C1": 84, "C2": 100}
+
+WRITING_TASKS = {
+    1: {"min_words": 60,  "max_words": 120, "minutes": 15,
+        "name": "Tâche 1 — Message court"},
+    2: {"min_words": 120, "max_words": 150, "minutes": 20,
+        "name": "Tâche 2 — Article, blog ou lettre"},
+    3: {"min_words": 120, "max_words": 180, "minutes": 25,
+        "name": "Tâche 3 — Texte argumentatif"},
+}
+WRITING_TOTAL_SECONDS = 60 * 60
+
+SPEAKING_TASKS = {
+    1: {"prep_seconds": 0,   "speak_seconds": 120, "min_words": 40,
+        "name": "Tâche 1 — Entretien dirigé"},
+    2: {"prep_seconds": 120, "speak_seconds": 210, "min_words": 60,
+        "name": "Tâche 2 — Exercice en interaction"},
+    3: {"prep_seconds": 120, "speak_seconds": 150, "min_words": 90,
+        "name": "Tâche 3 — Expression d'un point de vue"},
+}
+
+# Kept for backwards compatibility with the simulator response shape.
+WORD_GUIDE = {n: (s["min_words"], s["max_words"]) for n, s in WRITING_TASKS.items()}
+
+
+def cap_level(analysis: dict, max_level: str, code: str, **params) -> dict:
+    """Lower a graded result to `max_level` if it sits above it.
+
+    The model is instructed to apply the CEFR caps itself but does not do so
+    reliably, so the rubric is also enforced here — a learner deciding whether
+    to book a real exam must not be told they are a level above their work.
+
+    `code` and `params` are returned rather than a sentence, so the interface
+    can render the reason in whichever language the learner is reading.
+    """
+    if max_level not in LEVEL_MAX_SCORE:
+        return analysis
+    current = analysis.get("tcf_level", "A1")
+    if current not in CEFR_LEVELS:
+        current = "A1"
+    if CEFR_LEVELS.index(current) <= CEFR_LEVELS.index(max_level):
+        return analysis
+    analysis["tcf_level"] = max_level
+    analysis["overall_score"] = min(int(analysis.get("overall_score", 0) or 0),
+                                    LEVEL_MAX_SCORE[max_level])
+    caps = list(analysis.get("caps_applied") or [])
+    caps.append({"code": code, "params": params})
+    analysis["caps_applied"] = caps
+    return analysis
+
+
+def apply_error_cap(analysis: dict) -> dict:
+    """CEFR cap driven by how many real errors the grader found.
+
+    'improvement' entries are style upgrades on correct sentences, so they
+    never count as errors here.
+    """
+    real = [e for e in analysis.get("errors", [])
+            if e.get("category") != "improvement"]
+    n = len(real)
+    if n >= 5:
+        return cap_level(analysis, "B1", "errors5plus", n=n)
+    if n >= 2:
+        return cap_level(analysis, "B2", "errors2to4", n=n)
+    return analysis
+
+
+def apply_writing_length_cap(analysis: dict, text: str,
+                             task_type: Optional[int]) -> dict:
+    """Enforce the official word range for a writing tâche.
+
+    A real examiner penalises an answer that is short of the minimum or well
+    past the maximum, however good the French is. Below half the minimum the
+    answer is not a valid attempt at the task at all.
+    """
+    spec = WRITING_TASKS.get(task_type or 0)
+    words = len([w for w in text.split() if w.strip()])
+    analysis["word_count"] = words
+    if not spec:
+        return analysis
+    analysis["word_guide"] = [spec["min_words"], spec["max_words"]]
+    lo, hi = spec["min_words"], spec["max_words"]
+    if words < lo // 2:
+        return cap_level(analysis, "A2", "lengthNotAttempted", words=words, min=lo)
+    if words < lo:
+        return cap_level(analysis, "B1", "lengthTooShort", words=words, min=lo)
+    if words > hi * 1.5:
+        return cap_level(analysis, "B2", "lengthTooLong", words=words, max=hi)
+    return analysis
+
+
+def apply_speaking_caps(analysis: dict, transcript: str,
+                        task_type: Optional[int]) -> dict:
+    """Length and relevance caps for a spoken answer.
+
+    The word floors approximate the volume of speech the official timings
+    expect; well under it means the candidate stopped far too early.
+    """
+    analysis = apply_error_cap(analysis)
+    if analysis.get("answers_question") is False:
+        analysis = cap_level(analysis, "B1", "offTopic")
+    spec = SPEAKING_TASKS.get(task_type or 0)
+    words = len([w for w in (transcript or "").split() if w.strip()])
+    analysis["word_count"] = words
+    if not spec:
+        return analysis
+    floor = spec["min_words"]
+    if words < floor // 2:
+        return cap_level(analysis, "A2", "speakVeryShort", words=words)
+    if words < floor:
+        return cap_level(analysis, "B1", "speakTooShort", words=words)
+    return analysis
+
+
+# ----------------------------------------------------------------------------
+# AI grading
 # ----------------------------------------------------------------------------
 VALID_CATEGORIES = {"prepositions", "spelling", "conjugation",
                     "gender_number", "anglicism", "improvement"}
@@ -567,12 +854,19 @@ CEFR scoring rubric (overall_score 0-100, tcf_level one of A1,A2,B1,B2,C1,C2):
 - C1 (70-84): fluent, well-structured, rich vocabulary, complex syntax, almost no real errors
 - C2 (85-100): near-native, flawless, idiomatic
 
-Hard capping rules:
-- 5+ basic errors -> A2/B1 maximum
-- 2-4 errors -> B2 maximum
+Hard capping rules (apply them strictly — a candidate must never be told they are above the level their text demonstrates):
+- 5+ real errors -> B1 maximum
+- 2-4 real errors -> B2 maximum
 - 0-1 real errors with good structure -> C1 minimum
 - 0 errors + sophisticated vocabulary and complex syntax -> C2
 - Simple correct sentences without complex structures -> B1 maximum
+"improvement" entries are style upgrades on correct sentences and do NOT count as errors for these caps.
+
+Official TCF Canada length requirements per tâche:
+- Tâche 1 (message court): 60-120 words
+- Tâche 2 (article, blog ou lettre): 120-150 words
+- Tâche 3 (texte argumentatif): 120-180 words
+If the consigne identifies a tâche and the text is under the minimum, say so in improvement_suggestions and lower the level accordingly: a real examiner penalises an under-length answer however good the French is.
 
 improvement_suggestions: 3-5 concrete English tips. linking_words: French connectors the writer should use. vocabulary_suggestions: French words/phrases to enrich the text."""
 
@@ -732,14 +1026,18 @@ def _validate_analysis(data: dict) -> dict:
             "explanation": str(e.get("explanation", "")),
             "category": cat,
         })
-    score = data.get("overall_score", 0)
+    # A missing score or level means the model did not really grade the text.
+    # Defaulting to 0/A1 would tell a learner they are a beginner because of a
+    # malformed response, so treat it as a parse failure instead.
+    if data.get("overall_score") is None or data.get("tcf_level") is None:
+        raise ValueError("grader response missing overall_score/tcf_level")
     try:
-        score = max(0, min(100, int(score)))
+        score = max(0, min(100, int(data["overall_score"])))
     except (TypeError, ValueError):
-        score = 0
-    level = data.get("tcf_level", "A1")
-    if level not in {"A1", "A2", "B1", "B2", "C1", "C2"}:
-        level = "A1"
+        raise ValueError("grader returned a non-numeric overall_score")
+    level = data["tcf_level"]
+    if level not in set(CEFR_LEVELS):
+        raise ValueError(f"grader returned an unknown level: {level!r}")
     return {
         "errors": errors,
         "overall_score": score,
@@ -750,10 +1048,19 @@ def _validate_analysis(data: dict) -> dict:
     }
 
 
-async def analyze_text_with_ai(text: str, topic: Optional[str] = None, db=None) -> dict:
-    """Grade writing using the active provider (Admin panel overrides .env)."""
-    prompt = (f"Topic/consigne: {topic}\n\nText to grade:\n{text}"
-              if topic else f"Text to grade:\n{text}")
+async def analyze_text_with_ai(text: str, topic: Optional[str] = None, db=None,
+                               task_type: Optional[int] = None) -> dict:
+    """Grade writing using the active provider (Admin panel overrides .env).
+
+    `task_type` (1/2/3) enables the official TCF word-range cap; leave it None
+    for free writing, where no official length applies.
+    """
+    spec = WRITING_TASKS.get(task_type or 0)
+    header = f"Topic/consigne: {topic}\n\n" if topic else ""
+    if spec:
+        header += (f"This is TCF Canada {spec['name']}, which requires "
+                   f"{spec['min_words']}-{spec['max_words']} words.\n\n")
+    prompt = f"{header}Text to grade:\n{text}"
     provider = (await get_provider(db, "writing_grader_provider")) if db is not None else WRITING_GRADER_PROVIDER
     raw = await _grade_with_provider(provider, GRADER_SYSTEM, prompt)
     if raw is None:
@@ -764,6 +1071,8 @@ async def analyze_text_with_ai(text: str, topic: Optional[str] = None, db=None) 
         _, _, model = _grader_backend(provider)
         result["ai_provider"] = provider
         result["ai_model"] = model
+        result = apply_error_cap(result)
+        result = apply_writing_length_cap(result, text, task_type)
         return result
     except Exception as exc:  # noqa: BLE001
         log.warning("Could not parse grading JSON (%s): %s", provider, exc)
@@ -812,8 +1121,14 @@ def normalize_error_text(text: str) -> str:
 
 async def record_mistakes(db: AsyncSession, user_id: str, source: str,
                           ref_id: str, analysis: dict,
-                          generate_distractors: bool = True):
-    """Write each detected error into the per-user mistakes table."""
+                          generate_distractors: bool = False):
+    """Write each detected error into the per-user mistakes table.
+
+    Distractors are NOT generated here by default. Doing so cost one sequential
+    LLM round-trip per new error inside the request, which pushed the response
+    past proxy timeouts on submissions with several errors. They are generated
+    on demand the first time a mistake reaches the MCQ review instead.
+    """
     for err in analysis.get("errors", []):
         if err["category"] == "improvement":
             continue  # improvements are not mistakes
@@ -876,7 +1191,8 @@ async def persist_submission(db: AsyncSession, user: User, text: str,
         improvement_suggestions=analysis["improvement_suggestions"],
         linking_words=analysis["linking_words"],
         vocabulary_suggestions=analysis["vocabulary_suggestions"],
-        word_count=len(text.split()),
+        word_count=analysis.get("word_count") or len(text.split()),
+        caps_applied=analysis.get("caps_applied") or [],
         source=source,
         created_at=now_utc(),
     )
@@ -1004,7 +1320,9 @@ async def grade_interaction(consigne: str, history: list, db=None) -> dict:
         _, _, model = _grader_backend(provider)
         result["ai_provider"] = provider
         result["ai_model"] = model
-        return result
+        # Tâche 2 is the interaction task; grade only what the candidate said.
+        spoken = " ".join(str(t.get("text", "")) for t in said)
+        return apply_speaking_caps(result, spoken, 2)
     except Exception as exc:  # noqa: BLE001
         log.warning("Could not parse interaction JSON (%s): %s", provider, exc)
         return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
@@ -1118,14 +1436,23 @@ def _validate_speaking(data: dict) -> dict:
     return base
 
 
-async def analyze_speaking_with_ai(transcript: str, question: str, db=None) -> dict:
-    """Grade a spoken answer using the active provider (Admin overrides .env)."""
+async def analyze_speaking_with_ai(transcript: str, question: str, db=None,
+                                   task_type: Optional[int] = None) -> dict:
+    """Grade a spoken answer using the active provider (Admin overrides .env).
+
+    `task_type` (1/2/3) enables the official TCF speaking caps.
+    """
     if not transcript.strip():
         return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
                 "relevance_comment": "No speech was detected in the recording.",
                 "suggestions": []}
-    prompt = (f"QUESTION (task):\n{question}\n\n"
-              f"TRANSCRIPT of the candidate's spoken answer:\n{transcript}")
+    spec = SPEAKING_TASKS.get(task_type or 0)
+    header = f"QUESTION (task):\n{question}\n\n"
+    if spec:
+        header += (f"This is TCF Canada {spec['name']}, in which the candidate "
+                   f"speaks for {spec['speak_seconds'] // 60} min "
+                   f"{spec['speak_seconds'] % 60:02d} s.\n\n")
+    prompt = f"{header}TRANSCRIPT of the candidate's spoken answer:\n{transcript}"
     provider = (await get_provider(db, "speaking_grader_provider")) if db is not None else SPEAKING_GRADER_PROVIDER
     raw = await _grade_with_provider(provider, SPEAKING_GRADER_SYSTEM, prompt)
     if raw is None:
@@ -1137,7 +1464,7 @@ async def analyze_speaking_with_ai(transcript: str, question: str, db=None) -> d
         _, _, model = _grader_backend(provider)
         result["ai_provider"] = provider
         result["ai_model"] = model
-        return result
+        return apply_speaking_caps(result, transcript, task_type)
     except Exception as exc:  # noqa: BLE001
         log.warning("Could not parse speaking JSON (%s): %s", provider, exc)
         return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
@@ -1148,9 +1475,10 @@ async def analyze_speaking_with_ai(transcript: str, question: str, db=None) -> d
 # Pydantic models
 # ----------------------------------------------------------------------------
 class RegisterIn(BaseModel):
-    name: str = Field(min_length=1)
+    name: str = Field(min_length=1, max_length=120)
     email: EmailStr
-    password: str = Field(min_length=6)
+    # bcrypt only hashes the first 72 bytes, so cap the input there too.
+    password: str = Field(min_length=8, max_length=72)
 
 
 class LoginIn(BaseModel):
@@ -1177,16 +1505,18 @@ class ConverseGradeIn(BaseModel):
 
 
 class AnalyzeIn(BaseModel):
-    text: str = Field(min_length=1)
+    text: str = Field(min_length=1, max_length=MAX_TEXT_CHARS)
     prompt_id: Optional[str] = None
-    topic: Optional[str] = None
-    label: Optional[str] = None  # alias used by paste / topic pages
+    topic: Optional[str] = Field(default=None, max_length=4000)
+    label: Optional[str] = Field(default=None, max_length=300)  # paste / topic pages
     source: Optional[str] = "practice"  # practice | paste
+    # 1/2/3 applies that tâche's official TCF word range; None = free writing.
+    task_type: Optional[int] = Field(default=None, ge=1, le=3)
 
 
 class SimulatorTask(BaseModel):
-    prompt: str
-    text: str
+    prompt: str = Field(max_length=4000)
+    text: str = Field(max_length=MAX_TEXT_CHARS)
 
 
 class SimulatorSubmitIn(BaseModel):
@@ -1234,9 +1564,21 @@ class SimPromptIn(BaseModel):
     text: str
 
 
+class ExamSubmitIn(BaseModel):
+    exam_type: str
+    # question_id -> chosen option id
+    answers: Dict[str, str] = Field(default_factory=dict)
+    time_used_seconds: int = 0
+
+
 class ReviewResult(BaseModel):
     mistake_id: str
-    correct: bool
+    # What the learner picked. The server compares it with the stored
+    # correction rather than trusting a client-sent `correct` flag, which made
+    # XP, badges and streaks forgeable from the console.
+    answer: Optional[str] = Field(default=None, max_length=600)
+    # Self-assessment on a flashcard, where there is nothing to compare.
+    self_rated_correct: Optional[bool] = None
 
 
 class ReviewSubmitIn(BaseModel):
@@ -1449,21 +1791,52 @@ async def run_seeds():
 
 
 # ----------------------------------------------------------------------------
-# Lifespan: create tables + seed
+# Lifespan: create tables + migrate + seed
 # ----------------------------------------------------------------------------
+# create_all() only creates missing tables, so column changes on an existing
+# database need an explicit statement. Each entry must be safe to re-run.
+MIGRATIONS = [
+    # combined_score was declared Integer but always receives a mean like 72.3,
+    # which asyncpg rejects for an int4 parameter.
+    "ALTER TABLE exam_attempts "
+    "ALTER COLUMN combined_score TYPE double precision",
+    # Per-user timezone, so streaks and the heatmap roll over at the learner's
+    # midnight rather than UTC's.
+    "ALTER TABLE users "
+    "ADD COLUMN IF NOT EXISTS timezone VARCHAR(64) DEFAULT 'America/Toronto'",
+    # Awarded bonuses, so a one-off XP reward is not re-granted every session.
+    "ALTER TABLE users "
+    "ADD COLUMN IF NOT EXISTS awarded_bonuses VARCHAR[] DEFAULT '{}'",
+    # Explanation of any TCF cap applied to a graded submission.
+    "ALTER TABLE submissions "
+    "ADD COLUMN IF NOT EXISTS caps_applied JSONB DEFAULT '[]'::jsonb",
+]
+
+
+async def run_migrations():
+    from sqlalchemy import text as sa_text
+    for stmt in MIGRATIONS:
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(sa_text(stmt))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Migration skipped (%s): %s", stmt[:60], exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await run_migrations()
     await run_seeds()
     yield
     await engine.dispose()
 
 
-app = FastAPI(title="TCF Canada Prep API", lifespan=lifespan)
+app = FastAPI(title="monfrançais API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL],
+    allow_origins=[o.strip() for o in FRONTEND_URL.split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1475,7 +1848,7 @@ app.add_middleware(
 # ----------------------------------------------------------------------------
 @app.get("/api/")
 async def root():
-    return {"message": "TCF Canada Prep API", "status": "healthy"}
+    return {"message": "monfrancais API", "status": "healthy"}
 
 
 @app.get("/api/health")
@@ -1483,8 +1856,25 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/api/tcf-spec")
+async def tcf_spec():
+    """The official TCF Canada constraints, so the UI and the grader can never
+    drift apart on word ranges or timings."""
+    return {
+        "writing": {
+            "total_seconds": WRITING_TOTAL_SECONDS,
+            "tasks": {str(n): s for n, s in WRITING_TASKS.items()},
+        },
+        "speaking": {"tasks": {str(n): s for n, s in SPEAKING_TASKS.items()}},
+        "free_monthly_limit": FREE_MONTHLY_LIMIT,
+        "free_model_answer_limit": FREE_MODEL_ANSWER_LIMIT,
+        "free_conversation_limit": FREE_CONVERSATION_LIMIT,
+        "max_text_chars": MAX_TEXT_CHARS,
+    }
+
+
 @app.get("/api/speaking/diag")
-async def speaking_diag():
+async def speaking_diag(admin: User = Depends(get_admin_user)):
     """Diagnostics for the speaking pipeline: which providers are configured
     and whether their SDKs are importable. Visit /api/speaking/diag to debug.
     Does NOT reveal key values — only whether they are set."""
@@ -1536,7 +1926,8 @@ async def speaking_diag():
 # ----------------------------------------------------------------------------
 @app.post("/api/auth/register")
 async def register(body: RegisterIn, response: Response,
-                   db: AsyncSession = Depends(get_db)):
+                   db: AsyncSession = Depends(get_db),
+                   _rl=Depends(auth_rate_limit)):
     email = body.email.lower()
     if await get_user_by_email(db, email):
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -1563,7 +1954,8 @@ async def register(body: RegisterIn, response: Response,
 
 @app.post("/api/auth/login")
 async def login(body: LoginIn, response: Response,
-                db: AsyncSession = Depends(get_db)):
+                db: AsyncSession = Depends(get_db),
+                _rl=Depends(auth_rate_limit)):
     user = await get_user_by_email(db, body.email.lower())
     if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -1581,9 +1973,7 @@ async def refresh(request: Request, response: Response,
     user = await get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
-    access = make_token(user_id, "access", minutes=ACCESS_TTL_MIN)
-    response.set_cookie("access_token", access, httponly=True, samesite="lax",
-                        path="/", max_age=ACCESS_TTL_MIN * 60)
+    _set_access_cookie(response, user_id)
     return {"user": public_user(user)}
 
 
@@ -1637,14 +2027,18 @@ def _sse(event: str, data: Any) -> str:
 @app.post("/api/analyze/stream")
 async def analyze_stream(body: AnalyzeIn,
                          user: User = Depends(get_current_user),
-                         db: AsyncSession = Depends(get_db)):
-    user = await enforce_free_limit(db, user)
+                         db: AsyncSession = Depends(get_db),
+                         _rl=Depends(ai_rate_limit)):
+    # The credit is claimed up front so two parallel tabs cannot both slip past
+    # the limit, and refunded below if the text could not actually be graded.
+    user = await reserve_credit(db, user)
     source = body.source if body.source in {"practice", "paste"} else "practice"
 
     async def gen():
         try:
             task = asyncio.create_task(
-                analyze_text_with_ai(body.text, body.topic or body.label, db=db))
+                analyze_text_with_ai(body.text, body.topic or body.label, db=db,
+                                     task_type=body.task_type))
             for stage in STAGES:
                 yield _sse("stage", {"stage": stage})
                 await asyncio.sleep(0.6)
@@ -1664,23 +2058,37 @@ async def analyze_stream(body: AnalyzeIn,
                         task.cancel()
                         log.warning("Grading exceeded %ss - giving up",
                                     STREAM_MAX_WAIT_SECONDS)
+                        await refund_credit(db, user)
                         yield _sse("error", {"detail": AI_TIMEOUT_DETAIL,
                                              "status": 504})
                         return
                     yield ": keep-alive\n\n"
             if analysis.get("ai_unavailable"):
-                # Don't persist an empty correction or burn a credit for it.
+                # Don't persist an empty correction or charge for it.
+                await refund_credit(db, user)
                 yield _sse("error", {"detail": AI_UNAVAILABLE_DETAIL,
                                      "status": 503})
                 return
-            sub = await persist_submission(
-                db, user, body.text, body.prompt_id, analysis, source=source)
+            # persist_submission can take a moment; keep the socket warm so a
+            # proxy does not drop a connection whose work is already done.
+            save = asyncio.create_task(persist_submission(
+                db, user, body.text, body.prompt_id, analysis, source=source,
+                consume=False))
+            while True:
+                try:
+                    sub = await asyncio.wait_for(asyncio.shield(save),
+                                                 timeout=STREAM_PING_SECONDS)
+                    break
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
             yield _sse("complete", sub)
         except HTTPException as exc:
+            await refund_credit(db, user)
             yield _sse("error", {"detail": exc.detail,
                                  "status": exc.status_code})
         except Exception:  # noqa: BLE001
             log.exception("Stream analysis failed")
+            await refund_credit(db, user)
             yield _sse("error",
                        {"detail": "AI analysis temporarily unavailable"})
 
@@ -1692,15 +2100,17 @@ async def analyze_stream(body: AnalyzeIn,
 @app.post("/api/submissions")
 async def create_submission(body: AnalyzeIn,
                             user: User = Depends(get_current_user),
-                            db: AsyncSession = Depends(get_db)):
-    user = await enforce_free_limit(db, user)
+                            db: AsyncSession = Depends(get_db),
+                            _rl=Depends(ai_rate_limit)):
+    user = await reserve_credit(db, user)
     source = body.source if body.source in {"practice", "paste"} else "practice"
-    analysis = await analyze_text_with_ai(body.text, body.topic or body.label, db=db)
+    analysis = await analyze_text_with_ai(body.text, body.topic or body.label,
+                                          db=db, task_type=body.task_type)
     if analysis.get("ai_unavailable"):
+        await refund_credit(db, user)
         raise HTTPException(status_code=503, detail=AI_UNAVAILABLE_DETAIL)
-    sub = await persist_submission(db, user, body.text, body.prompt_id,
-                                   analysis, source=source)
-    return sub
+    return await persist_submission(db, user, body.text, body.prompt_id,
+                                    analysis, source=source, consume=False)
 
 
 @app.get("/api/submissions")
@@ -1754,18 +2164,30 @@ WORD_GUIDE = {1: (60, 120), 2: (120, 150), 3: (120, 180)}
 @app.post("/api/simulator/submit")
 async def simulator_submit(body: SimulatorSubmitIn,
                            user: User = Depends(get_current_user),
-                           db: AsyncSession = Depends(get_db)):
-    user = await enforce_free_limit(db, user)
+                           db: AsyncSession = Depends(get_db),
+                           _rl=Depends(ai_rate_limit)):
+    user = await reserve_credit(db, user)
     attempt_id = new_id("att")
     tasks_out = {}
     scores = []
     levels = []
-    level_order = ["A1", "A2", "B1", "B2", "C1", "C2"]
+    graded_any = False
     for i, task in ((1, body.task1), (2, body.task2), (3, body.task3)):
         if task.text.strip():
-            analysis = await analyze_text_with_ai(task.text, task.prompt, db=db)
+            # task_type applies the official word range for this tâche.
+            analysis = await analyze_text_with_ai(task.text, task.prompt, db=db,
+                                                  task_type=i)
+            if analysis.get("ai_unavailable"):
+                # The grader is down. Charging for an ungraded exam and telling
+                # the candidate they are A1 would be worse than failing loudly.
+                await refund_credit(db, user)
+                raise HTTPException(status_code=503,
+                                    detail=AI_UNAVAILABLE_DETAIL)
+            graded_any = True
         else:
-            analysis = dict(FALLBACK_ANALYSIS)
+            # Left blank: a real examiner scores an unattempted tâche at zero.
+            analysis = {**dict(FALLBACK_ANALYSIS), "ai_unavailable": False,
+                        "not_attempted": True}
         tasks_out[f"task{i}"] = {
             "prompt": task.prompt, "text": task.text, "analysis": analysis,
             "word_count": len(task.text.split()),
@@ -1775,9 +2197,14 @@ async def simulator_submit(body: SimulatorSubmitIn,
         levels.append(analysis["tcf_level"])
         await record_mistakes(db, user.user_id, "simulator", attempt_id,
                               analysis)
+    if not graded_any:
+        await refund_credit(db, user)
+        raise HTTPException(
+            status_code=400,
+            detail="Aucune tâche n'a été rédigée : rien à corriger.")
     combined = round(sum(scores) / 3, 1)
-    tcf_level = level_order[
-        min(round(sum(level_order.index(l) for l in levels) / 3), 5)]
+    tcf_level = CEFR_LEVELS[
+        min(round(sum(CEFR_LEVELS.index(l) for l in levels) / 3), 5)]
     attempt = ExamAttempt(
         attempt_id=attempt_id, user_id=user.user_id,
         task1=tasks_out["task1"], task2=tasks_out["task2"],
@@ -1787,7 +2214,7 @@ async def simulator_submit(body: SimulatorSubmitIn,
     )
     db.add(attempt)
     await db.commit()
-    await consume_credit(db, user.user_id)  # one credit per run, not three
+    # The single credit for the run was already reserved before grading.
     streak = await update_streak(db, user.user_id)
     out = _row_to_dict(attempt)
     out["streak"] = streak
@@ -1855,23 +2282,38 @@ async def dashboard_stats(user: User = Depends(get_current_user),
 @app.get("/api/dashboard/heatmap")
 async def dashboard_heatmap(user: User = Depends(get_current_user),
                             db: AsyncSession = Depends(get_db)):
+    """Activity per day, bucketed in the learner's timezone.
+
+    Timestamps are stored in UTC, so an evening session in Montréal would land
+    on tomorrow's square if it were bucketed as-is.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(user.timezone or "America/Toronto")
+    except Exception:  # noqa: BLE001
+        tz = timezone.utc
     since = now_utc() - timedelta(days=365)
     out: Dict[str, int] = {}
+
+    def bump(d):
+        if isinstance(d, datetime):
+            local = d.astimezone(tz) if d.tzinfo else d.replace(tzinfo=timezone.utc).astimezone(tz)
+            key = local.strftime("%Y-%m-%d")
+        else:
+            key = str(d)[:10]
+        out[key] = out.get(key, 0) + 1
+
     res = await db.execute(
         select(Submission).where(Submission.user_id == user.user_id,
                                  Submission.created_at >= since))
     for s in res.scalars().all():
-        d = s.created_at
-        key = d.strftime("%Y-%m-%d") if isinstance(d, datetime) else str(d)[:10]
-        out[key] = out.get(key, 0) + 1
+        bump(s.created_at)
     res = await db.execute(
         select(ReviewSession).where(ReviewSession.user_id == user.user_id,
                                     ReviewSession.created_at >= since))
     for r in res.scalars().all():
-        d = r.created_at
-        key = d.strftime("%Y-%m-%d") if isinstance(d, datetime) else str(d)[:10]
-        out[key] = out.get(key, 0) + 1
-    return {"heatmap": out}
+        bump(r.created_at)
+    return {"heatmap": out, "timezone": user.timezone or "America/Toronto"}
 
 
 CATEGORY_TIPS = {
@@ -1980,7 +2422,20 @@ async def review_queue(category: Optional[str] = None,
         stmt = stmt.where(Mistake.category == category)
     stmt = stmt.order_by(Mistake.srs_due_at.asc()).limit(limit)
     res = await db.execute(stmt)
-    return {"due": [_row_to_dict(m) for m in res.scalars().all()]}
+    due = res.scalars().all()
+    # Fill in any missing MCQ distractors now, concurrently, rather than one at
+    # a time inside the grading request. The static fallback keeps this fast.
+    pending = [m for m in due if not (m.distractor or "").strip()
+               or m.distractor == "réponse incorrecte"]
+    if pending:
+        generated = await asyncio.gather(*[
+            generate_distractor(m.error_text, m.correction, m.category, db=db)
+            for m in pending], return_exceptions=True)
+        for m, d in zip(pending, generated):
+            if isinstance(d, str) and d.strip():
+                m.distractor = d
+        await db.commit()
+    return {"due": [_row_to_dict(m) for m in due]}
 
 
 @app.post("/api/review/submit")
@@ -1990,6 +2445,7 @@ async def review_submit(body: ReviewSubmitIn,
     xp = 0
     mastered_now: List[str] = []
     new_badges: List[str] = []
+    graded: List[dict] = []
     for r in body.results:
         res = await db.execute(
             select(Mistake).where(Mistake.mistake_id == r.mistake_id,
@@ -1997,7 +2453,15 @@ async def review_submit(body: ReviewSubmitIn,
         m = res.scalar_one_or_none()
         if not m:
             continue
-        if r.correct:
+        # MCQ and sprint send the picked answer, which the server checks against
+        # the stored correction. Flashcards have no comparable answer, so the
+        # learner's own "I got it" is the only signal available there.
+        if r.answer is not None:
+            correct = normalize_error_text(r.answer) == normalize_error_text(m.correction)
+        else:
+            correct = bool(r.self_rated_correct)
+        graded.append({"mistake_id": m.mistake_id, "correct": correct})
+        if correct:
             xp += XP_PER_CORRECT
             streak_ok = (m.srs_consecutive_got_it or 0) + 1
             idx = m.srs_interval_index or 0
@@ -2029,7 +2493,13 @@ async def review_submit(body: ReviewSubmitIn,
             Mistake.status == "mastered"))
     if (n_conj or 0) >= 25 and slayer not in badges:
         new_badges.append(slayer)
+    # Clearing a category pays once. Re-checking every session meant the bonus
+    # was granted again on every submission for the rest of the account's life.
+    awarded = set(user_doc.awarded_bonuses or [])
     for cat in VALID_CATEGORIES:
+        token = f"category_clear:{cat}"
+        if token in awarded:
+            continue
         remaining = await db.scalar(
             select(func.count()).select_from(Mistake).where(
                 Mistake.user_id == user.user_id, Mistake.category == cat,
@@ -2039,22 +2509,25 @@ async def review_submit(body: ReviewSubmitIn,
                 Mistake.user_id == user.user_id, Mistake.category == cat))
         if had_any and not remaining:
             xp += XP_CATEGORY_CLEAR_BONUS
+            awarded.add(token)
     badges.update(new_badges)
     session = ReviewSession(
         session_id=new_id("rev"), user_id=user.user_id, mode=body.mode,
-        mistake_ids=[r.mistake_id for r in body.results],
-        results=[r.dict() for r in body.results],
+        mistake_ids=[g["mistake_id"] for g in graded],
+        results=graded,
         xp_earned=xp, created_at=now_utc(),
     )
     db.add(session)
     prev_xp = user_doc.xp or 0
     user_doc.xp = prev_xp + xp
     user_doc.badges = sorted(badges)
+    user_doc.awarded_bonuses = sorted(awarded)
     await db.commit()
     streak = await update_streak(db, user.user_id)
     return {"session": _row_to_dict(session), "xp_earned": xp,
             "newly_mastered": mastered_now, "badges": new_badges,
             "total_xp": prev_xp + xp,
+            "graded": graded,  # so the client can show what it actually got
             "streak": streak}
 
 
@@ -2081,12 +2554,61 @@ async def review_mastery(user: User = Depends(get_current_user),
 # ----------------------------------------------------------------------------
 @app.get("/api/exam/questions/{exam_type}")
 async def exam_questions(exam_type: str, db: AsyncSession = Depends(get_db)):
+    """Questions without the answer key — grading happens server-side."""
     if exam_type not in {"reading-comprehension", "oral-comprehension"}:
         raise HTTPException(status_code=404, detail="Unknown exam type")
     res = await db.execute(
         select(ExamQuestion).where(ExamQuestion.exam_type == exam_type,
                                    ExamQuestion.is_active == True))  # noqa: E712
-    return {"questions": [_row_to_dict(q) for q in res.scalars().all()]}
+    return {"questions": [_row_to_dict(q, drop=("correct_answer",))
+                          for q in res.scalars().all()]}
+
+
+@app.post("/api/exam/submit")
+async def exam_submit(body: ExamSubmitIn,
+                      user: User = Depends(get_current_user),
+                      db: AsyncSession = Depends(get_db)):
+    """Grade a mock exam and record it, so it counts towards streak and history.
+
+    Shipping the answer key to the browser let anyone read it in DevTools, and
+    scoring in the client meant a completed mock exam produced no data at all.
+    """
+    if body.exam_type not in {"reading-comprehension", "oral-comprehension"}:
+        raise HTTPException(status_code=404, detail="Unknown exam type")
+    res = await db.execute(
+        select(ExamQuestion).where(ExamQuestion.exam_type == body.exam_type,
+                                   ExamQuestion.is_active == True))  # noqa: E712
+    questions = res.scalars().all()
+    if not questions:
+        raise HTTPException(status_code=503, detail="No questions available")
+    key = {q.question_id: q.correct_answer for q in questions}
+    corrections = {
+        qid: {"correct_answer": answer,
+              "picked": body.answers.get(qid),
+              "is_correct": body.answers.get(qid) == answer}
+        for qid, answer in key.items()
+    }
+    score = sum(1 for c in corrections.values() if c["is_correct"])
+    attempt = MockExamAttempt(
+        mock_attempt_id=new_id("mock"), user_id=user.user_id,
+        exam_type=body.exam_type, answers=body.answers,
+        score=score, total=len(questions),
+        time_used_seconds=body.time_used_seconds, created_at=now_utc(),
+    )
+    db.add(attempt)
+    await db.commit()
+    streak = await update_streak(db, user.user_id)
+    return {"score": score, "total": len(questions),
+            "corrections": corrections, "streak": streak}
+
+
+@app.get("/api/exam/attempts")
+async def exam_attempts(user: User = Depends(get_current_user),
+                        db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(MockExamAttempt).where(MockExamAttempt.user_id == user.user_id)
+        .order_by(MockExamAttempt.created_at.desc()).limit(50))
+    return {"attempts": [_row_to_dict(a) for a in res.scalars().all()]}
 
 
 # ----------------------------------------------------------------------------
@@ -2095,18 +2617,32 @@ async def exam_questions(exam_type: str, db: AsyncSession = Depends(get_db)):
 @app.post("/api/speaking/analyze")
 async def speaking_analyze(question: str = Form(...),
                            audio: UploadFile = File(...),
+                           task_type: Optional[int] = Form(None),
                            user: User = Depends(get_current_user),
-                           db: AsyncSession = Depends(get_db)):
-    user = await enforce_free_limit(db, user)
+                           db: AsyncSession = Depends(get_db),
+                           _rl=Depends(ai_rate_limit)):
+    user = await reserve_credit(db, user)
     audio_bytes = await audio.read()
     if not audio_bytes:
+        await refund_credit(db, user)
         raise HTTPException(status_code=400, detail="Empty audio upload")
+    if len(audio_bytes) > MAX_AUDIO_BYTES:
+        await refund_credit(db, user)
+        raise HTTPException(
+            status_code=413,
+            detail=f"Enregistrement trop volumineux (max {MAX_AUDIO_BYTES // (1024 * 1024)} Mo).")
+    if task_type not in (1, 2, 3):
+        task_type = None
     transcript = await transcribe_audio(audio_bytes, audio.filename or "audio.webm", db=db)
-    analysis = await analyze_speaking_with_ai(transcript, question, db=db)
+    analysis = await analyze_speaking_with_ai(transcript, question, db=db,
+                                              task_type=task_type)
+    if analysis.get("ai_unavailable"):
+        await refund_credit(db, user)
+        raise HTTPException(status_code=503, detail=AI_UNAVAILABLE_DETAIL)
     analysis["transcript"] = transcript
     sub = await persist_submission(
         db, user, transcript or "(no speech detected)", None, analysis,
-        source="speaking")
+        source="speaking", consume=False)
     analysis["submission_id"] = sub.get("submission_id")
     analysis["streak"] = sub.get("streak")
     return analysis
@@ -2115,13 +2651,16 @@ async def speaking_analyze(question: str = Form(...),
 @app.post("/api/speaking/turn/transcribe")
 async def speaking_turn_transcribe(audio: UploadFile = File(...),
                                    user: User = Depends(get_current_user),
-                                   db: AsyncSession = Depends(get_db)):
+                                   db: AsyncSession = Depends(get_db),
+                                   _rl=Depends(ai_rate_limit)):
     """Transcribe a single conversational turn. Used by browsers without live
     speech recognition; costs no credit because the graded unit is the whole
     conversation, not the turn."""
     audio_bytes = await audio.read()
     if not audio_bytes:
         raise HTTPException(status_code=400, detail="Empty audio upload")
+    if len(audio_bytes) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="Enregistrement trop volumineux.")
     text = await transcribe_audio(audio_bytes, audio.filename or "turn.webm", db=db)
     return {"text": text}
 
@@ -2129,7 +2668,8 @@ async def speaking_turn_transcribe(audio: UploadFile = File(...),
 @app.post("/api/speaking/converse")
 async def speaking_converse(body: ConverseIn,
                             user: User = Depends(get_current_user),
-                            db: AsyncSession = Depends(get_db)):
+                            db: AsyncSession = Depends(get_db),
+                            _rl=Depends(ai_rate_limit)):
     """One in-character reply from the roleplay partner (Tache 2)."""
     history = [t.model_dump() for t in body.history]
     reply = await interaction_reply(body.consigne, history, db=db)
@@ -2142,16 +2682,21 @@ async def speaking_converse(body: ConverseIn,
 @app.post("/api/speaking/converse/grade")
 async def speaking_converse_grade(body: ConverseGradeIn,
                                   user: User = Depends(get_current_user),
-                                  db: AsyncSession = Depends(get_db)):
+                                  db: AsyncSession = Depends(get_db),
+                                  _rl=Depends(ai_rate_limit)):
     """Grade a finished conversation. Tache 2 spends one AI credit; open-ended
     practice draws on the separate free-conversation allowance."""
     free_mode = body.mode == "free"
     if free_mode:
         user = await enforce_free_conversation_limit(db, user)
     else:
-        user = await enforce_free_limit(db, user)
+        user = await reserve_credit(db, user)
     history = [t.model_dump() for t in body.history]
     analysis = await grade_interaction(body.consigne, history, db=db)
+    if analysis.get("ai_unavailable"):
+        if not free_mode:
+            await refund_credit(db, user)
+        raise HTTPException(status_code=503, detail=AI_UNAVAILABLE_DETAIL)
     transcript = "\n".join(
         f"{'Candidat' if t['role'] == 'candidate' else 'Agent'} : {t['text']}"
         for t in history if str(t.get("text", "")).strip())
@@ -2159,7 +2704,7 @@ async def speaking_converse_grade(body: ConverseGradeIn,
     sub = await persist_submission(
         db, user, transcript or "(no speech detected)", None, analysis,
         source="conversation" if free_mode else "speaking",
-        consume=not free_mode)
+        consume=False)  # the credit, if any, was reserved above
     analysis["submission_id"] = sub.get("submission_id")
     analysis["streak"] = sub.get("streak")
     return analysis
@@ -2185,10 +2730,10 @@ async def recent_topics(task_type: Optional[int] = None,
 async def recent_topic(topic_id: str,
                        user: User = Depends(get_current_user),
                        db: AsyncSession = Depends(get_db)):
-    """Topic detail. The model answer is included for premium users always,
-    and for free users on up to FREE_MODEL_ANSWER_LIMIT distinct topics
-    (re-reading an already-unlocked topic is free). Past the limit the
-    answer is withheld and `model_answer_locked` is set instead."""
+    """Topic detail. Never spends an unlock — merely opening a page must not
+    cost the learner one of their three free model answers. The answer is
+    returned only if already unlocked (or premium); otherwise the client shows
+    a Reveal button that calls the POST below."""
     res = await db.execute(
         select(RecentTopic).where(RecentTopic.topic_id == topic_id,
                                   RecentTopic.is_active == True))  # noqa: E712
@@ -2197,21 +2742,45 @@ async def recent_topic(topic_id: str,
         raise HTTPException(status_code=404, detail="Topic not found")
     t = _row_to_dict(t_obj)
     model_answer = t.pop("model_answer", "")
-    t["model_answer_locked"] = False
-    if user.subscription_status == "premium":
+    unlocked = user.model_answer_topic_ids or []
+    premium = user.subscription_status == "premium"
+    t["model_answers_remaining"] = (
+        None if premium
+        else max(0, FREE_MODEL_ANSWER_LIMIT - len(unlocked)))
+    if premium or topic_id in unlocked:
         t["model_answer"] = model_answer
+        t["model_answer_locked"] = False
     else:
-        unlocked = user.model_answer_topic_ids or []
-        if topic_id in unlocked:
-            t["model_answer"] = model_answer
-        elif len(unlocked) < FREE_MODEL_ANSWER_LIMIT:
-            user.model_answer_topic_ids = list(unlocked) + [topic_id]
-            user.model_answers_read = (user.model_answers_read or 0) + 1
-            await db.commit()
-            t["model_answer"] = model_answer
-        else:
-            t["model_answer_locked"] = True
+        t["model_answer_locked"] = True
     return {"topic": t}
+
+
+@app.post("/api/recent-topics/{topic_id}/reveal")
+async def reveal_model_answer(topic_id: str,
+                              user: User = Depends(get_current_user),
+                              db: AsyncSession = Depends(get_db)):
+    """Deliberately spend one of the free model-answer unlocks."""
+    res = await db.execute(
+        select(RecentTopic).where(RecentTopic.topic_id == topic_id,
+                                  RecentTopic.is_active == True))  # noqa: E712
+    t_obj = res.scalar_one_or_none()
+    if not t_obj:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    unlocked = list(user.model_answer_topic_ids or [])
+    premium = user.subscription_status == "premium"
+    if not premium and topic_id not in unlocked:
+        if len(unlocked) >= FREE_MODEL_ANSWER_LIMIT:
+            raise HTTPException(
+                status_code=402,
+                detail=(f"Vous avez utilisé vos {FREE_MODEL_ANSWER_LIMIT} corrigés "
+                        "modèles gratuits. Passez à la version Pro pour tous les voir."))
+        user.model_answer_topic_ids = unlocked + [topic_id]
+        user.model_answers_read = (user.model_answers_read or 0) + 1
+        await db.commit()
+        unlocked = user.model_answer_topic_ids
+    return {"model_answer": t_obj.model_answer,
+            "model_answers_remaining": (None if premium
+                                        else max(0, FREE_MODEL_ANSWER_LIMIT - len(unlocked)))}
 
 
 # ----------------------------------------------------------------------------
@@ -2537,7 +3106,7 @@ class BlogPost(Base):
     content: Mapped[str] = mapped_column(Text)            # markdown or HTML
     cover_image: Mapped[str] = mapped_column(Text, default="")
     meta_description: Mapped[str] = mapped_column(Text, default="")
-    author: Mapped[str] = mapped_column(String(120), default="MonFrancais")
+    author: Mapped[str] = mapped_column(String(120), default="monfrancais")
     tags: Mapped[Any] = mapped_column(JSONB, default=list)
     is_published: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -2564,7 +3133,7 @@ class BlogPostIn(BaseModel):
     excerpt: Optional[str] = ""
     cover_image: Optional[str] = ""
     meta_description: Optional[str] = ""
-    author: Optional[str] = "MonFrancais"
+    author: Optional[str] = "monfrancais"
     tags: Optional[List[str]] = None
     is_published: Optional[bool] = True
     slug: Optional[str] = None  # auto-generated from title if omitted
@@ -2654,7 +3223,7 @@ async def admin_create_blog(body: BlogPostIn,
         content=body.content,
         cover_image=body.cover_image or "",
         meta_description=body.meta_description or (body.excerpt or "")[:160],
-        author=body.author or "MonFrancais",
+        author=body.author or "monfrancais",
         tags=body.tags or [],
         is_published=body.is_published if body.is_published is not None else True,
         created_at=now,

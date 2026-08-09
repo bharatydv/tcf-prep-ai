@@ -20,6 +20,31 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// The access cookie expires after an hour. Without this, any call that happens
+// to cross that boundary just fails — losing, for example, an essay the learner
+// spent twenty minutes on. Refresh once, then replay the original request.
+let refreshing = null;
+api.interceptors.response.use(
+  (res) => res,
+  async (error) => {
+    const original = error.config;
+    const status = error?.response?.status;
+    const isRefreshCall = original?.url?.includes('/auth/refresh');
+    if (status !== 401 || !original || original._retried || isRefreshCall) {
+      return Promise.reject(error);
+    }
+    original._retried = true;
+    try {
+      // One shared refresh, so N parallel 401s don't fire N refresh calls.
+      refreshing = refreshing || api.post('/auth/refresh').finally(() => { refreshing = null; });
+      await refreshing;
+      return api(original);
+    } catch {
+      return Promise.reject(error);
+    }
+  },
+);
+
 // Exporting baseURL as BACKEND_URL for consistency
 export const BACKEND_URL = "";
 
@@ -92,4 +117,4 @@ export const errMsg = (err, defaultMsg) => {
   return err.response?.data?.detail || err.message || defaultMsg;
 };
 export const CATEGORY_META = CATEGORIES;
-export const ACCENTS = ["é", "è", "ê", "ë", "à", "â", "ç", "î", "ï", "ô", "û", "ù", "ü", "œ", "«", "»", "'"];
+export const ACCENTS = ["é", "è", "ê", "ë", "à", "â", "ç", "î", "ï", "ô", "û", "ù", "ü", "œ", "«", "»", "’"];

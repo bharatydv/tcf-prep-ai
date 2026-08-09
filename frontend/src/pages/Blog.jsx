@@ -4,12 +4,11 @@ import {
   Sparkle, MagnifyingGlass, ArrowRight, CalendarBlank, Star,
 } from '@phosphor-icons/react';
 import { api } from '../lib/api';
+import { formatDate, useI18n } from '../i18n';
 
-function fmtDate(d) {
-  if (!d) return '';
-  try { return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }); }
-  catch { return String(d).slice(0, 10); }
-}
+/* Sentinel for "no category filter". Kept separate from its label so the
+   filter keeps working when the label is translated. */
+const ALL_CATS = '__all__';
 
 /* Decorative Eiffel Tower / Paris skyline (inline SVG, no external asset) */
 function ParisSkyline() {
@@ -34,30 +33,31 @@ function ParisSkyline() {
 }
 
 export default function Blog() {
+  const { t, lang } = useI18n();
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
-  const [activeCat, setActiveCat] = useState('All');
+  const [activeCat, setActiveCat] = useState(ALL_CATS);
 
   useEffect(() => {
-    document.title = 'Blog — TEF / TCF tips, guides & strategies | MonFrancais';
+    document.title = t('blog.docTitle');
     api.get('/api/blog')
       .then(({ data }) => setPosts(data.posts || []))
       .catch(() => setPosts([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [t]);
 
   // Build category list from post tags
   const categories = useMemo(() => {
     const set = new Set();
-    posts.forEach((p) => (p.tags || []).forEach((t) => set.add(t)));
-    return ['All', ...Array.from(set)];
+    posts.forEach((p) => (p.tags || []).forEach((tag) => set.add(tag)));
+    return [ALL_CATS, ...Array.from(set)];
   }, [posts]);
 
   // Filter by search + category
   const filtered = useMemo(() => {
     return posts.filter((p) => {
-      const matchesCat = activeCat === 'All' || (p.tags || []).includes(activeCat);
+      const matchesCat = activeCat === ALL_CATS || (p.tags || []).includes(activeCat);
       const q = query.trim().toLowerCase();
       const matchesQuery = !q
         || (p.title || '').toLowerCase().includes(q)
@@ -81,15 +81,13 @@ export default function Blog() {
         </div>
         <div className="relative mx-auto max-w-4xl px-4 pb-12 pt-12 text-center sm:px-6">
           <span className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-white/80 px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider text-primary shadow-sm">
-            <Sparkle size={14} weight="fill" /> Blog
+            <Sparkle size={14} weight="fill" /> {t('blog.badge')}
           </span>
           <h1 className="mt-4 font-heading text-4xl font-extrabold leading-tight tracking-tight text-gray-900 sm:text-5xl">
-            TEF / TCF{' '}
-            <span className="bg-gradient-to-r from-primary via-fuchsia-600 to-fuchsia-500 bg-clip-text text-transparent">Tips &amp; Guides</span>
+            {t('blog.heroA')}{' '}
+            <span className="bg-gradient-to-r from-primary via-fuchsia-600 to-fuchsia-500 bg-clip-text text-transparent">{t('blog.heroB')}</span>
           </h1>
-          <p className="mx-auto mt-3 max-w-xl text-[15px] leading-relaxed text-gray-700">
-            Strategies, study plans and writing tips to help you reach CLB 7 and beyond on the TEF and TCF exams.
-          </p>
+          <p className="mx-auto mt-3 max-w-xl text-[15px] leading-relaxed text-gray-700">{t('blog.heroSub')}</p>
 
           {/* Search */}
           <div className="mx-auto mt-6 flex max-w-md items-center gap-2 rounded-full border border-violet-200 bg-white/90 px-4 py-2 shadow-sm">
@@ -97,7 +95,7 @@ export default function Blog() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search articles…"
+              placeholder={t('blog.searchPlaceholder')}
               className="w-full bg-transparent text-sm outline-none placeholder:text-gray-400"
               data-testid="blog-search"
             />
@@ -117,7 +115,7 @@ export default function Blog() {
                       : 'border border-violet-200 bg-white/80 text-gray-600 hover:bg-white'
                   }`}
                 >
-                  {c}
+                  {c === ALL_CATS ? t('blog.allCategories') : c}
                 </button>
               ))}
             </div>
@@ -133,10 +131,10 @@ export default function Blog() {
         ) : filtered.length === 0 ? (
           <div className="rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-12 text-center shadow-soft">
             <p className="font-heading text-lg font-bold text-gray-900">
-              {posts.length === 0 ? 'No articles yet' : 'No articles match your search'}
+              {posts.length === 0 ? t('blog.emptyTitle') : t('blog.noMatchTitle')}
             </p>
             <p className="mt-2 text-sm text-gray-600">
-              {posts.length === 0 ? 'New posts are on the way — check back soon!' : 'Try a different keyword or category.'}
+              {posts.length === 0 ? t('blog.emptyBody') : t('blog.noMatchBody')}
             </p>
           </div>
         ) : (
@@ -145,7 +143,7 @@ export default function Blog() {
             {featured && (
               <div className="mb-10">
                 <h2 className="mb-4 flex items-center gap-2 font-heading text-sm font-bold uppercase tracking-wide text-primary">
-                  <Star size={16} weight="fill" /> Featured article
+                  <Star size={16} weight="fill" /> {t('blog.featured')}
                 </h2>
                 <Link
                   to={`/blog/${featured.slug}`}
@@ -172,10 +170,10 @@ export default function Blog() {
                     <p className="mt-3 text-sm leading-relaxed text-gray-600">{featured.excerpt}</p>
                     <div className="mt-5 flex items-center justify-between">
                       <span className="flex items-center gap-1.5 text-xs text-gray-400">
-                        <CalendarBlank size={14} /> {fmtDate(featured.created_at)}
+                        <CalendarBlank size={14} /> {formatDate(featured.created_at, lang)}
                       </span>
                       <span className="flex items-center gap-1 text-sm font-semibold text-primary">
-                        Read <ArrowRight size={15} weight="bold" />
+                        {t('blog.read')} <ArrowRight size={15} weight="bold" />
                       </span>
                     </div>
                   </div>
@@ -186,7 +184,7 @@ export default function Blog() {
             {/* LATEST GRID */}
             {rest.length > 0 && (
               <>
-                <h2 className="mb-4 font-heading text-xl font-extrabold text-gray-900">Latest articles</h2>
+                <h2 className="mb-4 font-heading text-xl font-extrabold text-gray-900">{t('blog.latest')}</h2>
                 <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                   {rest.map((p) => (
                     <Link
@@ -213,10 +211,10 @@ export default function Blog() {
                         <p className="mt-2 flex-1 text-sm leading-relaxed text-gray-600">{p.excerpt}</p>
                         <div className="mt-4 flex items-center justify-between">
                           <span className="flex items-center gap-1.5 text-xs text-gray-400">
-                            <CalendarBlank size={14} /> {fmtDate(p.created_at)}
+                            <CalendarBlank size={14} /> {formatDate(p.created_at, lang)}
                           </span>
                           <span className="flex items-center gap-1 text-sm font-semibold text-primary">
-                            Read <ArrowRight size={15} weight="bold" />
+                            {t('blog.read')} <ArrowRight size={15} weight="bold" />
                           </span>
                         </div>
                       </div>

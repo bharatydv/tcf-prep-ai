@@ -3,11 +3,13 @@ import {
   Sparkle, Compass, PenNib, ClockCountdown, CheckCircle,
 } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
+import { useT } from '../i18n';
 
 const FREE_LIMIT = 5;
 
 export default function Practice() {
   const { user } = useAuth();
+  const t = useT();
   const navigate = useNavigate();
 
   const startPractice = () => navigate('/practice/tasks');
@@ -23,15 +25,15 @@ export default function Practice() {
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-2.5 px-4 py-3 sm:px-6">
           <Link to="/methodology"
             className="btn-primary !py-1.5 text-sm !bg-gradient-to-r !from-primary !to-fuchsia-600">
-            <Compass size={16} weight="fill" /> Methodology
+            <Compass size={16} weight="fill" /> {t('practice.methodology')}
           </Link>
           <Link to="/recent-topics"
             className="btn-primary !py-1.5 text-sm !bg-gradient-to-r !from-primary !to-fuchsia-600">
-            <Sparkle size={16} weight="fill" /> New Topics
+            <Sparkle size={16} weight="fill" /> {t('practice.newTopics')}
           </Link>
           {user && user.subscription_status !== 'premium' && (
             <span className="pill bg-white/80 text-primary shadow-sm">
-              {user.free_submissions_used} / {FREE_LIMIT} free attempts
+              {t('practice.freeAttempts', { used: user.free_submissions_used, total: FREE_LIMIT })}
             </span>
           )}
         </div>
@@ -40,9 +42,9 @@ export default function Practice() {
       {/* MODE CHOICE */}
       <section className="mx-auto max-w-5xl px-4 pt-10 sm:px-6">
         <div className="mb-6 text-center">
-          <h2 className="font-heading text-2xl font-extrabold text-gray-900">Writing Assistant — choose how you want to work</h2>
+          <h2 className="font-heading text-2xl font-extrabold text-gray-900">{t('practice.chooseMode')}</h2>
           <p className="mx-auto mt-2 max-w-lg text-sm text-gray-600">
-            Practice one task at a time with instant feedback, or sit a full timed exam.
+            {t('practice.chooseModeSub')}
           </p>
         </div>
 
@@ -54,18 +56,18 @@ export default function Practice() {
                 <PenNib size={24} weight="fill" />
               </span>
               <div>
-                <h3 className="font-heading text-lg font-extrabold text-gray-900">Practice Mode</h3>
-                <p className="text-xs font-semibold text-primary">Focus on weak spots, learn from mistakes, and build confidence.</p>
+                <h3 className="font-heading text-lg font-extrabold text-gray-900">{t('practice.practiceMode')}</h3>
+                <p className="text-xs font-semibold text-primary">{t('practice.practiceModeSub')}</p>
               </div>
             </div>
             <ul className="mt-5 space-y-2.5 text-sm text-gray-600">
-              <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-primary" /> Targeted, theme-based topics derived from real exams.</li>
-              <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-primary" /> Instant grading with detailed grammar and vocabulary corrections.</li>
-              <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-primary" /> A practical, structured plan designed to elevate your writing to CLB 7.</li>
+              <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-primary" /> {t('practice.practiceBullet1')}</li>
+              <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-primary" /> {t('practice.practiceBullet2')}</li>
+              <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-primary" /> {t('practice.practiceBullet3')}</li>
             </ul>
             <button onClick={startPractice}
               className="btn-primary mt-6 w-full justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600">
-              <PenNib size={18} weight="fill" /> Start Practice Test
+              <PenNib size={18} weight="fill" /> {t('practice.startPractice')}
             </button>
           </div>
 
@@ -76,25 +78,25 @@ export default function Practice() {
                 <ClockCountdown size={24} weight="fill" />
               </span>
               <div>
-                <h3 className="font-heading text-lg font-extrabold text-gray-900">Test Mode</h3>
-                <p className="text-xs font-semibold text-pink-700">Simulate the real pressure of exam day.</p>
+                <h3 className="font-heading text-lg font-extrabold text-gray-900">{t('practice.testMode')}</h3>
+                <p className="text-xs font-semibold text-pink-700">{t('practice.testModeSub')}</p>
               </div>
             </div>
-            <p className="mt-5 text-xs font-bold uppercase tracking-wide text-gray-400">What to expect</p>
+            <p className="mt-5 text-xs font-bold uppercase tracking-wide text-gray-400">{t('practice.whatToExpect')}</p>
             <ul className="mt-2 space-y-2.5 text-sm text-gray-600">
-              <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-pink-600" /> A continuous, timed 60-minute exam simulation.</li>
-              <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-pink-600" /> All 3 tasks delivered back-to-back under real exam conditions.</li>
-              <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-pink-600" /> An official CLB score prediction for your complete test.</li>
+              <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-pink-600" /> {t('practice.testBullet1')}</li>
+              <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-pink-600" /> {t('practice.testBullet2')}</li>
+              <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-pink-600" /> {t('practice.testBullet3')}</li>
             </ul>
             <button onClick={startTest}
               className="btn-primary mt-6 w-full justify-center !bg-gradient-to-r !from-pink-600 !to-fuchsia-600">
-              <ClockCountdown size={18} weight="fill" /> Start Exam Simulator
+              <ClockCountdown size={18} weight="fill" /> {t('practice.startSimulator')}
             </button>
           </div>
         </div>
 
         <p className="mx-auto mt-5 max-w-xl pb-12 text-center text-xs leading-relaxed text-gray-400">
-          This is a practice tool, not the official TEF/TCF exam. Scores and levels are estimates to guide your preparation.
+          {t('practice.disclaimer')}
         </p>
       </section>
     </main>

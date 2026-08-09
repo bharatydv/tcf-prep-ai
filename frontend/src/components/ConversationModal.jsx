@@ -5,6 +5,7 @@ import {
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, errMsg } from '../lib/api';
+import { useT } from '../i18n';
 
 /* Tache 2 is a live roleplay: the candidate asks, an examiner answers. This
    modal plays that examiner - live speech in, AI reply spoken back out. */
@@ -25,6 +26,7 @@ const HAS_LIVE_STT = Boolean(SpeechRec);
 export default function ConversationModal({
   consigne, tacheTitle, onCancel, onGraded, mode = 'tache2',
 }) {
+  const t = useT();
   // Free practice has no exam framing: no preparation, a longer window, and it
   // is metered by its own monthly allowance rather than an AI credit.
   const isFree = mode === 'free';
@@ -206,7 +208,7 @@ export default function ConversationModal({
           });
           const text = (data?.text || '').trim();
           if (text) sendTurnRef.current?.(text);
-          else { setStatus('idle'); toast.error('Aucune parole détectée. Réessayez.'); }
+          else { setStatus('idle'); toast.error(t('conv.noSpeech')); }
         } catch (err) {
           setStatus('idle');
           setError(errMsg(err, "La transcription a échoué."));
@@ -217,7 +219,7 @@ export default function ConversationModal({
       setRecording(true);
       setStatus('listening');
     } catch (err) {
-      toast.error("Impossible d'accéder au microphone. Vérifiez les autorisations.");
+      toast.error(t('conv.micDenied'));
     }
   };
 
@@ -234,7 +236,7 @@ export default function ConversationModal({
       probe.getTracks().forEach((t) => t.stop());
     } catch (err) {
       setChecking(false);
-      return toast.error("Impossible d'accéder au microphone. Vérifiez les autorisations.");
+      return toast.error(t('conv.micDenied'));
     }
     setChecking(false);
     if (PREP_SECONDS > 0) setPhase('prep');
@@ -258,7 +260,7 @@ export default function ConversationModal({
       onGraded(data);
     } catch (err) {
       if (err?.response?.status === 402) {
-        toast.error('Limite gratuite atteinte.');
+        toast.error(t('conv.freeLimit'));
         onCancel();
         return;
       }
@@ -293,7 +295,7 @@ export default function ConversationModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 p-4 backdrop-blur-sm"
-      role="dialog" aria-modal="true" aria-label="Conversation">
+      role="dialog" aria-modal="true" aria-label={t('conv.titleAria')}>
       <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
         {/* HEADER */}
         <div className="flex items-start gap-3 bg-gradient-to-r from-primary to-fuchsia-600 px-6 py-4 text-white">
@@ -315,7 +317,7 @@ export default function ConversationModal({
             </button>
           )}
           {phase !== 'grading' && (
-            <button onClick={cancel} aria-label="Fermer"
+            <button onClick={cancel} aria-label={t('conv.closeAria')}
               className="rounded-lg p-1.5 text-white/80 transition hover:bg-white/20 hover:text-white">
               <X size={18} weight="bold" />
             </button>
@@ -325,7 +327,7 @@ export default function ConversationModal({
         {/* CONSIGNE */}
         {phase !== 'grading' && (
           <div className="border-b border-violet-100 bg-violet-50/40 px-6 py-3">
-            <p className="text-[10px] font-bold uppercase tracking-wide text-primary">Consigne</p>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-primary">{t('conv.consigne')}</p>
             <p className="mt-1 text-sm leading-relaxed text-gray-800">{consigne}</p>
           </div>
         )}
@@ -338,7 +340,7 @@ export default function ConversationModal({
                 <>Parlez librement en français avec l'IA — elle vous répond et relance la
                   conversation. Vous avez {fmt(SPEAK_SECONDS)}, et vous pouvez arrêter quand vous voulez.</>
               ) : (
-                <>C'est un échange à deux : <strong>vous posez les questions</strong>, l'agent vous répond.
+                <>{t('conv.twoWayA')} <strong>{t('conv.twoWayB')}</strong>, l'agent vous répond.
                   Vous aurez {fmt(PREP_SECONDS)} de préparation, puis {fmt(SPEAK_SECONDS)} de conversation.</>
               )}
             </p>
@@ -352,11 +354,11 @@ export default function ConversationModal({
               <button onClick={begin} disabled={checking}
                 className="btn-primary flex-1 justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600 disabled:opacity-60">
                 {checking
-                  ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> Micro…</>
+                  ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> {t('conv.mic')}</>
                   : <><Microphone size={16} weight="fill" />
                       {isFree ? 'Commencer à parler' : 'Commencer la préparation'}</>}
               </button>
-              <button onClick={cancel} className="btn-outline flex-1 justify-center">Annuler</button>
+              <button onClick={cancel} className="btn-outline flex-1 justify-center">{t('conv.cancel')}</button>
             </div>
           </div>
         )}
@@ -364,16 +366,16 @@ export default function ConversationModal({
         {phase === 'prep' && (
           <div className="px-6 py-6 text-center">
             <p className="font-heading text-5xl font-extrabold tabular-nums text-primary">{fmt(prepLeft)}</p>
-            <p className="mt-2 font-heading text-sm font-bold text-gray-900">Préparation</p>
+            <p className="mt-2 font-heading text-sm font-bold text-gray-900">{t('conv.preparation')}</p>
             <p className="mt-1 text-xs text-gray-500">
-              Préparez vos questions — ne parlez pas encore.
+              {t('conv.prepHint')}
             </p>
             <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-violet-100">
               <div className="h-full rounded-full bg-gradient-to-r from-primary to-fuchsia-600 transition-all duration-1000"
                 style={{ width: `${((PREP_SECONDS - prepLeft) / PREP_SECONDS) * 100}%` }} />
             </div>
             <button onClick={goLive} className="btn-outline mt-5 w-full justify-center">
-              Commencer la conversation
+              {t('conv.start')}
             </button>
           </div>
         )}
@@ -399,7 +401,7 @@ export default function ConversationModal({
             {/* transcript */}
             <div ref={scrollRef} className="min-h-[220px] flex-1 space-y-3 overflow-y-auto bg-gray-50/60 px-6 py-4">
               {turns.length === 0 && status === 'thinking' && (
-                <p className="py-8 text-center text-xs text-gray-400">L'agent se prépare…</p>
+                <p className="py-8 text-center text-xs text-gray-400">{t('conv.agentThinking')}</p>
               )}
               {turns.map((t, i) => (
                 <div key={i} className={`flex ${t.role === 'candidate' ? 'justify-end' : 'justify-start'}`}>
@@ -428,7 +430,7 @@ export default function ConversationModal({
               <div className="flex items-start gap-2 border-t border-amber-100 bg-amber-50 px-6 py-2.5 text-xs text-amber-800">
                 <Warning size={15} weight="fill" className="mt-0.5 shrink-0" />
                 <span className="flex-1">{error}</span>
-                <button onClick={() => exchange(turnsRef.current)} className="font-bold underline">Réessayer</button>
+                <button onClick={() => exchange(turnsRef.current)} className="font-bold underline">{t('conv.retry')}</button>
               </div>
             )}
 
@@ -437,24 +439,24 @@ export default function ConversationModal({
               {recording ? (
                 <button onClick={stopPushToTalk}
                   className="btn-primary flex-1 justify-center !bg-gradient-to-r !from-red-500 !to-rose-600">
-                  <Stop size={16} weight="fill" /> Envoyer ma réplique
+                  <Stop size={16} weight="fill" /> {t('conv.sendTurn')}
                 </button>
               ) : !HAS_LIVE_STT ? (
                 <button onClick={startPushToTalk} disabled={status === 'thinking' || status === 'speaking'}
                   className="btn-primary flex-1 justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600 disabled:opacity-50">
-                  <PaperPlaneTilt size={16} weight="fill" /> Parler
+                  <PaperPlaneTilt size={16} weight="fill" /> {t('conv.speak')}
                 </button>
               ) : status === 'idle' ? (
                 /* Live recognition exists but stalled (denied mic, no network,
                    a failed exchange) - never leave the learner with no way to talk. */
                 <button onClick={() => listenRef.current?.()}
                   className="btn-primary flex-1 justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600">
-                  <Microphone size={16} weight="fill" /> Reprendre l'écoute
+                  <Microphone size={16} weight="fill" /> {t('conv.resumeListening')}
                 </button>
               ) : null}
               <button onClick={finish}
                 className={`btn-outline justify-center ${status !== 'idle' && HAS_LIVE_STT && !recording ? 'flex-1' : ''}`}>
-                <Lightning size={16} weight="fill" /> Terminer et analyser
+                <Lightning size={16} weight="fill" /> {t('conv.finish')}
               </button>
             </div>
             <p className="px-6 pb-3 text-center text-[10px] text-gray-400">
@@ -466,8 +468,8 @@ export default function ConversationModal({
         {phase === 'grading' && (
           <div className="px-6 py-12 text-center">
             <div className="mx-auto h-9 w-9 animate-spin rounded-full border-4 border-violet-200 border-t-primary" />
-            <p className="mt-4 font-heading text-sm font-bold text-gray-900">Analyse de votre conversation…</p>
-            <p className="mt-1 text-xs text-gray-500">Questions posées, registre, informations obtenues.</p>
+            <p className="mt-4 font-heading text-sm font-bold text-gray-900">{t('conv.analysing')}</p>
+            <p className="mt-1 text-xs text-gray-500">{t('conv.gradedOn')}</p>
           </div>
         )}
       </div>

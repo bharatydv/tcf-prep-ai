@@ -2,12 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, CalendarBlank, User } from '@phosphor-icons/react';
 import { api } from '../lib/api';
-
-function fmtDate(d) {
-  if (!d) return '';
-  try { return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }); }
-  catch { return String(d).slice(0, 10); }
-}
+import { BackLink } from '../components/shared';
+import { formatDate, useI18n } from '../i18n';
 
 /* Very small, safe markdown -> HTML for headings, bold, links, lists, paragraphs.
    If you write posts in HTML already, it passes through fine. */
@@ -39,6 +35,7 @@ function renderContent(src) {
 }
 
 export default function BlogPost() {
+  const { t, lang } = useI18n();
   const { slug } = useParams();
   const navigate = useNavigate();
   const [post, setPost] = useState(null);
@@ -55,7 +52,7 @@ export default function BlogPost() {
 
   useEffect(() => {
     if (!post) return;
-    document.title = `${post.title} | MonFrancais Blog`;
+    document.title = `${post.title} | monfrancais Blog`;
 
     // Meta description (SEO/AEO)
     let meta = document.querySelector('meta[name="description"]');
@@ -72,7 +69,7 @@ export default function BlogPost() {
       '@type': 'Article',
       headline: post.title,
       description: post.meta_description || post.excerpt || '',
-      author: { '@type': 'Organization', name: post.author || 'MonFrancais' },
+      author: { '@type': 'Organization', name: post.author || 'monfrancais' },
       datePublished: post.created_at,
       dateModified: post.updated_at || post.created_at,
       image: post.cover_image || undefined,
@@ -97,10 +94,10 @@ export default function BlogPost() {
   if (notFound || !post) {
     return (
       <main className="mx-auto max-w-2xl px-4 py-20 text-center">
-        <h1 className="font-heading text-2xl font-bold text-gray-900">Article not found</h1>
-        <p className="mt-2 text-gray-600">This post may have been moved or unpublished.</p>
+        <h1 className="font-heading text-2xl font-bold text-gray-900">{t('blog.notFoundTitle')}</h1>
+        <p className="mt-2 text-gray-600">{t('blog.notFoundBody')}</p>
         <button onClick={() => navigate('/blog')} className="btn-primary mt-6 !bg-gradient-to-r !from-primary !to-fuchsia-600">
-          <ArrowLeft size={18} /> Back to blog
+          <ArrowLeft size={18} /> {t('blog.backToBlog')}
         </button>
       </main>
     );
@@ -111,17 +108,15 @@ export default function BlogPost() {
       {/* HERO */}
       <section className="relative bg-gradient-to-br from-violet-100 via-fuchsia-50 to-violet-200">
         <div className="relative mx-auto max-w-3xl px-4 pb-10 pt-10 sm:px-6">
-          <Link to="/blog" className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline">
-            <ArrowLeft size={16} /> All articles
-          </Link>
+          <BackLink to="/blog" label={t('blog.allArticles')} className="!mb-0" />
           <h1 className="mt-4 font-heading text-3xl font-extrabold leading-tight tracking-tight text-gray-900 sm:text-4xl">
             {post.title}
           </h1>
           <div className="mt-4 flex flex-wrap items-center gap-4 text-sm text-gray-500">
-            <span className="flex items-center gap-1.5"><User size={15} /> {post.author || 'MonFrancais'}</span>
-            <span className="flex items-center gap-1.5"><CalendarBlank size={15} /> {fmtDate(post.created_at)}</span>
-            {Array.isArray(post.tags) && post.tags.map((t) => (
-              <span key={t} className="pill bg-white/80 capitalize text-primary">{t}</span>
+            <span className="flex items-center gap-1.5"><User size={15} /> {post.author || 'monfrancais'}</span>
+            <span className="flex items-center gap-1.5"><CalendarBlank size={15} /> {formatDate(post.created_at, lang)}</span>
+            {Array.isArray(post.tags) && post.tags.map((tag) => (
+              <span key={tag} className="pill bg-white/80 capitalize text-primary">{tag}</span>
             ))}
           </div>
         </div>
@@ -144,10 +139,10 @@ export default function BlogPost() {
       {/* FOOTER CTA */}
       <section className="mx-auto max-w-3xl px-4 pb-16 sm:px-6">
         <div className="rounded-3xl bg-gradient-to-r from-primary via-purple-600 to-fuchsia-600 p-8 text-center">
-          <h2 className="font-heading text-2xl font-extrabold text-white">Ready to evaluate your French writing?</h2>
-          <p className="mt-2 text-sm text-violet-100/90">Get instant AI feedback and your estimated TEF/TCF score band.</p>
+          <h2 className="font-heading text-2xl font-extrabold text-white">{t('blog.ctaTitle')}</h2>
+          <p className="mt-2 text-sm text-violet-100/90">{t('blog.ctaBody')}</p>
           <Link to="/practice" className="btn-primary mt-5 !bg-white !text-primary hover:!brightness-100">
-            Try the Writing Assistant
+            {t('blog.ctaLink')}
           </Link>
         </div>
       </section>

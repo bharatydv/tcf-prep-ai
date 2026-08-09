@@ -8,3 +8,9 @@ __pycache__/
 frontend/build/
 *.log
 .vscode/
+
+venv312/
+backend/venv312/
+venv/
+*.save
+*.save.*

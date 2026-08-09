@@ -7,18 +7,20 @@ import {
 import { toast } from 'sonner';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
+import { useT } from '../i18n';
+import { BackLink } from '../components/shared';
 
+/* Module-level, so the copy is held as translation keys and resolved with t()
+   at render time rather than baked in at import time. */
 const TACHES = [
-  { n: 1, title: 'Tâche 1 : Écrit Court (Short Message)', meta: '60 – 120 mots',
-    focus: 'Presenting, describing, or summarizing an event to a friend or relative.', icon: ChatText },
-  { n: 2, title: 'Tâche 2 : Article / Lettre (Extended Text)', meta: '120 – 150 mots',
-    focus: 'Writing an article, a letter of complaint, or a professional response to a public forum.', icon: Article },
-  { n: 3, title: 'Tâche 3 : Synthèse et Opinion (Document Comparison & Essay)', meta: '120 – 180 mots',
-    focus: 'Comparing two viewpoints and defending an abstract position clearly.', icon: Scales },
+  { n: 1, title: 'tasks.t1Title', meta: 'tasks.t1Meta', focus: 'tasks.t1Focus', icon: ChatText },
+  { n: 2, title: 'tasks.t2Title', meta: 'tasks.t2Meta', focus: 'tasks.t2Focus', icon: Article },
+  { n: 3, title: 'tasks.t3Title', meta: 'tasks.t3Meta', focus: 'tasks.t3Focus', icon: Scales },
 ];
 
 export default function SelectTask() {
   const { user } = useAuth();
+  const t = useT();
   const navigate = useNavigate();
 
   const [activeTache, setActiveTache] = useState(null);
@@ -47,7 +49,7 @@ export default function SelectTask() {
   const startOwn = () => {
     if (!user) return navigate('/login');
     if (!ownQuestion.trim() && !ownText.trim()) {
-      return toast.error('Écrivez votre sujet ou votre texte d’abord.');
+      return toast.error(t('own.writeSomething'));
     }
     navigate('/practice/write', {
       state: {
@@ -72,7 +74,7 @@ export default function SelectTask() {
   const openTheme = (t) => {
     if (!user) return navigate('/login');
     if (t.is_premium && !isPremiumUser) {
-      toast.error('Ce thème est réservé aux membres Pro.');
+      toast.error(t('themes.proOnly'));
       return navigate('/pricing');
     }
     navigate(`/practice/write?tache=${activeTache}&theme=${t.theme_id}`);
@@ -81,26 +83,23 @@ export default function SelectTask() {
   return (
     <main className="overflow-x-clip bg-white">
       <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-        <button onClick={() => navigate('/practice')}
-          className="mb-5 inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline">
-          <ArrowLeft size={16} /> Back
-        </button>
+        <BackLink fallback="/practice" />
 
         <div className="mb-7">
-          <h1 className="font-heading text-3xl font-extrabold text-gray-900">Practice Task Overview</h1>
+          <h1 className="font-heading text-3xl font-extrabold text-gray-900">{t('tasks.overview')}</h1>
           <p className="mt-2 max-w-lg text-sm text-gray-600">
-            Choose a writing task on the left to see its themes, or run the full exam simulator.
+            {t('tasks.overviewSub')}
           </p>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,360px)_1fr]">
           {/* LEFT — task list (fixed) */}
           <div className="flex flex-col gap-3">
-            {TACHES.map((t) => {
-              const Icon = t.icon;
-              const active = activeTache === t.n;
+            {TACHES.map((tache) => {
+              const Icon = tache.icon;
+              const active = activeTache === tache.n;
               return (
-                <button key={t.n} onClick={() => selectTache(t)}
+                <button key={tache.n} onClick={() => selectTache(tache)}
                   className={`flex w-full flex-col rounded-2xl border p-5 text-left shadow-soft transition hover:shadow-lg hover:shadow-violet-200/50 ${
                     active ? 'border-primary bg-violet-50/60 ring-2 ring-primary/30' : 'border-violet-100 bg-white'
                   }`}>
@@ -111,12 +110,12 @@ export default function SelectTask() {
                       <Icon size={20} weight="fill" />
                     </span>
                     <div className="min-w-0">
-                      <h3 className="font-heading text-sm font-bold leading-snug text-gray-900">{t.title}</h3>
-                      <p className="mt-0.5 text-xs font-semibold text-primary">{t.meta}</p>
+                      <h3 className="font-heading text-sm font-bold leading-snug text-gray-900">{t(tache.title)}</h3>
+                      <p className="mt-0.5 text-xs font-semibold text-primary">{t(tache.meta)}</p>
                     </div>
                     <CaretRight size={18} className={`ml-auto shrink-0 ${active ? 'text-primary' : 'text-gray-300'}`} />
                   </div>
-                  <p className="mt-2 text-xs leading-relaxed text-gray-500">{t.focus}</p>
+                  <p className="mt-2 text-xs leading-relaxed text-gray-500">{t(tache.focus)}</p>
                 </button>
               );
             })}
@@ -127,44 +126,52 @@ export default function SelectTask() {
             {ownMode ? (
               <div className="flex h-full flex-col rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-5 shadow-soft sm:p-6">
                 <div className="flex items-center gap-3">
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-primary">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-fuchsia-600 text-white shadow-md shadow-violet-300/50">
                     <PenNib size={22} weight="fill" />
                   </span>
                   <div className="min-w-0">
-                    <h2 className="font-heading text-xl font-extrabold leading-tight text-gray-900">Your own question</h2>
-                    <p className="text-xs leading-snug text-gray-600">
-                      Paste the topic you want to write on, then your answer. Leave the answer empty to write it on the next page.
+                    <h2 className="font-heading text-xl font-extrabold leading-tight text-gray-900">{t('own.title')}</h2>
+                    <p className="mt-0.5 text-[13px] leading-snug text-gray-600">
+                      {t('own.subtitle')}
                     </p>
                   </div>
                 </div>
 
-                <label className="mt-4 block text-xs font-bold uppercase tracking-wide text-primary">Question</label>
+                <div className="mt-5 flex items-baseline justify-between gap-3">
+                  <label htmlFor="own-question" className="text-xs font-bold uppercase tracking-wide text-primary">{t('own.question')}</label>
+                  <span className="text-[11px] tabular-nums text-gray-400">{ownQuestion.length} / 1000</span>
+                </div>
                 <input
-                  className="input !rounded-xl mt-1 text-sm" maxLength={1000}
-                  placeholder="Paste your topic or question here…"
+                  id="own-question"
+                  className="input !rounded-xl mt-1.5 text-sm" maxLength={1000}
+                  placeholder={t('own.questionPlaceholder')}
                   value={ownQuestion} onChange={(e) => setOwnQuestion(e.target.value)}
                   data-testid="own-question-input"
                 />
-                <p className="mt-0.5 text-right text-[11px] text-gray-400">{ownQuestion.length} / 1000</p>
 
-                <label className="mt-2 block text-xs font-bold uppercase tracking-wide text-primary">Answer</label>
+                <div className="mt-4 flex items-baseline justify-between gap-3">
+                  <label htmlFor="own-answer" className="text-xs font-bold uppercase tracking-wide text-primary">
+                    {t('own.answer')} <span className="font-semibold normal-case tracking-normal text-gray-400">· {t('common.optional')}</span>
+                  </label>
+                  <span className="text-[11px] tabular-nums text-gray-400">
+                    {t('own.wordsAndChars', { words: ownText.trim() ? ownText.trim().split(/\s+/).length : 0, chars: ownText.length, max: 3000 })}
+                  </span>
+                </div>
                 <textarea
-                  className="input !rounded-xl mt-1 resize-none text-sm" rows={5} maxLength={3000}
-                  placeholder="Write your answer here… (optional — leave blank to start fresh on the next page)"
+                  id="own-answer"
+                  className="input !rounded-xl mt-1.5 min-h-[150px] flex-1 resize-none text-sm" maxLength={3000}
+                  placeholder={t('own.answerPlaceholder')}
                   value={ownText} onChange={(e) => setOwnText(e.target.value)}
                   data-testid="own-answer-input"
                 />
-                <p className="mt-0.5 text-right text-[11px] text-gray-400">
-                  {ownText.trim() ? ownText.trim().split(/\s+/).length : 0} mots · {ownText.length} / 3000
-                </p>
 
-                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+                <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-violet-100 pt-4">
                   <button onClick={startOwn} data-testid="own-start-button"
-                    className="btn-primary w-fit !bg-gradient-to-r !from-primary !to-fuchsia-600">
+                    className="btn-primary w-fit !bg-gradient-to-r !from-primary !to-fuchsia-600 shadow-lg shadow-violet-300/50 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-violet-300/60">
                     <Lightning size={18} weight="fill" />
-                    {ownText.trim() ? 'Analyser mon texte' : 'Commencer à écrire'}
+                    {ownText.trim() ? t('own.analyseMyText') : t('own.startWriting')}
                   </button>
-                  <p className="text-xs text-gray-400">Or pick a tâche on the left to practice a real exam format.</p>
+                  <p className="text-xs text-gray-500">{t('own.orPickTache')}</p>
                 </div>
               </div>
             ) : loadingThemes ? (
@@ -173,23 +180,23 @@ export default function SelectTask() {
               </div>
             ) : themes.length === 0 ? (
               <div className="flex h-full items-center justify-center rounded-3xl border border-violet-100 bg-white p-8 text-center text-sm text-gray-500">
-                No themes available for this task yet.
+                {t('tasks.noThemes')}
               </div>
             ) : (
               <div>
                 <button onClick={() => { setActiveTache(null); setThemes([]); }}
                   className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline">
-                  <ArrowLeft size={16} /> Écrire sur mon propre sujet
+                  <ArrowLeft size={16} /> {t('own.writeOwn')}
                 </button>
                 <h2 className="mb-4 font-heading text-lg font-extrabold text-gray-900">
                   Choose a theme — Tâche {activeTache}
                 </h2>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  {themes.map((t) => {
-                    const locked = t.is_premium && !isPremiumUser;
-                    const count = t.question_count ?? 0;
+                  {themes.map((theme) => {
+                    const locked = theme.is_premium && !isPremiumUser;
+                    const count = theme.question_count ?? 0;
                     return (
-                      <button key={t.theme_id} onClick={() => openTheme(t)}
+                      <button key={theme.theme_id} onClick={() => openTheme(theme)}
                         className={`flex flex-col rounded-2xl border bg-white p-5 text-left shadow-soft transition hover:-translate-y-1 hover:shadow-xl hover:shadow-violet-200/50 ${
                           locked ? 'border-amber-100' : 'border-violet-100'
                         }`}>
@@ -197,21 +204,21 @@ export default function SelectTask() {
                           <span className={`flex h-11 w-11 items-center justify-center rounded-2xl text-xl ${
                             locked ? 'bg-amber-50' : 'bg-violet-100'
                           }`}>
-                            {locked ? <Lock size={20} weight="fill" className="text-amber-500" /> : (t.emoji || <BookOpen size={20} weight="duotone" className="text-primary" />)}
+                            {locked ? <Lock size={20} weight="fill" className="text-amber-500" /> : (theme.emoji || <BookOpen size={20} weight="duotone" className="text-primary" />)}
                           </span>
-                          {t.is_premium ? (
-                            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">Pro</span>
+                          {theme.is_premium ? (
+                            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">{t('common.pro')}</span>
                           ) : (
                             <CaretRight size={18} className="text-gray-300" />
                           )}
                         </div>
-                        <h3 className="mt-4 font-heading text-base font-bold text-gray-900">{t.name}</h3>
-                        {t.description && (
-                          <p className="mt-1 flex-1 text-xs leading-relaxed text-gray-500">{t.description}</p>
+                        <h3 className="mt-4 font-heading text-base font-bold text-gray-900">{theme.name}</h3>
+                        {theme.description && (
+                          <p className="mt-1 flex-1 text-xs leading-relaxed text-gray-500">{theme.description}</p>
                         )}
                         <div className="mt-4">
                           <div className="flex items-center justify-between text-xs text-gray-500">
-                            <span>Attempted questions</span>
+                            <span>{t('tasks.attempted')}</span>
                             <span className="font-semibold text-gray-700">{locked ? '—' : `0/${count}`}</span>
                           </div>
                           <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-violet-100">
