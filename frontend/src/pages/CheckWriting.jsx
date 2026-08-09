@@ -4,10 +4,12 @@ import { Lightning } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { BACKEND_URL } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import { AccentToolbar, AnalysisProgress, streamAnalysis } from '../components/shared';
+import { useT } from '../i18n';
+import { AccentToolbar, AnalysisProgress, BackLink, streamAnalysis } from '../components/shared';
 
 export default function CheckWriting() {
   const { user, refreshUser } = useAuth();
+  const t = useT();
   const navigate = useNavigate();
   const location = useLocation();
   const [text, setText] = useState('');
@@ -16,7 +18,7 @@ export default function CheckWriting() {
   const taRef = useRef(null);
 
   const submit = async () => {
-    if (!text.trim()) return toast.error('Collez votre texte d’abord !');
+    if (!text.trim()) return toast.error(t('check.pasteFirst'));
     setStage('parsing');
     await streamAnalysis(BACKEND_URL, { text, source: 'paste', label: label || null }, {
       onStage: setStage,
@@ -37,26 +39,26 @@ export default function CheckWriting() {
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-10">
-      <h1 className="text-3xl font-bold">Check my writing</h1>
+      <BackLink />
+      <h1 className="text-3xl font-bold">{t('check.title')}</h1>
       <p className="mt-2 max-w-2xl text-gray-600">
-        Paste any French text you wrote elsewhere — homework, an old essay, something a tutor corrected.
-        It runs through the same AI grading, and every error joins your personal mistake history.
+        {t('check.subtitle')}
       </p>
       {user?.subscription_status !== 'premium' && (
-        <span className="pill mt-3 bg-violet-50 text-primary">{user?.free_submissions_used} / 5 free attempts</span>
+        <span className="pill mt-3 bg-violet-50 text-primary">{t('check.freeAttempts', { used: user?.free_submissions_used })}</span>
       )}
-      <input className="input mt-6" placeholder="Label / topic (optional) — e.g. « Lettre de motivation »"
+      <input className="input mt-6" placeholder={t('check.labelPlaceholder')}
         value={label} onChange={(e) => setLabel(e.target.value)} data-testid="paste-label-input" />
       <div className="mt-3">
         <AccentToolbar textareaRef={taRef} onInsert={(_c, next) => setText(next)} />
       </div>
       <textarea ref={taRef} value={text} onChange={(e) => setText(e.target.value)} lang="fr"
-        className="input paper-textarea mt-3 p-6 shadow-card" placeholder="Collez votre texte français ici…"
+        className="input paper-textarea mt-3 p-6 shadow-card" placeholder={t('check.textPlaceholder')}
         data-testid="paste-textarea" />
       <div className="mt-3 flex items-center justify-between">
         <span className="text-sm text-gray-500">{text.trim() ? text.trim().split(/\s+/).length : 0} mots</span>
         <button className="btn-primary" onClick={submit} data-testid="submit-paste-button">
-          <Lightning size={18} weight="fill" /> Analyser
+          <Lightning size={18} weight="fill" /> {t('check.analyse')}
         </button>
       </div>
     </main>

@@ -1,33 +1,46 @@
 import { useEffect, useState, useCallback } from 'react';
 import { toast } from 'sonner';
-import { api, errMsg, CATEGORY_META } from '../lib/api';
+import { api, errMsg, catColor } from '../lib/api';
+import { useT } from '../i18n';
 
-const TABS = ['Analytics', 'Users', 'Submissions', 'Prompts', 'Exam Questions', 'Recent Topics', 'Simulator Prompts', 'Blog', 'AI Providers'];
+/* id drives the switch below; label is a translation key. */
+const TABS = [
+  { id: 'analytics', label: 'admin.tabAnalytics' },
+  { id: 'users', label: 'admin.tabUsers' },
+  { id: 'submissions', label: 'admin.tabSubmissions' },
+  { id: 'prompts', label: 'admin.tabPrompts' },
+  { id: 'questions', label: 'admin.tabQuestions' },
+  { id: 'topics', label: 'admin.tabTopics' },
+  { id: 'sim-prompts', label: 'admin.tabSimPrompts' },
+  { id: 'blog', label: 'admin.tabBlog' },
+  { id: 'providers', label: 'admin.tabProviders' },
+];
 
 export default function Admin() {
-  const [tab, setTab] = useState('Analytics');
+  const t = useT();
+  const [tab, setTab] = useState('analytics');
   return (
     <main className="mx-auto max-w-7xl px-4 py-10">
-      <h1 className="text-3xl font-bold">Admin Panel</h1>
+      <h1 className="text-3xl font-bold">{t('admin.title')}</h1>
       <div className="mt-6 flex flex-wrap gap-2">
-        {TABS.map((t) => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${tab === t ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-            data-testid={`admin-tab-${t.toLowerCase().replace(/ /g, '-')}`}>
-            {t}
+        {TABS.map((item) => (
+          <button key={item.id} onClick={() => setTab(item.id)}
+            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${tab === item.id ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            data-testid={`admin-tab-${item.id}`}>
+            {t(item.label)}
           </button>
         ))}
       </div>
       <div className="mt-8">
-        {tab === 'Analytics' && <Analytics />}
-        {tab === 'Users' && <Users />}
-        {tab === 'Submissions' && <Submissions />}
-        {tab === 'Prompts' && <Prompts />}
-        {tab === 'Exam Questions' && <Questions />}
-        {tab === 'Recent Topics' && <Topics />}
-        {tab === 'Simulator Prompts' && <SimPrompts />}
-        {tab === 'Blog' && <Blog />}
-        {tab === 'AI Providers' && <AIProviders />}
+        {tab === 'analytics' && <Analytics />}
+        {tab === 'users' && <Users />}
+        {tab === 'submissions' && <Submissions />}
+        {tab === 'prompts' && <Prompts />}
+        {tab === 'questions' && <Questions />}
+        {tab === 'topics' && <Topics />}
+        {tab === 'sim-prompts' && <SimPrompts />}
+        {tab === 'blog' && <Blog />}
+        {tab === 'providers' && <AIProviders />}
       </div>
     </main>
   );
@@ -35,34 +48,35 @@ export default function Admin() {
 
 /* ------------------------------------------------------------ Analytics ---- */
 function Analytics() {
+  const t = useT();
   const [data, setData] = useState(null);
   useEffect(() => { api.get('/api/admin/analytics').then((r) => setData(r.data)).catch((e) => toast.error(errMsg(e))); }, []);
   if (!data) return <Spinner />;
   return (
     <div>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Stat label="Total users" value={data.total_users} />
-        <Stat label="Total submissions" value={data.total_submissions} />
+        <Stat label={t('admin.totalUsers')} value={data.total_users} />
+        <Stat label={t('admin.totalSubmissions')} value={data.total_submissions} />
       </div>
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <section className="card p-6">
-          <h2 className="font-heading font-semibold">Global error breakdown</h2>
+          <h2 className="font-heading font-semibold">{t('admin.errorBreakdown')}</h2>
           <ul className="mt-4 space-y-2 text-sm">
             {Object.entries(data.error_breakdown).map(([k, v]) => (
               <li key={k} className="flex items-center justify-between">
-                <span className="pill" style={{ background: CATEGORY_META[k]?.color }}>{CATEGORY_META[k]?.label || k}</span>
+                <span className="pill" style={{ background: catColor(k) }}>{t(`cat.${k}`)}</span>
                 <span className="font-semibold">{v}</span>
               </li>
             ))}
           </ul>
         </section>
         <section className="card p-6">
-          <h2 className="font-heading font-semibold">Top 10 exact errors</h2>
+          <h2 className="font-heading font-semibold">{t('admin.topErrors')}</h2>
           <ol className="mt-4 list-decimal space-y-2 pl-5 text-sm">
             {data.top_errors.map((e, i) => (
               <li key={i}><span className="text-red-600">{e.error}</span> <span className="text-gray-400">×{e.count}</span></li>
             ))}
-            {!data.top_errors.length && <p className="text-gray-400">No errors recorded yet.</p>}
+            {!data.top_errors.length && <p className="text-gray-400">{t('admin.noErrors')}</p>}
           </ol>
         </section>
       </div>
@@ -77,12 +91,13 @@ const Spinner = () => <div className="flex justify-center py-16"><div className=
 
 /* -------------------------------------------------------- AI Providers ---- */
 const AI_LABELS = {
-  transcribe_provider: 'Transcription (audio → text)',
-  speaking_grader_provider: 'Speaking analysis',
-  writing_grader_provider: 'Writing analysis',
+  transcribe_provider: 'admin.transcribeProvider',
+  speaking_grader_provider: 'admin.speakingGrader',
+  writing_grader_provider: 'admin.writingGrader',
 };
 
 function AIProviders() {
+  const t = useT();
   const [data, setData] = useState(null);
   const [sel, setSel] = useState({});
   const [saving, setSaving] = useState(false);
@@ -98,7 +113,7 @@ function AIProviders() {
     setSaving(true);
     try {
       await api.post('/api/admin/ai-providers', sel);
-      toast.success('AI providers updated');
+      toast.success(t('admin.aiUpdated'));
       load();
     } catch (e) { toast.error(errMsg(e)); }
     finally { setSaving(false); }
@@ -111,15 +126,14 @@ function AIProviders() {
     <div className="space-y-6">
       <section className="card space-y-5 p-6">
         <div>
-          <h2 className="font-heading font-semibold">AI Providers</h2>
+          <h2 className="font-heading font-semibold">{t('admin.providers')}</h2>
           <p className="mt-1 text-sm text-gray-500">
-            Choose which AI service handles each task. API keys are configured on the server; this only selects the active provider.
-          </p>
+{t('admin.aiHint')}</p>
         </div>
 
         {Object.keys(data.options).map((key) => (
           <div key={key}>
-            <label className="block text-sm font-semibold text-gray-800">{AI_LABELS[key] || key}</label>
+            <label className="block text-sm font-semibold text-gray-800">{AI_LABELS[key] ? t(AI_LABELS[key]) : key}</label>
             <select
               value={sel[key] || ''}
               onChange={(e) => setSel((s) => ({ ...s, [key]: e.target.value }))}
@@ -127,26 +141,26 @@ function AIProviders() {
               data-testid={`ai-select-${key}`}>
               {data.options[key].map((p) => (
                 <option key={p} value={p} disabled={!data.keys_present[p]}>
-                  {p}{!data.keys_present[p] ? ' — no API key set' : ''}{p === data.env_defaults[key] ? '  (default)' : ''}
+                  {p}{!data.keys_present[p] ? t('admin.noApiKey') : ''}{p === data.env_defaults[key] ? t('admin.defaultSuffix') : ''}
                 </option>
               ))}
             </select>
             {sel[key] && !data.keys_present[sel[key]] && (
-              <p className="mt-1 text-sm font-semibold text-red-600">No API key for “{sel[key]}” on the server — analysis will fail.</p>
+              <p className="mt-1 text-sm font-semibold text-red-600">{t('admin.noKeyWarning', { provider: sel[key] })}</p>
             )}
           </div>
         ))}
 
         <div className="flex items-center gap-3">
           <button onClick={save} disabled={!dirty || saving} className="btn-primary disabled:opacity-50" data-testid="ai-save">
-            {saving ? 'Saving…' : 'Save changes'}
+            {saving ? t('admin.saving') : t('admin.saveChanges')}
           </button>
-          {dirty && <span className="text-sm text-amber-600">Unsaved changes</span>}
+          {dirty && <span className="text-sm text-amber-600">{t('admin.unsaved')}</span>}
         </div>
       </section>
 
       <section className="card p-6">
-        <h2 className="font-heading font-semibold">API keys available on server</h2>
+        <h2 className="font-heading font-semibold">{t('admin.keysAvailable')}</h2>
         <div className="mt-4 flex flex-wrap gap-2">
           {Object.keys(data.keys_present).map((p) => (
             <span key={p} className={`pill ${data.keys_present[p] ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
@@ -161,6 +175,7 @@ function AIProviders() {
 
 /* ---------------------------------------------------------------- Users ---- */
 function Users() {
+  const t = useT();
   const [users, setUsers] = useState(null);
   useEffect(() => { api.get('/api/admin/users').then((r) => setUsers(r.data.users)).catch((e) => toast.error(errMsg(e))); }, []);
   if (!users) return <Spinner />;
@@ -168,7 +183,7 @@ function Users() {
     <section className="card overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
-          <tr><th className="px-5 py-3">Name</th><th className="px-5 py-3">Email</th><th className="px-5 py-3">Role</th><th className="px-5 py-3">Plan</th><th className="px-5 py-3">Used</th><th className="px-5 py-3">Streak</th><th className="px-5 py-3">Joined</th></tr>
+          <tr>{['admin.thName', 'admin.thEmail', 'admin.thRole', 'admin.thPlan', 'admin.thUsed', 'admin.thStreak', 'admin.thJoined'].map((k) => <th key={k} className="px-5 py-3">{t(k)}</th>)}</tr>
         </thead>
         <tbody>
           {users.map((u) => (
@@ -190,6 +205,7 @@ function Users() {
 
 /* ----------------------------------------------------------- Submissions ---- */
 function Submissions() {
+  const t = useT();
   const [subs, setSubs] = useState(null);
   useEffect(() => { api.get('/api/admin/submissions').then((r) => setSubs(r.data.submissions)).catch((e) => toast.error(errMsg(e))); }, []);
   if (!subs) return <Spinner />;
@@ -197,7 +213,7 @@ function Submissions() {
     <section className="card overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
-          <tr><th className="px-5 py-3">Date</th><th className="px-5 py-3">User</th><th className="px-5 py-3">Source</th><th className="px-5 py-3">Level</th><th className="px-5 py-3">Score</th><th className="px-5 py-3">Errors</th><th className="px-5 py-3">Excerpt</th></tr>
+          <tr>{['admin.thDate', 'admin.thUser', 'admin.thSource', 'admin.thLevel', 'admin.thScore', 'admin.thErrors', 'admin.thExcerpt'].map((k) => <th key={k} className="px-5 py-3">{t(k)}</th>)}</tr>
         </thead>
         <tbody>
           {subs.map((s) => (
@@ -233,6 +249,7 @@ function Field({ label, children }) {
 
 /* -------------------------------------------------------------- Prompts ---- */
 function Prompts() {
+  const t = useT();
   const [items, load] = useCrud('/api/prompts', 'prompts');
   const empty = { title: '', description: '', category: 'general', level: 'C1' };
   const [form, setForm] = useState(empty);
@@ -243,27 +260,27 @@ function Prompts() {
     try {
       if (editing) await api.put(`/api/admin/prompts/${editing}`, form);
       else await api.post('/api/admin/prompts', form);
-      toast.success('Saved'); setForm(empty); setEditing(null); load();
+      toast.success(t('admin.saved')); setForm(empty); setEditing(null); load();
     } catch (e) { toast.error(errMsg(e)); }
   };
   const del = async (id) => {
-    try { await api.delete(`/api/admin/prompts/${id}`); toast.success('Deactivated'); load(); }
+    try { await api.delete(`/api/admin/prompts/${id}`); toast.success(t('admin.deactivated')); load(); }
     catch (e) { toast.error(errMsg(e)); }
   };
   if (!items) return <Spinner />;
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <section className="card space-y-4 p-6">
-        <h2 className="font-heading font-semibold">{editing ? 'Edit prompt' : 'New writing prompt'}</h2>
-        <Field label="Title"><input className="input" value={form.title} onChange={set('title')} data-testid="prompt-title-input" /></Field>
-        <Field label="Description"><textarea className="input min-h-[100px]" value={form.description} onChange={set('description')} /></Field>
+        <h2 className="font-heading font-semibold">{editing ? t('admin.editPrompt') : t('admin.newPrompt')}</h2>
+        <Field label={t('admin.titleField')}><input className="input" value={form.title} onChange={set('title')} data-testid="prompt-title-input" /></Field>
+        <Field label={t('admin.description')}><textarea className="input min-h-[100px]" value={form.description} onChange={set('description')} /></Field>
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Category"><input className="input" value={form.category} onChange={set('category')} /></Field>
-          <Field label="Level"><input className="input" value={form.level} onChange={set('level')} /></Field>
+          <Field label={t('admin.category')}><input className="input" value={form.category} onChange={set('category')} /></Field>
+          <Field label={t('admin.level')}><input className="input" value={form.level} onChange={set('level')} /></Field>
         </div>
         <div className="flex gap-3">
-          <button className="btn-primary" onClick={save} data-testid="save-prompt-button">{editing ? 'Update' : 'Create'}</button>
-          {editing && <button className="btn-outline" onClick={() => { setEditing(null); setForm(empty); }}>Cancel</button>}
+          <button className="btn-primary" onClick={save} data-testid="save-prompt-button">{editing ? t('admin.update') : t('admin.create')}</button>
+          {editing && <button className="btn-outline" onClick={() => { setEditing(null); setForm(empty); }}>{t('admin.cancel')}</button>}
         </div>
       </section>
       <section className="space-y-3">
@@ -274,8 +291,8 @@ function Prompts() {
               <p className="text-xs text-gray-500">{p.category} · {p.level}</p>
             </div>
             <div className="flex shrink-0 gap-2">
-              <button className="btn-outline !px-3 !py-1 text-xs" onClick={() => { setEditing(p.prompt_id); setForm({ title: p.title, description: p.description, category: p.category, level: p.level }); }}>Edit</button>
-              <button className="btn-outline !border-red-200 !px-3 !py-1 text-xs !text-red-600" onClick={() => del(p.prompt_id)}>Delete</button>
+              <button className="btn-outline !px-3 !py-1 text-xs" onClick={() => { setEditing(p.prompt_id); setForm({ title: p.title, description: p.description, category: p.category, level: p.level }); }}>{t('admin.edit')}</button>
+              <button className="btn-outline !border-red-200 !px-3 !py-1 text-xs !text-red-600" onClick={() => del(p.prompt_id)}>{t('admin.delete')}</button>
             </div>
           </div>
         ))}
@@ -286,6 +303,7 @@ function Prompts() {
 
 /* ------------------------------------------------------------- Questions ---- */
 function Questions() {
+  const t = useT();
   const [examType, setExamType] = useState('reading-comprehension');
   const [items, setItems] = useState(null);
   const load = useCallback(() => {
@@ -307,43 +325,43 @@ function Questions() {
     try {
       if (editing) await api.put(`/api/admin/exam/questions/${editing}`, payload);
       else await api.post('/api/admin/exam/questions', payload);
-      toast.success('Saved'); setForm(empty); setEditing(null); load();
+      toast.success(t('admin.saved')); setForm(empty); setEditing(null); load();
     } catch (e) { toast.error(errMsg(e)); }
   };
   const del = async (id) => {
-    try { await api.delete(`/api/admin/exam/questions/${id}`); toast.success('Deactivated'); load(); }
+    try { await api.delete(`/api/admin/exam/questions/${id}`); toast.success(t('admin.deactivated')); load(); }
     catch (e) { toast.error(errMsg(e)); }
   };
 
   return (
     <div>
       <div className="mb-4 flex gap-2">
-        {['reading-comprehension', 'oral-comprehension'].map((t) => (
-          <button key={t} onClick={() => { setExamType(t); setEditing(null); setForm(empty); }}
-            className={`rounded-xl px-4 py-2 text-sm font-semibold ${examType === t ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}>
-            {t === 'reading-comprehension' ? 'Reading' : 'Listening'}
+        {['reading-comprehension', 'oral-comprehension'].map((type) => (
+          <button key={type} onClick={() => { setExamType(type); setEditing(null); setForm(empty); }}
+            className={`rounded-xl px-4 py-2 text-sm font-semibold ${examType === type ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}>
+            {type === 'reading-comprehension' ? t('admin.reading') : t('admin.listening')}
           </button>
         ))}
       </div>
       {!items ? <Spinner /> : (
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="card space-y-4 p-6">
-            <h2 className="font-heading font-semibold">{editing ? 'Edit question' : 'New question'}</h2>
-            <Field label="Passage / transcript"><textarea className="input min-h-[90px]" value={form.text} onChange={set('text')} /></Field>
-            <Field label="Question"><input className="input" value={form.question} onChange={set('question')} /></Field>
+            <h2 className="font-heading font-semibold">{editing ? t('admin.editQuestion') : t('admin.newQuestion')}</h2>
+            <Field label={t('admin.passage')}><textarea className="input min-h-[90px]" value={form.text} onChange={set('text')} /></Field>
+            <Field label={t('admin.question')}><input className="input" value={form.question} onChange={set('question')} /></Field>
             <div className="grid grid-cols-2 gap-3">
               {['a', 'b', 'c', 'd'].map((id) => (
-                <Field key={id} label={`Option ${id.toUpperCase()}`}><input className="input" value={form[id]} onChange={set(id)} /></Field>
+                <Field key={id} label={t('admin.option', { id: id.toUpperCase() })}><input className="input" value={form[id]} onChange={set(id)} /></Field>
               ))}
             </div>
-            <Field label="Correct answer">
+            <Field label={t('admin.correctAnswer')}>
               <select className="input" value={form.correct_answer} onChange={set('correct_answer')}>
                 {['a', 'b', 'c', 'd'].map((id) => <option key={id} value={id}>{id.toUpperCase()}</option>)}
               </select>
             </Field>
             <div className="flex gap-3">
-              <button className="btn-primary" onClick={save}>{editing ? 'Update' : 'Create'}</button>
-              {editing && <button className="btn-outline" onClick={() => { setEditing(null); setForm(empty); }}>Cancel</button>}
+              <button className="btn-primary" onClick={save}>{editing ? t('admin.update') : t('admin.create')}</button>
+              {editing && <button className="btn-outline" onClick={() => { setEditing(null); setForm(empty); }}>{t('admin.cancel')}</button>}
             </div>
           </section>
           <section className="space-y-3">
@@ -351,15 +369,15 @@ function Questions() {
               <div key={q.question_id} className="card flex items-start justify-between gap-4 p-5">
                 <div>
                   <p className="text-sm font-medium">{q.question}</p>
-                  <p className="mt-1 text-xs text-gray-500">Answer: {q.correct_answer?.toUpperCase()}</p>
+                  <p className="mt-1 text-xs text-gray-500">{t('admin.questionAnswer', { answer: q.correct_answer?.toUpperCase() })}</p>
                 </div>
                 <div className="flex shrink-0 gap-2">
                   <button className="btn-outline !px-3 !py-1 text-xs" onClick={() => {
                     setEditing(q.question_id);
                     const o = Object.fromEntries((q.options || []).map((x) => [x.id, x.text]));
                     setForm({ text: q.text, question: q.question, a: o.a || '', b: o.b || '', c: o.c || '', d: o.d || '', correct_answer: q.correct_answer });
-                  }}>Edit</button>
-                  <button className="btn-outline !border-red-200 !px-3 !py-1 text-xs !text-red-600" onClick={() => del(q.question_id)}>Delete</button>
+                  }}>{t('admin.edit')}</button>
+                  <button className="btn-outline !border-red-200 !px-3 !py-1 text-xs !text-red-600" onClick={() => del(q.question_id)}>{t('admin.delete')}</button>
                 </div>
               </div>
             ))}
@@ -372,6 +390,7 @@ function Questions() {
 
 /* ----------------------------------------------------------- RecentTopics ---- */
 function Topics() {
+  const t = useT();
   const [items, load] = useCrud('/api/admin/recent-topics', 'topics');
   const empty = { title: '', task_type: 1, topic_text: '', model_answer: '', target_level: 'B2', month_label: '' };
   const [form, setForm] = useState(empty);
@@ -382,52 +401,53 @@ function Topics() {
     try {
       if (editing) await api.put(`/api/admin/recent-topics/${editing}`, form);
       else await api.post('/api/admin/recent-topics', form);
-      toast.success('Saved'); setForm(empty); setEditing(null); load();
+      toast.success(t('admin.saved')); setForm(empty); setEditing(null); load();
     } catch (e) { toast.error(errMsg(e)); }
   };
   const del = async (id) => {
-    try { await api.delete(`/api/admin/recent-topics/${id}`); toast.success('Deactivated'); load(); }
+    try { await api.delete(`/api/admin/recent-topics/${id}`); toast.success(t('admin.deactivated')); load(); }
     catch (e) { toast.error(errMsg(e)); }
   };
   if (!items) return <Spinner />;
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <section className="card space-y-4 p-6">
-        <h2 className="font-heading font-semibold">{editing ? 'Edit topic' : 'New recent topic'}</h2>
-        <Field label="Title"><input className="input" value={form.title} onChange={set('title')} data-testid="topic-title-input" /></Field>
+        <h2 className="font-heading font-semibold">{editing ? t('admin.editTopic') : t('admin.newTopic')}</h2>
+        <Field label={t('admin.titleField')}><input className="input" value={form.title} onChange={set('title')} data-testid="topic-title-input" /></Field>
         <div className="grid grid-cols-3 gap-3">
-          <Field label="Task">
+          <Field label={t('admin.task')}>
             <select className="input" value={form.task_type} onChange={set('task_type')}>
-              {[1, 2, 3].map((t) => <option key={t} value={t}>Tâche {t}</option>)}
+              {[1, 2, 3].map((n) => <option key={n} value={n}>Tâche {n}</option>)}
             </select>
           </Field>
-          <Field label="Target level"><input className="input" value={form.target_level} onChange={set('target_level')} /></Field>
-          <Field label="Month label"><input className="input" placeholder="Janvier 2026" value={form.month_label} onChange={set('month_label')} /></Field>
+          <Field label={t('admin.targetLevel')}><input className="input" value={form.target_level} onChange={set('target_level')} /></Field>
+          <Field label={t('admin.monthLabel')}><input className="input" placeholder={t('admin.monthPlaceholder')} value={form.month_label} onChange={set('month_label')} /></Field>
         </div>
-        <Field label="Consigne (topic text)"><textarea className="input min-h-[90px]" value={form.topic_text} onChange={set('topic_text')} /></Field>
-        <Field label="Model answer"><textarea className="input min-h-[180px]" value={form.model_answer} onChange={set('model_answer')} data-testid="model-answer-textarea" /></Field>
+        <Field label={t('admin.consigneTopic')}><textarea className="input min-h-[90px]" value={form.topic_text} onChange={set('topic_text')} /></Field>
+        <Field label={t('admin.modelAnswer')}><textarea className="input min-h-[180px]" value={form.model_answer} onChange={set('model_answer')} data-testid="model-answer-textarea" /></Field>
         <div className="flex gap-3">
-          <button className="btn-primary" onClick={save} data-testid="save-topic-button">{editing ? 'Update' : 'Create'}</button>
-          {editing && <button className="btn-outline" onClick={() => { setEditing(null); setForm(empty); }}>Cancel</button>}
+          <button className="btn-primary" onClick={save} data-testid="save-topic-button">{editing ? t('admin.update') : t('admin.create')}</button>
+          {editing && <button className="btn-outline" onClick={() => { setEditing(null); setForm(empty); }}>{t('admin.cancel')}</button>}
         </div>
       </section>
       <section className="space-y-3">
-        {items.map((t) => (
-          <div key={t.topic_id} className={`card flex items-start justify-between gap-4 p-5 ${t.is_active ? '' : 'opacity-50'}`}>
+        {/* the map variable used to be named `t`, shadowing the translator */}
+        {items.map((topic) => (
+          <div key={topic.topic_id} className={`card flex items-start justify-between gap-4 p-5 ${topic.is_active ? '' : 'opacity-50'}`}>
             <div>
-              <p className="font-semibold">{t.title}</p>
-              <p className="text-xs text-gray-500">Tâche {t.task_type} · {t.target_level} · {t.month_label || '—'} {t.is_active ? '' : '· inactive'}</p>
+              <p className="font-semibold">{topic.title}</p>
+              <p className="text-xs text-gray-500">Tâche {topic.task_type} · {topic.target_level} · {topic.month_label || '—'} {topic.is_active ? '' : t('admin.inactiveSuffix')}</p>
             </div>
             <div className="flex shrink-0 gap-2">
               <button className="btn-outline !px-3 !py-1 text-xs" onClick={() => {
-                setEditing(t.topic_id);
-                setForm({ title: t.title, task_type: t.task_type, topic_text: t.topic_text, model_answer: t.model_answer || '', target_level: t.target_level, month_label: t.month_label || '' });
-              }}>Edit</button>
-              <button className="btn-outline !border-red-200 !px-3 !py-1 text-xs !text-red-600" onClick={() => del(t.topic_id)}>Delete</button>
+                setEditing(topic.topic_id);
+                setForm({ title: topic.title, task_type: topic.task_type, topic_text: topic.topic_text, model_answer: topic.model_answer || '', target_level: topic.target_level, month_label: topic.month_label || '' });
+              }}>{t('admin.edit')}</button>
+              <button className="btn-outline !border-red-200 !px-3 !py-1 text-xs !text-red-600" onClick={() => del(topic.topic_id)}>{t('admin.delete')}</button>
             </div>
           </div>
         ))}
-        {!items.length && <p className="text-sm text-gray-400">No topics yet — create the first one.</p>}
+        {!items.length && <p className="text-sm text-gray-400">{t('admin.noTopics')}</p>}
       </section>
     </div>
   );
@@ -435,6 +455,7 @@ function Topics() {
 
 /* --------------------------------------------------------- SimulatorPrompts ---- */
 function SimPrompts() {
+  const t = useT();
   const [items, load] = useCrud('/api/admin/simulator-prompts', 'prompts');
   const empty = { task_type: 1, text: '' };
   const [form, setForm] = useState(empty);
@@ -444,27 +465,27 @@ function SimPrompts() {
     try {
       if (editing) await api.put(`/api/admin/simulator-prompts/${editing}`, form);
       else await api.post('/api/admin/simulator-prompts', form);
-      toast.success('Saved'); setForm(empty); setEditing(null); load();
+      toast.success(t('admin.saved')); setForm(empty); setEditing(null); load();
     } catch (e) { toast.error(errMsg(e)); }
   };
   const del = async (id) => {
-    try { await api.delete(`/api/admin/simulator-prompts/${id}`); toast.success('Deactivated'); load(); }
+    try { await api.delete(`/api/admin/simulator-prompts/${id}`); toast.success(t('admin.deactivated')); load(); }
     catch (e) { toast.error(errMsg(e)); }
   };
   if (!items) return <Spinner />;
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <section className="card space-y-4 p-6">
-        <h2 className="font-heading font-semibold">{editing ? 'Edit simulator prompt' : 'New simulator prompt'}</h2>
-        <Field label="Task">
+        <h2 className="font-heading font-semibold">{editing ? t('admin.editSimPrompt') : t('admin.newSimPrompt')}</h2>
+        <Field label={t('admin.task')}>
           <select className="input" value={form.task_type} onChange={(e) => setForm({ ...form, task_type: Number(e.target.value) })}>
-            {[1, 2, 3].map((t) => <option key={t} value={t}>Tâche {t}</option>)}
+            {[1, 2, 3].map((n) => <option key={n} value={n}>Tâche {n}</option>)}
           </select>
         </Field>
-        <Field label="Consigne"><textarea className="input min-h-[120px]" value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} /></Field>
+        <Field label={t('admin.consigne')}><textarea className="input min-h-[120px]" value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} /></Field>
         <div className="flex gap-3">
-          <button className="btn-primary" onClick={save}>{editing ? 'Update' : 'Create'}</button>
-          {editing && <button className="btn-outline" onClick={() => { setEditing(null); setForm(empty); }}>Cancel</button>}
+          <button className="btn-primary" onClick={save}>{editing ? t('admin.update') : t('admin.create')}</button>
+          {editing && <button className="btn-outline" onClick={() => { setEditing(null); setForm(empty); }}>{t('admin.cancel')}</button>}
         </div>
       </section>
       <section className="space-y-3">
@@ -475,8 +496,8 @@ function SimPrompts() {
               <p className="mt-2 text-sm text-gray-700">{p.text}</p>
             </div>
             <div className="flex shrink-0 gap-2">
-              <button className="btn-outline !px-3 !py-1 text-xs" onClick={() => { setEditing(p.sim_prompt_id); setForm({ task_type: p.task_type, text: p.text }); }}>Edit</button>
-              <button className="btn-outline !border-red-200 !px-3 !py-1 text-xs !text-red-600" onClick={() => del(p.sim_prompt_id)}>Delete</button>
+              <button className="btn-outline !px-3 !py-1 text-xs" onClick={() => { setEditing(p.sim_prompt_id); setForm({ task_type: p.task_type, text: p.text }); }}>{t('admin.edit')}</button>
+              <button className="btn-outline !border-red-200 !px-3 !py-1 text-xs !text-red-600" onClick={() => del(p.sim_prompt_id)}>{t('admin.delete')}</button>
             </div>
           </div>
         ))}
@@ -487,6 +508,7 @@ function SimPrompts() {
 
 /* ---------------------------------------------------------------- Blog ---- */
 function Blog() {
+  const t = useT();
   const [items, load] = useCrud('/api/admin/blog', 'posts');
   const empty = { title: '', excerpt: '', content: '', cover_image: '', meta_description: '', author: 'MonFrancais', tags: '', is_published: true };
   const [form, setForm] = useState(empty);
@@ -501,40 +523,40 @@ function Blog() {
       cover_image: form.cover_image,
       meta_description: form.meta_description,
       author: form.author,
-      tags: form.tags ? form.tags.split(',').map((t) => t.trim()).filter(Boolean) : [],
+      tags: form.tags ? form.tags.split(',').map((tag) => tag.trim()).filter(Boolean) : [],
       is_published: form.is_published,
     };
     try {
       if (editing) await api.put(`/api/admin/blog/${editing}`, payload);
       else await api.post('/api/admin/blog', payload);
-      toast.success('Saved'); setForm(empty); setEditing(null); load();
+      toast.success(t('admin.saved')); setForm(empty); setEditing(null); load();
     } catch (e) { toast.error(errMsg(e)); }
   };
   const del = async (id) => {
-    try { await api.delete(`/api/admin/blog/${id}`); toast.success('Deleted'); load(); }
+    try { await api.delete(`/api/admin/blog/${id}`); toast.success(t('admin.deleted')); load(); }
     catch (e) { toast.error(errMsg(e)); }
   };
   if (!items) return <Spinner />;
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <section className="card space-y-4 p-6">
-        <h2 className="font-heading font-semibold">{editing ? 'Edit post' : 'New blog post'}</h2>
-        <Field label="Title"><input className="input" value={form.title} onChange={set('title')} data-testid="blog-title-input" /></Field>
-        <Field label="Excerpt (short summary)"><textarea className="input min-h-[70px]" value={form.excerpt} onChange={set('excerpt')} /></Field>
-        <Field label="Content (Markdown or HTML)"><textarea className="input min-h-[220px] font-mono text-xs" value={form.content} onChange={set('content')} data-testid="blog-content-textarea" /></Field>
+        <h2 className="font-heading font-semibold">{editing ? t('admin.editPost') : t('admin.newPost')}</h2>
+        <Field label={t('admin.titleField')}><input className="input" value={form.title} onChange={set('title')} data-testid="blog-title-input" /></Field>
+        <Field label={t('admin.excerpt')}><textarea className="input min-h-[70px]" value={form.excerpt} onChange={set('excerpt')} /></Field>
+        <Field label={t('admin.content')}><textarea className="input min-h-[220px] font-mono text-xs" value={form.content} onChange={set('content')} data-testid="blog-content-textarea" /></Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Author"><input className="input" value={form.author} onChange={set('author')} /></Field>
-          <Field label="Tags (comma-separated)"><input className="input" placeholder="tcf, grammaire" value={form.tags} onChange={set('tags')} /></Field>
+          <Field label={t('admin.author')}><input className="input" value={form.author} onChange={set('author')} /></Field>
+          <Field label={t('admin.tags')}><input className="input" placeholder={t('admin.tagsPlaceholder')} value={form.tags} onChange={set('tags')} /></Field>
         </div>
-        <Field label="Cover image URL"><input className="input" value={form.cover_image} onChange={set('cover_image')} /></Field>
-        <Field label="Meta description (SEO)"><input className="input" value={form.meta_description} onChange={set('meta_description')} /></Field>
+        <Field label={t('admin.coverImage')}><input className="input" value={form.cover_image} onChange={set('cover_image')} /></Field>
+        <Field label={t('admin.metaDescription')}><input className="input" value={form.meta_description} onChange={set('meta_description')} /></Field>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={form.is_published} onChange={(e) => setForm({ ...form, is_published: e.target.checked })} />
-          <span className="font-medium text-gray-600">Published</span>
+          <span className="font-medium text-gray-600">{t('admin.published')}</span>
         </label>
         <div className="flex gap-3">
-          <button className="btn-primary" onClick={save} data-testid="save-blog-button">{editing ? 'Update' : 'Create'}</button>
-          {editing && <button className="btn-outline" onClick={() => { setEditing(null); setForm(empty); }}>Cancel</button>}
+          <button className="btn-primary" onClick={save} data-testid="save-blog-button">{editing ? t('admin.update') : t('admin.create')}</button>
+          {editing && <button className="btn-outline" onClick={() => { setEditing(null); setForm(empty); }}>{t('admin.cancel')}</button>}
         </div>
       </section>
       <section className="space-y-3">
@@ -542,10 +564,10 @@ function Blog() {
           <div key={p.post_id} className={`card flex items-start justify-between gap-4 p-5 ${p.is_published ? '' : 'opacity-50'}`}>
             <div>
               <p className="font-semibold">{p.title}</p>
-              <p className="text-xs text-gray-500">/{p.slug} · {p.author} {p.is_published ? '' : '· draft'}</p>
+              <p className="text-xs text-gray-500">/{p.slug} · {p.author} {p.is_published ? '' : t('admin.draftSuffix')}</p>
               {p.tags?.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1">
-                  {p.tags.map((t) => <span key={t} className="pill bg-violet-50 text-xs text-primary">{t}</span>)}
+                  {p.tags.map((tag) => <span key={tag} className="pill bg-violet-50 text-xs text-primary">{tag}</span>)}
                 </div>
               )}
             </div>
@@ -559,12 +581,12 @@ function Blog() {
                   tags: (p.tags || []).join(', '),
                   is_published: p.is_published,
                 });
-              }}>Edit</button>
-              <button className="btn-outline !border-red-200 !px-3 !py-1 text-xs !text-red-600" onClick={() => del(p.post_id)}>Delete</button>
+              }}>{t('admin.edit')}</button>
+              <button className="btn-outline !border-red-200 !px-3 !py-1 text-xs !text-red-600" onClick={() => del(p.post_id)}>{t('admin.delete')}</button>
             </div>
           </div>
         ))}
-        {!items.length && <p className="text-sm text-gray-400">No posts yet — write the first one.</p>}
+        {!items.length && <p className="text-sm text-gray-400">{t('admin.noPosts')}</p>}
       </section>
     </div>
   );

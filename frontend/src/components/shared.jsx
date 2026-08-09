@@ -1,28 +1,81 @@
 import { useState, useRef } from 'react';
-import { Link, NavLink, Navigate, useNavigate } from 'react-router-dom';
-import { Fire, SignOut, List, X, SquaresFour } from '@phosphor-icons/react';
+import { Link, NavLink, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Fire, SignOut, List, X, SquaresFour, ArrowLeft } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 import { ACCENTS, CATEGORY_META } from '../lib/api';
+import { WRITING_TASKS, countWords, wordStatus } from '../lib/tcf';
+import { LANGUAGES, useI18n, useT } from '../i18n';
+
+/* ----------------------------------------------------------- BackLink ---- */
+/* `to` pins a fixed parent; omit it to return wherever the user came from, and
+   pass `fallback` for where that should land when there is no history to pop.
+   location.key is 'default' only on the first entry of the session, which is
+   how we know the page was opened directly rather than navigated to. */
+export function BackLink({ to, fallback = '/', label, className = '', testid = 'back-link' }) {
+  const navigate = useNavigate();
+  const { key } = useLocation();
+  const t = useT();
+
+  const go = () => {
+    if (to) navigate(to);
+    else if (key !== 'default') navigate(-1);
+    else navigate(fallback);
+  };
+
+  return (
+    <button onClick={go} data-testid={testid}
+      className={`mb-5 inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline ${className}`}>
+      <ArrowLeft size={16} /> {label || t('common.back')}
+    </button>
+  );
+}
+
+/* ---------------------------------------------------------- LangToggle ---- */
+/* Two locales only, so a segmented control beats a dropdown: the alternative
+   is always visible and one tap away.
+   shrink-0 is load-bearing: the toggle sits in a flex row next to the auth
+   buttons, and without it flex compresses the control while `overflow-hidden`
+   silently slices the labels off — which strands anyone who cannot read the
+   language they are currently in. */
+function LangToggle({ lang, setLang }) {
+  return (
+    <div className="inline-flex shrink-0 overflow-hidden rounded-lg border border-violet-200"
+      role="group" aria-label="Language">
+      {LANGUAGES.map((l) => (
+        <button key={l.code} onClick={() => setLang(l.code)}
+          aria-pressed={lang === l.code}
+          title={l.name}
+          data-testid={`lang-${l.code}`}
+          className={`shrink-0 px-2.5 py-1 text-xs font-bold transition ${
+            lang === l.code ? 'bg-primary text-white' : 'bg-white text-gray-500 hover:text-primary'
+          }`}>
+          {l.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 /* ------------------------------------------------------------- Header ---- */
 export function Header() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const { t, lang, setLang } = useI18n();
   const [open, setOpen] = useState(false);
 
   const links = [
-    { to: '/speaking', label: 'Speaking Lab' },
-    { to: '/practice', label: 'Writing Assistant' },
-    { to: '/reading', label: 'Reading' },
-    { to: '/listening', label: 'Listening' },
-    { to: '/exam/reading-comprehension', label: 'Mock Exams' },
-    { to: '/resources', label: 'Resources' },
+    { to: '/speaking', label: t('nav.speaking') },
+    { to: '/practice', label: t('nav.writing') },
+    { to: '/reading', label: t('nav.reading') },
+    { to: '/listening', label: t('nav.listening') },
+    { to: '/exam/reading-comprehension', label: t('nav.mockExams') },
+    { to: '/resources', label: t('nav.resources') },
   ];
 
   return (
     <header className="glass sticky top-0 z-50 border-b border-gray-100">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
-        <Link to="/" className="flex items-center" data-testid="logo-link" aria-label="monfrançais">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
+        <Link to="/" className="flex shrink-0 items-center" data-testid="logo-link" aria-label="monfrançais">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0.30 -75.90 544.20 100.15"
             className="h-8 w-auto" role="img" aria-label="monfrançais" preserveAspectRatio="xMinYMid meet">
             <path fill="#7f3be7" d="M15.400 0L4.500 0L4.500-24.600L4.300-51.900L14.100-51.900L13-28.200L13.900-28.200Q14.900-41.400 19.100-47.350Q23.300-53.300 30.900-53.300L30.900-53.300Q38.700-53.300 42-47.150Q45.300-41 44.700-28.200L44.700-28.200L45.600-28.200Q46.500-41.300 50.800-47.300Q55.100-53.300 63.100-53.300L63.100-53.300Q79.200-53.300 79.200-29L79.200-29L79.200 0L68.200 0L68.200-27.600Q68.200-35.700 66.200-39.550Q64.200-43.400 59.900-43.400L59.900-43.400Q53.900-43.400 50.500-36.450Q47.100-29.500 47.100-17L47.100-17L47.100 0L36.400 0L36.400-28.200Q36.400-43.400 28.100-43.400L28.100-43.400Q22.400-43.400 18.900-36.750Q15.400-30.100 15.400-17L15.400-17L15.400 0ZM109.100 1.300L109.100 1.300Q101.900 1.300 96.200-1.700Q90.500-4.700 87.250-10.750Q84-16.800 84-26L84-26Q84-35.200 87.300-41.250Q90.600-47.300 96.250-50.300Q101.900-53.300 109-53.300L109-53.300Q116.200-53.300 121.850-50.250Q127.500-47.200 130.750-41.050Q134-34.900 134-25.800L134-25.800Q134-16.500 130.700-10.500Q127.400-4.500 121.750-1.600Q116.100 1.300 109.100 1.300ZM109.300-7.300L109.300-7.300Q115.700-7.300 119.350-12Q123-16.700 123-25.300L123-25.300Q123-34.100 119.200-39.200Q115.400-44.300 108.800-44.300L108.800-44.300Q102.300-44.300 98.650-39.400Q95-34.500 95-26.100L95-26.100Q95-17.300 98.750-12.300Q102.500-7.300 109.300-7.300ZM150.300 0L139.400 0L139.400-25.900L139.300-51.900L149.100-51.900L148-28.200L148.900-28.200Q149.700-40.900 154.200-47.100Q158.700-53.300 167.400-53.300L167.400-53.300Q176.100-53.300 180.350-47.150Q184.600-41 184.600-28.400L184.600-28.400L184.600 0L173.700 0L173.700-27.600Q173.700-35.800 171.400-39.700Q169.100-43.600 164-43.600L164-43.600Q157.400-43.600 153.850-36.850Q150.300-30.100 150.300-15.500L150.300-15.500L150.300 0Z" />
@@ -32,62 +85,64 @@ export function Header() {
           </svg>
         </Link>
 
-        <nav className="hidden items-center gap-6 md:flex">
+        <nav className="hidden shrink-0 items-center gap-4 xl:flex 2xl:gap-5">
           {links.map((l) => (
             <NavLink key={l.to} to={l.to}
-              className={({ isActive }) => `text-sm font-medium transition ${isActive ? 'text-primary' : 'text-gray-600 hover:text-primary'}`}>
+              className={({ isActive }) => `whitespace-nowrap text-sm font-medium transition ${isActive ? 'text-primary' : 'text-gray-600 hover:text-primary'}`}>
               {l.label}
             </NavLink>
           ))}
         </nav>
 
-        <div className="hidden items-center gap-3 md:flex">
+        <div className="hidden shrink-0 items-center gap-3 xl:flex">
+          <LangToggle lang={lang} setLang={setLang} />
           {user ? (
             <>
               {user.current_streak > 0 && (
-                <span className="pill bg-orange-50 text-orange-600" title="Daily streak">
+                <span className="pill bg-orange-50 text-orange-600" title={t('nav.streakTitle')}>
                   <Fire size={14} weight="fill" /> {user.current_streak}
                 </span>
               )}
               <Link to="/dashboard"
-                className="btn-outline !px-3 !py-1.5 text-sm" data-testid="header-dashboard">
-                <SquaresFour size={16} weight="fill" /> Dashboard
+                className="btn-outline !px-3 !py-1.5 whitespace-nowrap text-sm" data-testid="header-dashboard">
+                <SquaresFour size={16} weight="fill" /> {t('nav.dashboard')}
               </Link>
               <Link to={user.role === 'admin' ? '/admin' : '/dashboard'}
-                className="text-sm font-semibold text-gray-700 hover:text-primary" data-testid="user-menu">
+                className="whitespace-nowrap text-sm font-semibold text-gray-700 hover:text-primary" data-testid="user-menu">
                 {user.name?.split(' ')[0]}
               </Link>
               <button onClick={async () => { await logout(); navigate('/'); }}
-                className="btn-outline !px-3 !py-1.5 text-sm" data-testid="logout-button">
-                <SignOut size={16} /> Logout
+                className="btn-outline !px-3 !py-1.5 whitespace-nowrap text-sm" data-testid="logout-button">
+                <SignOut size={16} /> {t('nav.logout')}
               </button>
             </>
           ) : (
             <>
-              <Link to="/login" className="text-sm font-semibold text-gray-700 hover:text-primary" data-testid="header-login">Log in</Link>
-              <Link to="/register" className="btn-primary !py-2 text-sm" data-testid="header-register">Start Free Trial</Link>
+              <Link to="/login" className="whitespace-nowrap text-sm font-semibold text-gray-700 hover:text-primary" data-testid="header-login">{t('nav.login')}</Link>
+              <Link to="/register" className="btn-primary !py-2 whitespace-nowrap text-sm" data-testid="header-register">{t('nav.register')}</Link>
             </>
           )}
         </div>
 
-        <button className="md:hidden" onClick={() => setOpen(!open)} aria-label="Menu">
+        <button className="xl:hidden" onClick={() => setOpen(!open)} aria-label={t('nav.menu')}>
           {open ? <X size={24} /> : <List size={24} />}
         </button>
       </div>
       {open && (
-        <div className="border-t border-gray-100 bg-white px-4 py-3 md:hidden">
+        <div className="border-t border-gray-100 bg-white px-4 py-3 xl:hidden">
+          <div className="pb-2"><LangToggle lang={lang} setLang={setLang} /></div>
           {links.map((l) => (
             <Link key={l.to} to={l.to} onClick={() => setOpen(false)} className="block py-2 text-sm font-medium text-gray-700">{l.label}</Link>
           ))}
           {user ? (
             <>
-              <Link to="/dashboard" onClick={() => setOpen(false)} className="block py-2 text-sm font-medium">Dashboard</Link>
-              <button onClick={async () => { await logout(); setOpen(false); navigate('/'); }} className="py-2 text-sm font-medium text-red-600">Logout</button>
+              <Link to="/dashboard" onClick={() => setOpen(false)} className="block py-2 text-sm font-medium">{t('nav.dashboard')}</Link>
+              <button onClick={async () => { await logout(); setOpen(false); navigate('/'); }} className="py-2 text-sm font-medium text-red-600">{t('nav.logout')}</button>
             </>
           ) : (
             <>
-              <Link to="/login" onClick={() => setOpen(false)} className="block py-2 text-sm font-medium">Log in</Link>
-              <Link to="/register" onClick={() => setOpen(false)} className="block py-2 text-sm font-semibold text-primary">Start Free Trial</Link>
+              <Link to="/login" onClick={() => setOpen(false)} className="block py-2 text-sm font-medium">{t('nav.login')}</Link>
+              <Link to="/register" onClick={() => setOpen(false)} className="block py-2 text-sm font-semibold text-primary">{t('nav.register')}</Link>
             </>
           )}
         </div>
@@ -135,21 +190,95 @@ export function AccentToolbar({ textareaRef, onInsert }) {
   );
 }
 
+/* -------------------------------------------------------- CreditsBadge ---- */
+/* Shown before the editor. Discovering the limit only after writing 150 words
+   and pressing Analyser wastes the learner's effort, which is the moment they
+   are most likely to leave. */
+export function CreditsBadge({ className = '' }) {
+  const { user } = useAuth();
+  const t = useT();
+  if (!user) return null;
+  const left = user.credits_remaining;
+  if (left === null || left === undefined) {
+    return (
+      <span className={`pill bg-violet-50 text-primary ${className}`} data-testid="credits-badge">
+        {t('credits.unlimited')}
+      </span>
+    );
+  }
+  const tone = left === 0 ? 'bg-red-50 text-red-700'
+    : left <= 2 ? 'bg-amber-50 text-amber-700'
+    : 'bg-violet-50 text-primary';
+  return (
+    <span className={`pill ${tone} ${className}`} data-testid="credits-badge">
+      {left === 0
+        ? t('credits.none')
+        : t('credits.remaining', { n: left, total: user.free_monthly_limit ?? 5 })}
+    </span>
+  );
+}
+
+/* ------------------------------------------------------- WordCountBar ---- */
+/* Live word count against a tâche's official TCF range. `capped` mirrors the
+   server-side rule, so the learner sees the penalty before submitting rather
+   than discovering it in the result. */
+export function WordCountBar({ text, taskType, className = '' }) {
+  const t = useT();
+  const { words, state, key: msgKey, vars, capped } = wordStatus(text, taskType);
+  const spec = WRITING_TASKS[taskType];
+  if (!spec) {
+    return (
+      <p className={`text-xs text-gray-500 ${className}`} data-testid="word-count">
+        {t('words.count', { n: countWords(text) })}
+      </p>
+    );
+  }
+  const tone = {
+    empty: 'text-gray-400',
+    under: 'text-amber-600',
+    ok: 'text-green-600',
+    warn: 'text-amber-600',
+    over: 'text-red-600',
+  }[state] || 'text-gray-500';
+  const pct = Math.min(100, Math.round((words / spec.maxWords) * 100));
+  const bar = { under: 'bg-amber-400', ok: 'bg-green-500', warn: 'bg-amber-500', over: 'bg-red-500' }[state] || 'bg-gray-300';
+
+  return (
+    <div className={className} data-testid="word-count">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-xs">
+        <span className={`font-semibold tabular-nums ${tone}`}>
+          {t('words.range', { n: words, min: spec.minWords, max: spec.maxWords })}
+        </span>
+        <span className={tone}>{msgKey ? t(msgKey, vars) : ''}</span>
+      </div>
+      <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
+        <div className={`h-full rounded-full transition-all ${bar}`} style={{ width: `${pct}%` }} />
+      </div>
+      {capped && (
+        <p className="mt-1 text-[11px] text-red-600" data-testid="word-count-cap-warning">
+          {t('words.cappedWarning')}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /* --------------------------------------------------- AnalysisProgress ---- */
 const STAGES = [
-  ['parsing', 'Lecture du texte'],
-  ['grammar', 'Analyse grammaticale'],
-  ['spelling', 'Vérification de l’orthographe'],
-  ['conjugation', 'Contrôle des conjugaisons'],
-  ['style', 'Évaluation du style'],
-  ['generating', 'Génération du rapport'],
+  ['parsing', 'analysis.parsing'],
+  ['grammar', 'analysis.grammar'],
+  ['spelling', 'analysis.spelling'],
+  ['conjugation', 'analysis.conjugation'],
+  ['style', 'analysis.style'],
+  ['generating', 'analysis.generating'],
 ];
 
 export function AnalysisProgress({ current }) {
+  const t = useT();
   const idx = STAGES.findIndex(([k]) => k === current);
   return (
     <div className="card mx-auto max-w-md p-6" data-testid="analysis-progress">
-      <h3 className="mb-4 font-heading text-lg font-semibold">Analyse en cours…</h3>
+      <h3 className="mb-4 font-heading text-lg font-semibold">{t('analysis.title')}</h3>
       <ul className="space-y-3">
         {STAGES.map(([key, label], i) => {
           const state = i < idx ? 'done' : i === idx ? 'active' : 'todo';
@@ -158,7 +287,7 @@ export function AnalysisProgress({ current }) {
               {state === 'done' && <span className="flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-[10px] text-white">✓</span>}
               {state === 'active' && <span className="h-5 w-5 animate-spin rounded-full border-2 border-violet-200 border-t-primary" />}
               {state === 'todo' && <span className="h-5 w-5 rounded-full border-2 border-gray-200" />}
-              <span className={state === 'todo' ? 'text-gray-400' : state === 'active' ? 'font-semibold text-primary' : 'text-gray-700'}>{label}</span>
+              <span className={state === 'todo' ? 'text-gray-400' : state === 'active' ? 'font-semibold text-primary' : 'text-gray-700'}>{t(label)}</span>
             </li>
           );
         })}
@@ -168,7 +297,7 @@ export function AnalysisProgress({ current }) {
 }
 
 /* ------------------------------------------------ Streaming SSE helper ---- */
-export async function streamAnalysis(backendUrl, payload, { onStage, onComplete, onError }) {
+export async function streamAnalysis(backendUrl, payload, { onStage, onComplete, onError, t = (k) => k }) {
   const res = await fetch(`${backendUrl}/api/analyze/stream`, {
     method: 'POST',
     credentials: 'include',
@@ -176,7 +305,7 @@ export async function streamAnalysis(backendUrl, payload, { onStage, onComplete,
     body: JSON.stringify(payload),
   });
   if (!res.ok || !res.body) {
-    let detail = 'Analysis failed';
+    let detail = t('analysis.failed');
     try { const j = await res.json(); detail = typeof j.detail === 'string' ? j.detail : detail; } catch {}
     onError?.(detail, res.status);
     return;
@@ -203,12 +332,12 @@ export async function streamAnalysis(backendUrl, payload, { onStage, onComplete,
       }
     }
   } catch (e) {
-    if (!settled) { settled = true; onError?.('Connexion interrompue pendant l’analyse. Réessayez.'); }
+    if (!settled) { settled = true; onError?.(t('analysis.interrupted')); }
     return;
   }
   // Stream closed with no result event — a proxy timeout or a dropped
   // connection. Without this the caller stays stuck on the progress spinner.
-  if (!settled) onError?.('L’analyse s’est interrompue avant la fin. Réessayez.');
+  if (!settled) onError?.(t('analysis.incomplete'));
 }
 
 /* ----------------------------------------------- ErrorHighlightedText ---- */

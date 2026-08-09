@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider } from "./context/AuthContext";
+import { I18nProvider } from "./i18n";
 import { Header, ProtectedRoute } from "./components/shared";
 import TefTcfWritingGuide from './pages/TefTcfWritingGuide';
 import SpeakingHome from './pages/SpeakingHome';
@@ -34,6 +35,7 @@ import Resources from './pages/Resources';
 export default function App() {
   return (
     <BrowserRouter>
+      <I18nProvider>
       <AuthProvider>
         <Header />
         <Routes>
@@ -91,6 +93,7 @@ export default function App() {
         </Routes>
         <Toaster position="top-right" richColors closeButton />
       </AuthProvider>
+      </I18nProvider>
     </BrowserRouter>
   );
 }

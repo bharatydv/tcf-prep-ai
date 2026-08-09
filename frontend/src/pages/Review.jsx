@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Cards, ListChecks, Lightning, Fire } from '@phosphor-icons/react';
+import { Cards, ListChecks, Lightning, Fire, ArrowLeft } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, errMsg, CATEGORY_META } from '../lib/api';
+import { BackLink } from '../components/shared';
+import { useT } from '../i18n';
 
 function shuffle(a) { return [...a].sort(() => Math.random() - 0.5); }
 
 export default function Review() {
   const [params] = useSearchParams();
+  const t = useT();
   const category = params.get('category');
   const [queue, setQueue] = useState(null);
   const [mode, setMode] = useState(null); // flashcards | mcq | sprint
@@ -34,10 +37,17 @@ export default function Review() {
     return shuffle([...opts]);
   }, [currentItem]);
 
+  /* The timer callback captured `results` from the render that created the
+     interval, so a sprint that ran out of time submitted the answers as they
+     were when it started — usually none. Read them through a ref instead. */
+  const resultsRef = useRef(results);
+  useEffect(() => { resultsRef.current = results; }, [results]);
+  const finishRef = useRef(null);
+
   useEffect(() => {
     if (mode !== 'sprint' || summary) return;
     const id = setInterval(() => setSprintLeft((s) => {
-      if (s <= 1) { clearInterval(id); finish(results); return 0; }
+      if (s <= 1) { clearInterval(id); finishRef.current?.(resultsRef.current); return 0; }
       return s - 1;
     }), 1000);
     return () => clearInterval(id);
@@ -48,14 +58,21 @@ export default function Review() {
     try {
       const { data } = await api.post('/api/review/submit', { mode, results: finalResults });
       setSummary(data);
-      if (data.streak?.extended) toast.success(`🔥 ${data.streak.current_streak}-day streak!`);
-      data.badges?.forEach((b) => toast.success(`🏅 Badge : ${b}`));
+      if (data.streak?.extended) toast.success(t('rev.streakToast', { n: data.streak.current_streak }));
+      data.badges?.forEach((b) => toast.success(t('rev.badgeToast', { name: b })));
     } catch (e) { toast.error(errMsg(e)); }
   };
+  finishRef.current = finish;
 
-  const answer = (correct) => {
+  /* MCQ and sprint send what the learner picked and let the server decide;
+     a flashcard has no comparable answer, so it sends a self-rating. The
+     client used to send `correct` directly, which made XP forgeable. */
+  const answer = ({ picked: pickedAnswer, selfRated }) => {
     const m = items[idx];
-    const next = [...results, { mistake_id: m.mistake_id, correct }];
+    const entry = pickedAnswer !== undefined
+      ? { mistake_id: m.mistake_id, answer: pickedAnswer }
+      : { mistake_id: m.mistake_id, self_rated_correct: selfRated };
+    const next = [...results, entry];
     setResults(next);
     setFlipped(false); setPicked(null);
     if (idx + 1 >= items.length) finish(next);
@@ -64,21 +81,35 @@ export default function Review() {
 
   const start = (m) => { setMode(m); setIdx(0); setResults([]); setSummary(null); setFlipped(false); setPicked(null); setSprintLeft(120); };
 
+  /* Leaves a session without submitting — answers so far are discarded. */
+  const quitSession = () => {
+    if (results.length && !window.confirm(t('rev.quitConfirm'))) return;
+    setMode(null); setIdx(0); setResults([]); setFlipped(false); setPicked(null);
+  };
+
+  const quitButton = (
+    <button onClick={quitSession} data-testid="quit-review-session"
+      className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-primary hover:underline">
+      <ArrowLeft size={16} /> {t('rev.quit')}
+    </button>
+  );
+
   if (!queue) return <main className="flex min-h-[60vh] items-center justify-center"><div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" /></main>;
 
   /* ---- summary screen ---- */
   if (summary) {
-    const correct = results.filter((r) => r.correct).length;
+    const graded = summary.graded || [];
+    const correct = graded.filter((r) => r.correct).length;
     return (
       <main className="mx-auto max-w-xl px-4 py-16 text-center">
-        <h1 className="text-3xl font-bold">Session terminée 🎉</h1>
+        <h1 className="text-3xl font-bold">{t('rev.sessionDone')}</h1>
         <div className="card mt-6 space-y-3 p-8">
           <p className="font-heading text-5xl font-bold text-primary">+{summary.xp_earned} XP</p>
-          <p className="text-gray-600">{correct} / {results.length} corrects · {summary.newly_mastered.length} maîtrisés · XP total : {summary.total_xp}</p>
+          <p className="text-gray-600">{t('rev.summary', { correct, total: graded.length, mastered: summary.newly_mastered.length, xp: summary.total_xp })}</p>
           {summary.badges?.map((b) => <p key={b} className="pill mx-auto bg-amber-50 text-amber-700">🏅 {b}</p>)}
         </div>
         <div className="mt-6 flex justify-center gap-3">
-          <button className="btn-primary" onClick={() => { setMode(null); setSummary(null); load(); }}>Continuer</button>
+          <button className="btn-primary" onClick={() => { setMode(null); setSummary(null); load(); }}>{t('rev.continue')}</button>
           <Link to="/dashboard" className="btn-outline">Tableau de bord</Link>
         </div>
       </main>
@@ -89,27 +120,28 @@ export default function Review() {
   if (!mode) {
     return (
       <main className="mx-auto max-w-5xl px-4 py-10">
-        <h1 className="text-3xl font-bold">Révision de vos erreurs</h1>
+        <BackLink />
+        <h1 className="text-3xl font-bold">{t('rev.title')}</h1>
         <p className="mt-2 text-gray-600">
-          {category ? <>Catégorie : <span className="pill" style={{ background: CATEGORY_META[category]?.color }}>{CATEGORY_META[category]?.label}</span> · </> : null}
-          <strong>{queue.due.length}</strong> erreurs à réviser aujourd'hui (répétition espacée : 1 / 3 / 7 / 14 jours). Les révisions sont gratuites et comptent pour votre série <Fire size={14} className="inline text-orange-500" weight="fill" />.
+          {category ? <>{t('rev.category')} <span className="pill" style={{ background: CATEGORY_META[category]?.color }}>{CATEGORY_META[category]?.label}</span> · </> : null}
+          {t('rev.hubIntro', { n: queue.due.length })} <Fire size={14} className="inline text-orange-500" weight="fill" />
         </p>
         {queue.due.length === 0 ? (
           <div className="card mt-8 p-10 text-center">
-            <p className="text-2xl">🎉 Rien à réviser !</p>
-            <p className="mt-2 text-gray-600">Revenez demain, ou <Link to="/practice" className="font-semibold text-primary">écrivez un nouveau texte</Link>.</p>
+            <p className="text-2xl">{t('rev.nothing')}</p>
+            <p className="mt-2 text-gray-600">{t('rev.comeBack')} <Link to="/practice" className="font-semibold text-primary">{t('rev.writeNew')}</Link>.</p>
           </div>
         ) : (
           <div className="mt-8 grid gap-5 md:grid-cols-3">
             {[
-              ['flashcards', Cards, 'Fix-it cards', 'Votre phrase erronée → formulez la correction → retournez la carte et auto-évaluez-vous.'],
-              ['mcq', ListChecks, 'Choose-the-correct', 'QCM générés à partir de vos propres erreurs : erreur, correction, et un piège.'],
-              ['sprint', Lightning, 'Category sprint', '2 minutes chrono sur vos erreurs dues — combien pouvez-vous en corriger ?'],
+              ['flashcards', Cards, 'rev.modeFlashTitle', 'rev.modeFlashDesc'],
+              ['mcq', ListChecks, 'rev.modeMcqTitle', 'rev.modeMcqDesc'],
+              ['sprint', Lightning, 'rev.modeSprintTitle', 'rev.modeSprintDesc'],
             ].map(([key, Icon, title, desc]) => (
               <button key={key} className="card card-hover p-6 text-left" onClick={() => start(key)} data-testid={`mode-${key}`}>
                 <Icon size={28} weight="duotone" className="text-primary" />
-                <h3 className="mt-3 font-heading text-lg font-semibold">{title}</h3>
-                <p className="mt-2 text-sm text-gray-600">{desc}</p>
+                <h3 className="mt-3 font-heading text-lg font-semibold">{t(title)}</h3>
+                <p className="mt-2 text-sm text-gray-600">{t(desc)}</p>
               </button>
             ))}
           </div>
@@ -127,17 +159,18 @@ export default function Review() {
   if (mode === 'flashcards') {
     return (
       <main className="mx-auto max-w-xl px-4 py-12">
-        <div className="flex items-center justify-between text-sm text-gray-500"><span>Fix-it cards · {progress}</span><span className="pill" style={{ background: meta.color }}>{meta.label}</span></div>
+        {quitButton}
+        <div className="flex items-center justify-between text-sm text-gray-500"><span>{t('rev.progress', { progress })}</span><span className="pill" style={{ background: meta.color }}>{meta.label}</span></div>
         <div className="card flip-in mt-4 min-h-[260px] p-8" key={`${idx}-${flipped}`}>
           {!flipped ? (
             <>
-              <p className="text-xs uppercase tracking-wide text-gray-400">Votre phrase (avec erreur)</p>
+              <p className="text-xs uppercase tracking-wide text-gray-400">{t('rev.yourSentence')}</p>
               <p className="mt-3 text-lg leading-relaxed text-red-700">{m.error_text}</p>
-              <p className="mt-6 text-sm text-gray-500">Formulez la correction dans votre tête, puis retournez la carte.</p>
+              <p className="mt-6 text-sm text-gray-500">{t('rev.thinkThenFlip')}</p>
             </>
           ) : (
             <>
-              <p className="text-xs uppercase tracking-wide text-gray-400">Correction</p>
+              <p className="text-xs uppercase tracking-wide text-gray-400">{t('rev.correction')}</p>
               <p className="mt-3 text-lg font-medium leading-relaxed text-green-700">{m.correction}</p>
               <p className="mt-4 text-sm text-gray-600">{m.explanation}</p>
             </>
@@ -145,11 +178,11 @@ export default function Review() {
         </div>
         <div className="mt-5 flex justify-center gap-3">
           {!flipped ? (
-            <button className="btn-primary" onClick={() => setFlipped(true)} data-testid="flip-button">Retourner la carte</button>
+            <button className="btn-primary" onClick={() => setFlipped(true)} data-testid="flip-button">{t('rev.flip')}</button>
           ) : (
             <>
-              <button className="btn-outline !border-amber-300 !text-amber-600" onClick={() => answer(false)} data-testid="shaky-button">Encore fragile</button>
-              <button className="btn-primary !bg-green-600 hover:!bg-green-500" onClick={() => answer(true)} data-testid="gotit-button">Je l'ai !</button>
+              <button className="btn-outline !border-amber-300 !text-amber-600" onClick={() => answer({ selfRated: false })} data-testid="shaky-button">{t('rev.shaky')}</button>
+              <button className="btn-primary !bg-green-600 hover:!bg-green-500" onClick={() => answer({ selfRated: true })} data-testid="gotit-button">{t('rev.gotIt')}</button>
             </>
           )}
         </div>
@@ -160,12 +193,13 @@ export default function Review() {
   /* ---- mcq & sprint ---- */
   return (
     <main className="mx-auto max-w-xl px-4 py-12">
+      {quitButton}
       <div className="flex items-center justify-between text-sm text-gray-500">
-        <span>{mode === 'sprint' ? `Sprint · ${Math.floor(sprintLeft / 60)}:${String(sprintLeft % 60).padStart(2, '0')}` : `QCM · ${progress}`}</span>
+        <span>{mode === 'sprint' ? t('rev.sprintProgress', { clock: `${Math.floor(sprintLeft / 60)}:${String(sprintLeft % 60).padStart(2, '0')}` }) : t('rev.mcqProgress', { progress })}</span>
         <span className="pill" style={{ background: meta.color }}>{meta.label}</span>
       </div>
       <div className="card mt-4 p-8">
-        <p className="text-xs uppercase tracking-wide text-gray-400">Quelle est la forme correcte ?</p>
+        <p className="text-xs uppercase tracking-wide text-gray-400">{t('rev.whichCorrect')}</p>
         <p className="mt-3 text-lg text-gray-800">« {m.error_text} »</p>
         <div className="mt-5 space-y-3">
           {options.map((opt) => {
@@ -174,7 +208,7 @@ export default function Review() {
             return (
               <button key={opt} disabled={picked != null}
                 className={`block w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-left text-sm transition hover:border-primary ${state}`}
-                onClick={() => { setPicked(opt); setTimeout(() => answer(isCorrect), 900); }}>
+                onClick={() => { setPicked(opt); setTimeout(() => answer({ picked: opt }), 900); }}>
                 {opt}
               </button>
             );

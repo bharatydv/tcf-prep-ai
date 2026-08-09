@@ -1,27 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Lightning, PenNib, Sparkle, BookOpen, ArrowRight, ArrowLeft,
+  Lightning, PenNib, Sparkle, BookOpen, ArrowRight,
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, BACKEND_URL } from '../lib/api';
+import { WRITING_TASKS, wordStatus } from '../lib/tcf';
 import { useAuth } from '../context/AuthContext';
-import { AnalysisProgress, streamAnalysis } from '../components/shared';
+import { AnalysisProgress, BackLink, CreditsBadge, WordCountBar, streamAnalysis } from '../components/shared';
+import { useT } from '../i18n';
 
 export default function PracticeWrite() {
   const { user, refreshUser } = useAuth();
+  const t = useT();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   // No ?tache= in the URL means Tâche 1, the default writing task.
   const tacheNum = parseInt(searchParams.get('tache'), 10) || 1;
   const themeId = searchParams.get('theme');
-  const [themeQuestion, setThemeQuestion] = useState('');
+  // Free writing has no official length; a tâche does.
+  const taskType = WRITING_TASKS[tacheNum] ? tacheNum : null;
 
   const [prompts, setPrompts] = useState([]);
   const [activePrompt, setActivePrompt] = useState(null);
   const [ownQuestion, setOwnQuestion] = useState('');
   const [text, setText] = useState('');
   const [stage, setStage] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
   const taRef = useRef(null);
 
   // Carried in from the landing simulator or the own-question panel.
@@ -50,7 +55,6 @@ export default function PracticeWrite() {
         const qs = data.questions || [];
         if (qs.length) {
           const pick = qs[Math.floor(Math.random() * qs.length)];
-          setThemeQuestion(pick.prompt_text);
           setOwnQuestion(pick.prompt_text);
         }
       })
@@ -67,25 +71,37 @@ export default function PracticeWrite() {
 
   const submit = async () => {
     if (!user) return navigate('/login');
-    if (!text.trim()) return toast.error('Écrivez quelque chose d\u2019abord !');
+    if (!text.trim()) return toast.error(t('write.writeFirst'));
+    if (submitting) return;
+    // The official range is enforced by the grader; warn before spending a
+    // credit on a text the real exam would penalise anyway.
+    const status = wordStatus(text, taskType);
+    if (status.capped && !window.confirm(
+      `${t(status.key, status.vars)}. ${t('write.capConfirm')}`)) {
+      return;
+    }
     const topic = freeMode ? (ownQuestion.trim() || null) : (activePrompt?.title || null);
+    setSubmitting(true);
     setStage('parsing');
     await streamAnalysis(BACKEND_URL, {
       text,
       prompt_id: activePrompt?.prompt_id || null,
       topic,
+      task_type: taskType,
       source: 'practice',
     }, {
+      t,
       onStage: setStage,
       onComplete: async (sub) => {
         await refreshUser();
-        toast.success(`Analyse termin\u00e9e \u2014 niveau ${sub.tcf_level}`);
+        toast.success(t('write.doneToast', { level: sub.tcf_level }));
         navigate(`/feedback/${sub.submission_id}`);
       },
-      onError: (detail, status) => {
+      onError: (detail, httpStatus) => {
         setStage(null);
+        setSubmitting(false);
         toast.error(detail);
-        if (status === 402) navigate('/pricing');
+        if (httpStatus === 402) navigate('/pricing');
       },
     });
   };
@@ -110,26 +126,20 @@ export default function PracticeWrite() {
 
   if (stage) return <main className="px-4 py-16"><AnalysisProgress current={stage} /></main>;
 
-  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
   // What the learner is writing about: their own topic, or the selected test's consigne.
   const question = freeMode ? ownQuestion.trim() : (activePrompt?.description || '');
 
   return (
     <main className="overflow-x-clip bg-white">
       <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
-        <button
-          onClick={() => navigate(themeId ? `/practice/themes?tache=${tacheNum}` : '/practice/tasks')}
-          className="mb-6 inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline"
-          data-testid="back-to-tasks"
-        >
-          <ArrowLeft size={16} /> Back
-        </button>
+        <BackLink className="!mb-6" testid="back-to-tasks"
+          fallback={themeId ? `/practice/themes?tache=${tacheNum}` : '/practice/tasks'} />
 
         <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
           {/* LEFT: test list */}
           <aside className="rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-5 shadow-soft">
             <p className="flex items-center gap-2 font-heading text-sm font-bold text-gray-900">
-              <BookOpen size={18} weight="duotone" className="text-primary" /> Writing tests
+              <BookOpen size={18} weight="duotone" className="text-primary" /> {t('write.testsList')}
             </p>
 
             <div className="mt-4 space-y-2.5">
@@ -152,7 +162,7 @@ export default function PracticeWrite() {
                       {i + 1}
                     </span>
                     <span className="min-w-0">
-                      <span className="block font-heading text-sm font-bold text-gray-900">Test {i + 1}</span>
+                      <span className="block font-heading text-sm font-bold text-gray-900">{t('write.testN', { n: i + 1 })}</span>
                       <span className="block text-xs capitalize text-gray-500">{p.category} · {p.level}</span>
                     </span>
                   </button>
@@ -163,10 +173,22 @@ export default function PracticeWrite() {
 
           {/* RIGHT: writing panel */}
           <div className="rounded-3xl border border-violet-100 bg-white p-5 shadow-xl shadow-violet-200/40 sm:p-6">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              {taskType ? (
+                <p className="text-sm font-bold text-gray-900">
+                  {WRITING_TASKS[taskType].name}
+                  <span className="ml-2 font-normal text-gray-500">
+                    {t('write.taskMeta', { min: WRITING_TASKS[taskType].minWords, max: WRITING_TASKS[taskType].maxWords, minutes: WRITING_TASKS[taskType].minutes })}
+                  </span>
+                </p>
+              ) : <span />}
+              <CreditsBadge />
+            </div>
+
             {question && (
               <div className="mb-4 rounded-2xl border border-violet-100 bg-violet-50/40 p-4" data-testid="question-display">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-primary">
-                  {freeMode ? 'Votre question' : activePrompt.title}
+                  {freeMode ? t('write.yourQuestion') : activePrompt.title}
                 </p>
                 <p className="mt-1 text-sm leading-relaxed text-gray-800">{question}</p>
               </div>
@@ -180,28 +202,28 @@ export default function PracticeWrite() {
                 onDrop={(e) => e.preventDefault()}
                 lang="fr"
                 className="input paper-textarea min-h-[340px] p-6 shadow-card"
-                placeholder="Commencez à écrire en français…"
+                placeholder={t('write.placeholder')}
                 data-testid="writing-textarea"
               />
             </div>
 
-            <div className="mt-4 flex items-center justify-between">
-              <span className="text-sm text-gray-500">{words} mots</span>
-              <div className="flex gap-3">
-                <button
-                  className="btn-outline"
-                  onClick={() => { setText(''); setOwnQuestion(''); setActivePrompt(null); }}
-                >
-                  Effacer
-                </button>
-                <button
-                  className="btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600"
-                  onClick={submit}
-                  data-testid="submit-text-button"
-                >
-                  <Lightning size={18} weight="fill" /> Analyser mon texte
-                </button>
-              </div>
+            <WordCountBar text={text} taskType={taskType} className="mt-4" />
+
+            <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
+              <button
+                className="btn-outline"
+                onClick={() => { setText(''); setOwnQuestion(''); setActivePrompt(null); }}
+              >
+                {t('write.clear')}
+              </button>
+              <button
+                className="btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600"
+                onClick={submit}
+                disabled={submitting}
+                data-testid="submit-text-button"
+              >
+                <Lightning size={18} weight="fill" /> {t('write.analyse')}
+              </button>
             </div>
           </div>
         </div>
@@ -210,10 +232,10 @@ export default function PracticeWrite() {
         <div className="mt-12">
           <div className="flex items-center justify-between">
             <h2 className="flex items-center gap-2 font-heading text-xl font-extrabold text-gray-900">
-              <Sparkle size={20} weight="fill" className="text-primary" /> Recent Topics
+              <Sparkle size={20} weight="fill" className="text-primary" /> {t('write.recentTopics')}
             </h2>
             <Link to="/combinations" className="flex items-center gap-1 text-sm font-semibold text-primary hover:underline" data-testid="recent-see-all">
-              See all <ArrowRight size={15} weight="bold" />
+              {t('write.seeAll')} <ArrowRight size={15} weight="bold" />
             </Link>
           </div>
 
@@ -232,10 +254,10 @@ export default function PracticeWrite() {
                       <PenNib size={20} weight="fill" />
                     </span>
                     <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-green-700">
-                      <span className="h-1.5 w-1.5 rounded-full bg-green-500" /> Available
+                      <span className="h-1.5 w-1.5 rounded-full bg-green-500" /> {t('write.available')}
                     </span>
                   </div>
-                  <h3 className="mt-4 font-heading text-base font-bold text-gray-900">Combinaison {n}</h3>
+                  <h3 className="mt-4 font-heading text-base font-bold text-gray-900">{t('write.combination', { n })}</h3>
                   <p className="mt-1 text-sm text-gray-500">June 2026</p>
                 </div>
               </Link>

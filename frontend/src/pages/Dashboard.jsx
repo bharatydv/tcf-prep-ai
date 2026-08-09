@@ -1,28 +1,64 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Fire, Trophy, GameController } from '@phosphor-icons/react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
   BarChart, Bar, Cell, LineChart, Line,
 } from 'recharts';
-import { api, CATEGORY_META } from '../lib/api';
+import { api, errMsg, CATEGORY_META } from '../lib/api';
 import { Heatmap } from '../components/shared';
+import { useT } from '../i18n';
 
 export default function Dashboard() {
+  const t = useT();
   const [stats, setStats] = useState(null);
   const [heatmap, setHeatmap] = useState({});
   const [mistakes, setMistakes] = useState(null);
   const [subs, setSubs] = useState([]);
+  const [error, setError] = useState('');
   const navigate = useNavigate();
 
-  useEffect(() => {
-    api.get('/api/dashboard/stats').then(({ data }) => setStats(data)).catch(() => {});
+  // Every call used to swallow its error, so a backend outage left the page
+  // spinning forever with nothing to click.
+  const load = useCallback(() => {
+    setError('');
+    api.get('/api/dashboard/stats')
+      .then(({ data }) => setStats(data))
+      .catch((e) => setError(errMsg(e, t('dash.loadError'))));
     api.get('/api/dashboard/heatmap').then(({ data }) => setHeatmap(data.heatmap)).catch(() => {});
     api.get('/api/mistakes/summary').then(({ data }) => setMistakes(data)).catch(() => {});
     api.get('/api/submissions').then(({ data }) => setSubs(data.submissions)).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(load, [load]);
+
+  if (error && !stats) {
+    return (
+      <main className="mx-auto max-w-md px-4 py-20 text-center">
+        <p className="text-gray-700">{error}</p>
+        <button className="btn-primary mt-5" onClick={load}>{t('dash.retry')}</button>
+      </main>
+    );
+  }
   if (!stats) return <main className="flex min-h-[60vh] items-center justify-center"><div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" /></main>;
+
+  // A brand-new account sees empty charts and a blank heatmap otherwise, which
+  // is the least motivating possible first screen.
+  if (!stats.total_submissions) {
+    return (
+      <main className="mx-auto max-w-2xl px-4 py-16 text-center">
+        <h1 className="font-heading text-3xl font-extrabold text-gray-900">{t('dash.welcome')}</h1>
+        <p className="mx-auto mt-3 max-w-lg text-gray-600">
+          {t('dash.emptyBody')}
+        </p>
+        <div className="mt-8 flex flex-wrap justify-center gap-3">
+          <Link to="/practice/tasks" className="btn-primary">{t('dash.writeFirst')}</Link>
+          <Link to="/speaking/tasks" className="btn-outline">{t('dash.orSpeak')}</Link>
+        </div>
+      </main>
+    );
+  }
 
   const breakdownData = Object.entries(stats.error_breakdown).map(([k, v]) => ({
     name: CATEGORY_META[k]?.label || k, count: v, color: CATEGORY_META[k]?.color || '#ddd',
@@ -30,15 +66,15 @@ export default function Dashboard() {
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-10">
-      <h1 className="text-3xl font-bold">Tableau de bord</h1>
+      <h1 className="text-3xl font-bold">{t('dash.title')}</h1>
 
       {/* stat cards */}
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[
-          ['Soumissions', stats.total_submissions, null],
-          ['Score moyen', stats.average_score, null],
-          ['Série actuelle', stats.current_streak, <Fire size={20} weight="fill" className="text-orange-500" />],
-          ['Meilleure série', stats.longest_streak, <Trophy size={20} weight="fill" className="text-amber-500" />],
+          [t('dash.statSubmissions'), stats.total_submissions, null],
+          [t('dash.statAverage'), stats.average_score, null],
+          [t('dash.statStreak'), stats.current_streak, <Fire size={20} weight="fill" className="text-orange-500" />],
+          [t('dash.statBest'), stats.longest_streak, <Trophy size={20} weight="fill" className="text-amber-500" />],
         ].map(([label, value, icon]) => (
           <div key={label} className="card p-5">
             <p className="flex items-center gap-2 text-sm text-gray-500">{icon}{label}</p>
@@ -56,7 +92,7 @@ export default function Dashboard() {
       {/* charts */}
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <section className="card p-6">
-          <h2 className="font-heading font-semibold">Tendance des scores (10 derniers)</h2>
+          <h2 className="font-heading font-semibold">{t('dash.scoreTrend')}</h2>
           <div className="mt-4 h-64">
             <ResponsiveContainer>
               <AreaChart data={stats.score_trend}>
@@ -76,7 +112,7 @@ export default function Dashboard() {
           </div>
         </section>
         <section className="card p-6">
-          <h2 className="font-heading font-semibold">Erreurs par catégorie</h2>
+          <h2 className="font-heading font-semibold">{t('dash.errorsByCategory')}</h2>
           <div className="mt-4 h-64">
             <ResponsiveContainer>
               <BarChart data={breakdownData}>
@@ -97,8 +133,8 @@ export default function Dashboard() {
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         <section className="card p-6 lg:col-span-2">
           <div className="flex items-center justify-between">
-            <h2 className="font-heading font-semibold">Vos points faibles</h2>
-            <span className="text-xs text-gray-400">basé sur votre historique d'erreurs</span>
+            <h2 className="font-heading font-semibold">{t('dash.weakPoints')}</h2>
+            <span className="text-xs text-gray-400">{t('dash.basedOn')}</span>
           </div>
           <div className="mt-4 space-y-4">
             {(mistakes?.weak_points || []).map((w) => (
@@ -107,18 +143,18 @@ export default function Dashboard() {
                   <span className="pill" style={{ background: CATEGORY_META[w.category]?.color }}>{w.label} · {w.count} erreurs</span>
                   <button className="btn-primary !px-3 !py-1.5 text-xs"
                     onClick={() => navigate(`/review?category=${w.category}`)} data-testid={`review-${w.category}`}>
-                    <GameController size={14} weight="fill" /> Réviser cette catégorie
+                    <GameController size={14} weight="fill" /> {t('dash.reviewCategory')}
                   </button>
                 </div>
                 <p className="mt-2 text-sm text-gray-600">{w.tip}</p>
               </div>
             ))}
-            {!mistakes?.weak_points?.length && <p className="text-sm text-gray-500">Aucune erreur enregistrée pour l'instant — écrivez un premier texte !</p>}
+            {!mistakes?.weak_points?.length && <p className="text-sm text-gray-500">{t('dash.noErrors')}</p>}
           </div>
         </section>
 
         <section className="card p-6">
-          <h2 className="font-heading font-semibold">Erreurs récurrentes</h2>
+          <h2 className="font-heading font-semibold">{t('dash.recurring')}</h2>
           <ul className="mt-4 space-y-3 text-sm">
             {(mistakes?.repeat_leaders || []).slice(0, 6).map((m) => (
               <li key={m.mistake_id} className="rounded-lg bg-gray-50 p-3">
@@ -126,7 +162,7 @@ export default function Dashboard() {
                 <span className="ml-2 text-xs text-gray-400">×{m.times_repeated + 1}</span>
               </li>
             ))}
-            {!mistakes?.repeat_leaders?.length && <li className="text-gray-400">Aucune erreur répétée 💪</li>}
+            {!mistakes?.repeat_leaders?.length && <li className="text-gray-400">{t('dash.noRecurring')}</li>}
           </ul>
         </section>
       </div>
@@ -134,8 +170,8 @@ export default function Dashboard() {
       {/* errors per 100 words trend */}
       {mistakes?.trend?.length > 1 && (
         <section className="card mt-6 p-6">
-          <h2 className="font-heading font-semibold">Erreurs pour 100 mots (par mois)</h2>
-          <p className="text-xs text-gray-400">Normalisé par volume écrit : la progression reste visible même si vous écrivez plus.</p>
+          <h2 className="font-heading font-semibold">{t('dash.errorsPer100')}</h2>
+          <p className="text-xs text-gray-400">{t('dash.normalised')}</p>
           <div className="mt-4 h-52">
             <ResponsiveContainer>
               <LineChart data={mistakes.trend}>
@@ -152,16 +188,16 @@ export default function Dashboard() {
 
       {/* heatmap */}
       <section className="card mt-6 p-6">
-        <h2 className="font-heading font-semibold">Activité sur 365 jours</h2>
+        <h2 className="font-heading font-semibold">{t('dash.heatmap')}</h2>
         <div className="mt-4"><Heatmap data={heatmap} /></div>
       </section>
 
       {/* history */}
       <section className="card mt-6 overflow-hidden">
-        <h2 className="px-6 pt-6 font-heading font-semibold">Historique</h2>
+        <h2 className="px-6 pt-6 font-heading font-semibold">{t('dash.history')}</h2>
         <table className="mt-4 w-full text-sm">
           <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
-            <tr><th className="px-6 py-2">Date</th><th className="px-6 py-2">Niveau</th><th className="px-6 py-2">Score</th><th className="px-6 py-2">Erreurs</th><th className="px-6 py-2"></th></tr>
+            <tr><th className="px-6 py-2">{t('dash.colDate')}</th><th className="px-6 py-2">{t('dash.colLevel')}</th><th className="px-6 py-2">{t('dash.colScore')}</th><th className="px-6 py-2">{t('dash.colErrors')}</th><th className="px-6 py-2"></th></tr>
           </thead>
           <tbody>
             {subs.map((s) => (
@@ -170,10 +206,10 @@ export default function Dashboard() {
                 <td className="px-6 py-3 font-semibold">{s.tcf_level}</td>
                 <td className="px-6 py-3">{s.overall_score}</td>
                 <td className="px-6 py-3">{s.errors?.length ?? 0}</td>
-                <td className="px-6 py-3"><Link to={`/feedback/${s.submission_id}`} className="font-semibold text-primary">Voir</Link></td>
+                <td className="px-6 py-3"><Link to={`/feedback/${s.submission_id}`} className="font-semibold text-primary">{t('dash.view')}</Link></td>
               </tr>
             ))}
-            {!subs.length && <tr><td colSpan="5" className="px-6 py-6 text-center text-gray-400">Aucune soumission pour l'instant.</td></tr>}
+            {!subs.length && <tr><td colSpan="5" className="px-6 py-6 text-center text-gray-400">{t('dash.noSubmissions')}</td></tr>}
           </tbody>
         </table>
       </section>
