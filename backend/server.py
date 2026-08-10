@@ -1770,6 +1770,53 @@ SEED_EXAM_QUESTIONS = [
 ]
 
 
+async def seed_writing_themes(db) -> bool:
+    """Rebuild the writing themes and their questions when the seed list has
+    changed. Returns True if anything was written.
+
+    Themes are content, not learner data, so seeding only on an empty table
+    meant an existing database kept the old question bank forever. Nothing
+    else references theme_id, so dropping and re-inserting loses no progress.
+    Speaking themes are left alone — they have their own seeding block.
+    """
+    # Filtered in Python rather than SQL so a legacy row with a NULL skill is
+    # still treated as a writing theme instead of surviving the rebuild.
+    res = await db.execute(select(Theme))
+    existing = [t for t in res.scalars().all() if t.skill != "speaking"]
+    if sorted(t.name for t in existing) == sorted(n for n, *_ in SEED_THEMES):
+        return False
+
+    old_ids = [t.theme_id for t in existing]
+    if old_ids:
+        await db.execute(sa_delete(ThemeQuestion).where(
+            ThemeQuestion.theme_id.in_(old_ids)))
+        await db.execute(sa_delete(Theme).where(Theme.theme_id.in_(old_ids)))
+        await db.commit()
+        log.info("Replaced %d stale writing themes", len(old_ids))
+
+    name_to_id = {}
+    for name, emoji, premium, order, desc in SEED_THEMES:
+        tid = new_id("theme")
+        name_to_id[name] = tid
+        db.add(Theme(
+            theme_id=tid, name=name, emoji=emoji, description=desc,
+            is_premium=premium, skill="writing", sort_order=order,
+            is_active=True, created_at=now_utc()))
+    await db.commit()
+
+    for theme_name, task_type, prompt_text in SEED_THEME_QUESTIONS:
+        tid = name_to_id.get(theme_name)
+        if not tid:
+            continue
+        db.add(ThemeQuestion(
+            question_id=new_id("tq"), theme_id=tid, task_type=task_type,
+            prompt_text=prompt_text, is_active=True, created_at=now_utc()))
+    await db.commit()
+    log.info("Seeded %d writing themes and %d theme questions",
+             len(SEED_THEMES), len(SEED_THEME_QUESTIONS))
+    return True
+
+
 async def run_seeds():
     async with SessionLocal() as db:
         # Admin
@@ -1823,29 +1870,8 @@ async def run_seeds():
                     is_active=True, **q))
             await db.commit()
 
-        # Themes + theme questions
-        count = await db.scalar(select(func.count()).select_from(Theme))
-        if not count:
-            name_to_id = {}
-            for name, emoji, premium, order, desc in SEED_THEMES:
-                tid = new_id("theme")
-                name_to_id[name] = tid
-                db.add(Theme(
-                    theme_id=tid, name=name, emoji=emoji, description=desc,
-                    is_premium=premium, skill="writing", sort_order=order,
-                    is_active=True, created_at=now_utc()))
-            await db.commit()
-            for theme_name, task_type, prompt_text in SEED_THEME_QUESTIONS:
-                tid = name_to_id.get(theme_name)
-                if not tid:
-                    continue
-                db.add(ThemeQuestion(
-                    question_id=new_id("tq"), theme_id=tid, task_type=task_type,
-                    prompt_text=prompt_text, is_active=True,
-                    created_at=now_utc()))
-            await db.commit()
-            log.info("Seeded %d themes and %d theme questions",
-                     len(SEED_THEMES), len(SEED_THEME_QUESTIONS))
+        # Writing themes + theme questions
+        await seed_writing_themes(db)
 
         # Seed SPEAKING themes (skill='speaking') separately so they can be
         # added even if writing themes already exist.
@@ -3520,6 +3546,11 @@ async def list_themes(task_type: Optional[int] = None,
     Pass ?skill=writing or ?skill=speaking to filter by skill area.
     Premium themes are returned too, marked is_premium=True so the UI can
     show a Pro badge / lock.
+
+    Themes with no question for the requested tâche are left out. The official
+    theme sets differ per tâche (tâche 1 has Ville/Quartier, tâche 2 has Santé
+    and Technologie), and a theme card that opens onto an empty question list
+    is worse than no card at all.
     """
     stmt = select(Theme).where(Theme.is_active == True)  # noqa: E712
     if skill in ("writing", "speaking"):
@@ -3536,7 +3567,9 @@ async def list_themes(task_type: Optional[int] = None,
                     ThemeQuestion.theme_id == t.theme_id,
                     ThemeQuestion.task_type == task_type,
                     ThemeQuestion.is_active == True))  # noqa: E712
-            d["question_count"] = count or 0
+            if not count:
+                continue
+            d["question_count"] = count
         out.append(d)
     return {"themes": out}
 
@@ -3665,86 +3698,664 @@ async def admin_delete_theme_question(question_id: str,
 #    shown in block 6 INSIDE run_seeds().
 # ----------------------------------------------------------------------------
 # Each theme: (name, emoji, is_premium, sort_order, description)
+#
+# Tâches 1 and 2 each have their own official set of 7 themes, and the two sets
+# only partly overlap — Ville/Quartier is a tâche 1 theme, while Santé and
+# Technologie belong to tâche 2. This list is their union (9), and /api/themes
+# hides the themes that hold no question for the tâche being asked for, so each
+# tâche still shows exactly its own 7. Tâche 3 reuses the tâche 1 themes.
 SEED_THEMES = [
-    ("Logement & Déménagement", "🏠", False, 1,
-     "Locations, voisinage, déménagement et vie quotidienne à la maison."),
-    ("Voyages & Déplacements", "✈️", False, 2,
-     "Vacances, transports, tourisme et expériences de voyage."),
-    ("Travail & Études", "💼", True, 3,
-     "Vie professionnelle, recherche d'emploi, formation et études."),
-    ("Santé & Bien-être", "🩺", True, 4,
-     "Mode de vie sain, sport, alimentation et équilibre de vie."),
-    ("Environnement & Société", "🌍", True, 5,
-     "Écologie, vie en société et grands enjeux contemporains."),
-    ("Loisirs & Culture", "🎭", True, 6,
-     "Sorties, gastronomie, événements culturels et temps libre."),
+    ("Logement & Vie quotidienne", "🏠", False, 1,
+     "Déménagement, voisinage, colocation et vie quotidienne à la maison."),
+    ("Travail & Études", "💼", False, 2,
+     "Vie professionnelle, collègues, formation, cours et examens."),
+    ("Voyage & Déplacements", "✈️", True, 3,
+     "Vacances, transports, séjours et organisation de voyages."),
+    ("Vie sociale & Événements", "🎉", True, 4,
+     "Invitations, fêtes, célébrations et rencontres entre amis."),
+    ("Loisirs, Culture & Sport", "🎭", True, 5,
+     "Cinéma, musique, expositions, lecture et activités sportives."),
+    ("Achats, Alimentation & Services", "🛒", True, 6,
+     "Restaurants, cuisine, achats, commandes et service client."),
+    ("Ville, Quartier & Vie locale", "🏙️", True, 7,
+     "Quartier, sorties en ville, événements locaux et vie de voisinage."),
+    ("Santé, Environnement & Mode de vie", "🌱", True, 8,
+     "Habitudes saines, sport, écologie et changements de mode de vie."),
+    ("Technologie, Achats & Services", "💻", True, 9,
+     "Appareils, applications, achats en ligne et service client."),
 ]
 
 # Each question: (theme_name, task_type, prompt_text)
 SEED_THEME_QUESTIONS = [
-    # --- Logement & Déménagement ---
-    ("Logement & Déménagement", 1,
-     "Vous venez d'emménager dans un nouvel appartement. Écrivez un message à un ami pour lui donner votre nouvelle adresse et l'inviter à venir le visiter. (60 à 120 mots)"),
-    ("Logement & Déménagement", 1,
-     "Votre voisin organise des travaux bruyants. Écrivez-lui un message poli pour lui demander de réduire le bruit le soir. (60 à 120 mots)"),
-    ("Logement & Déménagement", 1,
-     "Vous cherchez un colocataire. Écrivez une annonce courte décrivant le logement et la personne recherchée. (60 à 120 mots)"),
-    ("Logement & Déménagement", 2,
-     "Racontez sur votre blog votre expérience de déménagement récente : les préparatifs, les difficultés et vos impressions sur votre nouveau quartier. (120 à 150 mots)"),
-    ("Logement & Déménagement", 2,
-     "Rédigez un article décrivant le logement idéal selon vous et expliquant pourquoi il vous correspondrait. (120 à 150 mots)"),
-    ("Logement & Déménagement", 3,
-     "« Il vaut mieux louer son logement que de l'acheter. » Comparez les deux points de vue et donnez votre opinion. (120 à 180 mots)"),
-    ("Logement & Déménagement", 3,
-     "« Vivre en ville est préférable à vivre à la campagne. » Présentez les avantages des deux modes de vie et défendez votre position. (120 à 180 mots)"),
+    # ------------------------------------------------------------------
+    # THÈME 1 — LOGEMENT & VIE QUOTIDIENNE — Tâche 1
+    # ------------------------------------------------------------------
+    ("Logement & Vie quotidienne", 1,
+     "Vous allez déménager dans un nouvel appartement. Écrivez à un ami pour lui demander de l'aide et précisez la date et les tâches à faire. (60 à 120 mots)"),
+    ("Logement & Vie quotidienne", 1,
+     "Vous avez trouvé un appartement qui vous plaît beaucoup. Écrivez à votre ami pour lui décrire le logement et expliquer pourquoi vous l'avez choisi. (60 à 120 mots)"),
+    ("Logement & Vie quotidienne", 1,
+     "Vous cherchez un colocataire. Rédigez une annonce pour présenter votre logement et préciser le type de personne que vous recherchez. (60 à 120 mots)"),
+    ("Logement & Vie quotidienne", 1,
+     "Votre ami cherche un appartement dans votre quartier. Écrivez-lui pour lui recommander un logement et présenter ses avantages. (60 à 120 mots)"),
+    ("Logement & Vie quotidienne", 1,
+     "Vous venez de déménager dans un nouveau quartier. Écrivez à un ami pour lui décrire votre nouveau quartier et les services disponibles. (60 à 120 mots)"),
+    ("Logement & Vie quotidienne", 1,
+     "Vous organisez une crémaillère dans votre nouvel appartement. Écrivez à vos amis pour les inviter et donner les informations pratiques. (60 à 120 mots)"),
+    ("Logement & Vie quotidienne", 1,
+     "Vous devez quitter votre logement plus tôt que prévu. Écrivez à votre propriétaire pour expliquer la situation et proposer une nouvelle date. (60 à 120 mots)"),
+    ("Logement & Vie quotidienne", 1,
+     "Vous avez découvert un problème important dans votre appartement. Écrivez à votre propriétaire pour décrire le problème et demander une intervention. (60 à 120 mots)"),
+    ("Logement & Vie quotidienne", 1,
+     "Vous avez besoin d'aide pour monter des meubles chez vous. Écrivez à un ami pour lui demander de venir vous aider. (60 à 120 mots)"),
+    ("Logement & Vie quotidienne", 1,
+     "Vous souhaitez acheter de nouveaux meubles pour votre appartement. Écrivez à un ami pour lui demander conseil et expliquer ce dont vous avez besoin. (60 à 120 mots)"),
+    ("Logement & Vie quotidienne", 1,
+     "Vous avez visité une maison que vous envisagez de louer. Écrivez à un proche pour décrire la maison et demander son avis. (60 à 120 mots)"),
+    ("Logement & Vie quotidienne", 1,
+     "Vous allez accueillir un nouvel étudiant dans votre appartement en colocation. Écrivez-lui pour présenter le logement et expliquer les règles de la maison. (60 à 120 mots)"),
+    ("Logement & Vie quotidienne", 1,
+     "Votre ami vient passer quelques jours chez vous. Écrivez-lui pour lui expliquer où se trouve votre logement et lui donner quelques informations pratiques. (60 à 120 mots)"),
+    ("Logement & Vie quotidienne", 1,
+     "Vous devez vous absenter pendant quelques jours. Écrivez à votre voisin pour lui demander de surveiller votre appartement. (60 à 120 mots)"),
+    ("Logement & Vie quotidienne", 1,
+     "Vous avez acheté un nouvel appareil pour votre maison. Écrivez à votre ami pour lui présenter l'appareil et expliquer pourquoi vous l'avez acheté. (60 à 120 mots)"),
+    ("Logement & Vie quotidienne", 1,
+     "Vous souhaitez organiser une journée de rangement et de nettoyage chez vous. Écrivez à vos amis pour leur demander de participer. (60 à 120 mots)"),
+    ("Logement & Vie quotidienne", 1,
+     "Vous avez récemment changé votre routine quotidienne. Écrivez à un ami pour lui expliquer ce que vous avez changé et pourquoi. (60 à 120 mots)"),
+    ("Logement & Vie quotidienne", 1,
+     "Vous souhaitez proposer une activité à votre voisin pour mieux faire connaissance. Écrivez-lui un message pour présenter votre idée. (60 à 120 mots)"),
+    ("Logement & Vie quotidienne", 1,
+     "Votre ami souhaite vivre dans votre quartier. Écrivez-lui pour lui présenter les avantages et les inconvénients de ce quartier. (60 à 120 mots)"),
+    ("Logement & Vie quotidienne", 1,
+     "Vous avez besoin de quelqu'un pour garder votre animal pendant quelques jours. Écrivez à un ami ou à un voisin pour lui demander de l'aide. (60 à 120 mots)"),
 
-    # --- Voyages & Déplacements ---
-    ("Voyages & Déplacements", 1,
-     "Vous préparez un voyage avec un ami. Écrivez-lui un message pour proposer une destination, des dates et le moyen de transport. (60 à 120 mots)"),
-    ("Voyages & Déplacements", 1,
-     "Vous avez raté votre train. Écrivez un message à la personne qui vous attend pour expliquer la situation et proposer une solution. (60 à 120 mots)"),
-    ("Voyages & Déplacements", 1,
-     "Écrivez une carte postale à votre famille pour décrire le lieu où vous passez vos vacances. (60 à 120 mots)"),
-    ("Voyages & Déplacements", 2,
-     "Racontez sur votre blog un voyage qui vous a particulièrement marqué : le lieu, les rencontres et ce que vous en avez retenu. (120 à 150 mots)"),
-    ("Voyages & Déplacements", 2,
-     "Rédigez un article pour conseiller les voyageurs sur la meilleure façon de découvrir une ville étrangère. (120 à 150 mots)"),
-    ("Voyages & Déplacements", 3,
-     "« Voyager seul est plus enrichissant que voyager en groupe. » Comparez les deux façons de voyager et donnez votre avis. (120 à 180 mots)"),
-    ("Voyages & Déplacements", 3,
-     "« Le tourisme de masse nuit aux destinations. » Présentez les deux points de vue et défendez le vôtre. (120 à 180 mots)"),
-
-    # --- Travail & Études (premium) ---
+    # ------------------------------------------------------------------
+    # THÈME 2 — TRAVAIL & ÉTUDES — Tâche 1
+    # ------------------------------------------------------------------
     ("Travail & Études", 1,
-     "Vous ne pouvez pas assister à une réunion importante. Écrivez un message à votre responsable pour vous excuser et proposer une alternative. (60 à 120 mots)"),
+     "Vous commencez un nouvel emploi. Écrivez à un ami pour lui raconter votre première journée et présenter votre nouveau travail. (60 à 120 mots)"),
+    ("Travail & Études", 1,
+     "Vous souhaitez organiser un déjeuner avec vos collègues. Écrivez-leur pour proposer une date, un lieu et une organisation. (60 à 120 mots)"),
+    ("Travail & Études", 1,
+     "Vous devez vous absenter du travail pendant une journée. Écrivez à votre collègue pour l'informer et expliquer comment organiser vos tâches. (60 à 120 mots)"),
+    ("Travail & Études", 1,
+     "Vous avez changé de poste dans votre entreprise. Écrivez à un ami pour lui présenter vos nouvelles responsabilités. (60 à 120 mots)"),
+    ("Travail & Études", 1,
+     "Vous souhaitez organiser une activité entre collègues après le travail. Écrivez un message pour proposer une activité et demander qui souhaite participer. (60 à 120 mots)"),
+    ("Travail & Études", 1,
+     "Votre ami cherche un emploi dans votre entreprise. Écrivez-lui pour présenter les possibilités et expliquer comment il peut postuler. (60 à 120 mots)"),
+    ("Travail & Études", 1,
+     "Vous avez participé à une formation professionnelle intéressante. Écrivez à votre collègue pour raconter votre expérience et lui recommander cette formation. (60 à 120 mots)"),
+    ("Travail & Études", 1,
+     "Vous avez obtenu une promotion. Écrivez à vos amis pour leur annoncer la nouvelle et proposer de célébrer ensemble. (60 à 120 mots)"),
+    ("Travail & Études", 1,
+     "Vous souhaitez travailler à distance pendant quelques jours. Écrivez à votre responsable pour expliquer votre situation et proposer une organisation. (60 à 120 mots)"),
+    ("Travail & Études", 1,
+     "Vous devez remplacer un collègue pendant ses vacances. Écrivez-lui pour lui demander les informations nécessaires concernant son travail. (60 à 120 mots)"),
+    ("Travail & Études", 1,
+     "Vous commencez un nouveau cours de français. Écrivez à un ami pour présenter le cours, les horaires et votre première impression. (60 à 120 mots)"),
+    ("Travail & Études", 1,
+     "Vous cherchez un partenaire pour étudier avec vous. Écrivez un message pour présenter vos disponibilités et les matières que vous souhaitez travailler. (60 à 120 mots)"),
+    ("Travail & Études", 1,
+     "Vous préparez un examen important avec vos amis. Écrivez-leur pour proposer un programme de révision. (60 à 120 mots)"),
+    ("Travail & Études", 1,
+     "Vous avez découvert une bibliothèque idéale pour étudier. Écrivez à votre ami pour lui présenter le lieu et proposer d'y aller ensemble. (60 à 120 mots)"),
+    ("Travail & Études", 1,
+     "Vous devez modifier votre horaire de cours. Écrivez à votre professeur pour expliquer votre situation et proposer une solution. (60 à 120 mots)"),
+    ("Travail & Études", 1,
+     "Votre ami souhaite étudier dans votre ville. Écrivez-lui pour présenter les possibilités d'études et les informations importantes. (60 à 120 mots)"),
+    ("Travail & Études", 1,
+     "Vous organisez un groupe d'étude avant un examen. Écrivez à vos camarades pour proposer une date, un lieu et un programme. (60 à 120 mots)"),
+    ("Travail & Études", 1,
+     "Vous avez trouvé un professeur particulier excellent. Écrivez à votre ami pour lui présenter ce professeur et expliquer pourquoi vous le recommandez. (60 à 120 mots)"),
+    ("Travail & Études", 1,
+     "Vous avez obtenu de bons résultats à un examen. Écrivez à votre famille pour annoncer la nouvelle et raconter comment vous avez préparé l'examen. (60 à 120 mots)"),
+    ("Travail & Études", 1,
+     "Votre école ou votre entreprise organise une journée spéciale. Écrivez à vos collègues ou camarades pour présenter le programme et les inviter. (60 à 120 mots)"),
+
+    # ------------------------------------------------------------------
+    # THÈME 3 — VOYAGE & DÉPLACEMENTS — Tâche 1
+    # ------------------------------------------------------------------
+    ("Voyage & Déplacements", 1,
+     "Votre ami souhaite visiter votre région. Écrivez-lui pour lui proposer des lieux intéressants à découvrir. (60 à 120 mots)"),
+    ("Voyage & Déplacements", 1,
+     "Vous venez de passer des vacances dans une autre ville. Écrivez à un ami pour raconter votre séjour et recommander quelques endroits. (60 à 120 mots)"),
+    ("Voyage & Déplacements", 1,
+     "Vous préparez un voyage avec des amis. Écrivez-leur pour présenter votre programme, les dates, le transport et les activités prévues. (60 à 120 mots)"),
+    ("Voyage & Déplacements", 1,
+     "Vous avez trouvé un hôtel intéressant pour vos prochaines vacances. Écrivez à vos amis pour leur présenter l'hôtel et proposer de le réserver. (60 à 120 mots)"),
+    ("Voyage & Déplacements", 1,
+     "Votre ami souhaite visiter votre pays pour la première fois. Écrivez-lui pour présenter les endroits qu'il devrait découvrir. (60 à 120 mots)"),
+    ("Voyage & Déplacements", 1,
+     "Vous avez effectué un voyage à la montagne. Écrivez à votre ami pour raconter votre séjour et lui conseiller cette destination. (60 à 120 mots)"),
+    ("Voyage & Déplacements", 1,
+     "Vous préparez un week-end à la campagne avec des amis. Écrivez-leur pour organiser le transport, l'hébergement et les activités. (60 à 120 mots)"),
+    ("Voyage & Déplacements", 1,
+     "Votre ami vient visiter votre ville. Écrivez-lui pour expliquer comment utiliser les transports publics et lui proposer un programme. (60 à 120 mots)"),
+    ("Voyage & Déplacements", 1,
+     "Vous avez réservé un logement pour un voyage avec vos amis. Écrivez-leur pour présenter le logement et expliquer pourquoi vous l'avez choisi. (60 à 120 mots)"),
+    ("Voyage & Déplacements", 1,
+     "Vous souhaitez proposer un voyage à vos collègues pendant un long week-end. Écrivez un message pour présenter votre idée. (60 à 120 mots)"),
+    ("Voyage & Déplacements", 1,
+     "Vous avez découvert une magnifique plage pendant vos vacances. Écrivez à votre ami pour raconter votre expérience et lui conseiller cet endroit. (60 à 120 mots)"),
+    ("Voyage & Déplacements", 1,
+     "Vous préparez un voyage en groupe mais vous devez modifier le programme. Écrivez à vos amis pour expliquer le changement. (60 à 120 mots)"),
+    ("Voyage & Déplacements", 1,
+     "Votre ami vient vous rendre visite pendant ses vacances. Écrivez-lui pour proposer un programme de trois jours dans votre ville. (60 à 120 mots)"),
+    ("Voyage & Déplacements", 1,
+     "Vous avez participé à une excursion organisée. Écrivez à votre ami pour raconter votre journée et lui conseiller cette activité. (60 à 120 mots)"),
+    ("Voyage & Déplacements", 1,
+     "Vous souhaitez partir en vacances avec votre famille. Écrivez à un proche pour proposer une destination et expliquer votre choix. (60 à 120 mots)"),
+    ("Voyage & Déplacements", 1,
+     "Vous souhaitez organiser un trajet en covoiturage avec vos collègues. Écrivez un message pour proposer le trajet et préciser les horaires. (60 à 120 mots)"),
+    ("Voyage & Déplacements", 1,
+     "Votre voiture est en panne et vous devez demander de l'aide à un ami. Écrivez-lui pour expliquer la situation et proposer une solution. (60 à 120 mots)"),
+    ("Voyage & Déplacements", 1,
+     "Vous souhaitez louer une voiture pour un week-end. Écrivez à une agence pour demander des informations sur les prix et les conditions. (60 à 120 mots)"),
+    ("Voyage & Déplacements", 1,
+     "Vous devez modifier l'heure de départ d'un voyage en groupe. Écrivez à vos amis pour expliquer le changement et proposer une nouvelle heure. (60 à 120 mots)"),
+    ("Voyage & Déplacements", 1,
+     "Vous avez découvert un moyen de transport pratique et économique. Écrivez à votre ami pour lui présenter cette solution et expliquer pourquoi vous la recommandez. (60 à 120 mots)"),
+
+    # ------------------------------------------------------------------
+    # THÈME 4 — VIE SOCIALE & ÉVÉNEMENTS — Tâche 1
+    # ------------------------------------------------------------------
+    ("Vie sociale & Événements", 1,
+     "Vous organisez une fête pour votre anniversaire. Écrivez à vos amis pour les inviter et préciser la date, le lieu et l'heure. (60 à 120 mots)"),
+    ("Vie sociale & Événements", 1,
+     "Votre meilleur ami fête son anniversaire prochainement. Écrivez à votre groupe d'amis pour proposer un cadeau commun. (60 à 120 mots)"),
+    ("Vie sociale & Événements", 1,
+     "Vous organisez une fête de départ pour un collègue. Écrivez à vos collègues pour les inviter et expliquer l'organisation. (60 à 120 mots)"),
+    ("Vie sociale & Événements", 1,
+     "Vous préparez une fête surprise pour un ami. Écrivez aux participants pour leur donner les informations nécessaires. (60 à 120 mots)"),
+    ("Vie sociale & Événements", 1,
+     "Vous souhaitez organiser une soirée entre anciens camarades de classe. Écrivez un message pour proposer la rencontre. (60 à 120 mots)"),
+    ("Vie sociale & Événements", 1,
+     "Vous organisez une fête de fin d'année avec vos amis. Invitez-les et présentez les activités prévues. (60 à 120 mots)"),
+    ("Vie sociale & Événements", 1,
+     "Vous souhaitez célébrer une réussite professionnelle avec vos collègues. Écrivez un message pour les inviter à un repas. (60 à 120 mots)"),
+    ("Vie sociale & Événements", 1,
+     "Votre ami vient d'avoir un bébé. Écrivez à vos amis pour proposer un cadeau commun et organiser une visite. (60 à 120 mots)"),
+    ("Vie sociale & Événements", 1,
+     "Vous préparez une fête culturelle dans votre quartier. Écrivez un message aux habitants pour les inviter. (60 à 120 mots)"),
+    ("Vie sociale & Événements", 1,
+     "Vous souhaitez organiser une soirée barbecue chez vous. Invitez vos amis et donnez les informations pratiques. (60 à 120 mots)"),
+    ("Vie sociale & Événements", 1,
+     "Vous organisez une soirée jeux de société. Écrivez à vos amis pour les inviter et expliquer ce qu'ils doivent apporter. (60 à 120 mots)"),
+    ("Vie sociale & Événements", 1,
+     "Vous préparez une fête costumée. Écrivez un message aux invités pour présenter le thème, la date et le lieu. (60 à 120 mots)"),
+    ("Vie sociale & Événements", 1,
+     "Vous voulez organiser un pique-nique pour célébrer une occasion spéciale. Invitez vos amis et précisez les détails. (60 à 120 mots)"),
+    ("Vie sociale & Événements", 1,
+     "Vous organisez une cérémonie familiale. Écrivez à un proche pour lui présenter le programme et demander sa présence. (60 à 120 mots)"),
+    ("Vie sociale & Événements", 1,
+     "Vous souhaitez organiser une fête après un examen important. Écrivez à vos amis pour les inviter. (60 à 120 mots)"),
+    ("Vie sociale & Événements", 1,
+     "Vous souhaitez organiser une réunion familiale après plusieurs années sans vous voir. Écrivez à votre famille pour proposer une date et un lieu. (60 à 120 mots)"),
+    ("Vie sociale & Événements", 1,
+     "Vous avez besoin de l'aide de vos amis pour organiser un événement. Écrivez-leur pour expliquer ce dont vous avez besoin. (60 à 120 mots)"),
+    ("Vie sociale & Événements", 1,
+     "Vous souhaitez organiser une journée entre amis sans dépenser beaucoup d'argent. Écrivez-leur pour proposer plusieurs activités gratuites. (60 à 120 mots)"),
+    ("Vie sociale & Événements", 1,
+     "Vous avez participé à une activité communautaire. Écrivez à votre ami pour raconter ce que vous avez fait et lui proposer de participer à la prochaine activité. (60 à 120 mots)"),
+    ("Vie sociale & Événements", 1,
+     "Votre ami vient d'arriver dans votre ville. Écrivez-lui pour lui proposer de passer une journée ensemble et de lui faire découvrir la ville. (60 à 120 mots)"),
+
+    # ------------------------------------------------------------------
+    # THÈME 5 — LOISIRS, CULTURE & SPORT — Tâche 1
+    # ------------------------------------------------------------------
+    ("Loisirs, Culture & Sport", 1,
+     "Vous avez vu un film que vous avez beaucoup aimé. Écrivez à votre ami pour lui raconter le film et lui conseiller de le regarder. (60 à 120 mots)"),
+    ("Loisirs, Culture & Sport", 1,
+     "Vous souhaitez aller à un concert avec vos amis. Écrivez-leur pour proposer le concert et donner les informations pratiques. (60 à 120 mots)"),
+    ("Loisirs, Culture & Sport", 1,
+     "Vous avez visité une exposition intéressante. Écrivez à votre ami pour raconter votre visite et lui recommander cette exposition. (60 à 120 mots)"),
+    ("Loisirs, Culture & Sport", 1,
+     "Vous souhaitez organiser une sortie au cinéma. Écrivez à vos amis pour proposer un film, une date et un lieu. (60 à 120 mots)"),
+    ("Loisirs, Culture & Sport", 1,
+     "Vous avez découvert un nouveau musée dans votre ville. Écrivez à votre ami pour lui présenter le musée. (60 à 120 mots)"),
+    ("Loisirs, Culture & Sport", 1,
+     "Vous cherchez quelqu'un avec qui pratiquer une activité artistique. Rédigez une annonce pour trouver un partenaire. (60 à 120 mots)"),
+    ("Loisirs, Culture & Sport", 1,
+     "Vous avez assisté à un festival culturel. Écrivez à votre ami pour raconter votre expérience. (60 à 120 mots)"),
+    ("Loisirs, Culture & Sport", 1,
+     "Vous souhaitez commencer à apprendre à jouer d'un instrument. Écrivez à votre ami pour lui demander des conseils. (60 à 120 mots)"),
+    ("Loisirs, Culture & Sport", 1,
+     "Vous avez commencé un nouveau loisir. Écrivez à votre ami pour expliquer ce que vous faites et pourquoi cela vous plaît. (60 à 120 mots)"),
+    ("Loisirs, Culture & Sport", 1,
+     "Vous souhaitez organiser une soirée cinéma chez vous. Invitez vos amis et présentez le programme. (60 à 120 mots)"),
+    ("Loisirs, Culture & Sport", 1,
+     "Vous avez lu un livre intéressant. Écrivez à votre ami pour lui présenter le livre et expliquer pourquoi vous le recommandez. (60 à 120 mots)"),
+    ("Loisirs, Culture & Sport", 1,
+     "Vous avez découvert un théâtre dans votre ville. Écrivez à votre ami pour lui proposer d'y aller ensemble. (60 à 120 mots)"),
+    ("Loisirs, Culture & Sport", 1,
+     "Vous souhaitez commencer à faire du sport dans une salle. Écrivez à un ami pour lui demander des informations sur une salle qu'il connaît. (60 à 120 mots)"),
+    ("Loisirs, Culture & Sport", 1,
+     "Vous avez commencé une nouvelle activité sportive. Écrivez à votre ami pour lui présenter cette activité et expliquer pourquoi vous l'aimez. (60 à 120 mots)"),
+    ("Loisirs, Culture & Sport", 1,
+     "Vous cherchez un partenaire pour faire du sport régulièrement. Rédigez une annonce en précisant vos activités préférées et vos disponibilités. (60 à 120 mots)"),
+    ("Loisirs, Culture & Sport", 1,
+     "Vous organisez une randonnée avec des amis. Écrivez-leur pour donner les informations sur le parcours et ce qu'ils doivent apporter. (60 à 120 mots)"),
+    ("Loisirs, Culture & Sport", 1,
+     "Vous avez participé à une compétition sportive. Écrivez à vos amis pour raconter l'événement et annoncer votre résultat. (60 à 120 mots)"),
+    ("Loisirs, Culture & Sport", 1,
+     "Vous avez découvert une piscine ou un centre sportif intéressant. Écrivez à votre ami pour présenter les installations et les horaires. (60 à 120 mots)"),
+    ("Loisirs, Culture & Sport", 1,
+     "Vous souhaitez organiser une journée sportive avec vos collègues. Écrivez un message pour proposer les activités. (60 à 120 mots)"),
+    ("Loisirs, Culture & Sport", 1,
+     "Votre ami veut commencer à courir. Écrivez-lui pour lui donner quelques conseils et lui proposer de courir ensemble. (60 à 120 mots)"),
+
+    # ------------------------------------------------------------------
+    # THÈME 6 — ACHATS, ALIMENTATION & SERVICES — Tâche 1
+    # ------------------------------------------------------------------
+    ("Achats, Alimentation & Services", 1,
+     "Vous avez découvert un excellent restaurant dans votre ville. Écrivez à votre ami pour lui présenter le restaurant et lui proposer d'y aller ensemble. (60 à 120 mots)"),
+    ("Achats, Alimentation & Services", 1,
+     "Vous souhaitez organiser un dîner avec vos amis. Écrivez-leur pour proposer un restaurant, une date et une heure. (60 à 120 mots)"),
+    ("Achats, Alimentation & Services", 1,
+     "Votre ami vous demande une recette de votre plat préféré. Répondez-lui en expliquant comment vous le préparez. (60 à 120 mots)"),
+    ("Achats, Alimentation & Services", 1,
+     "Vous souhaitez organiser un repas chez vous. Invitez vos amis et expliquez ce qu'ils peuvent apporter. (60 à 120 mots)"),
+    ("Achats, Alimentation & Services", 1,
+     "Vous avez testé un nouveau restaurant végétarien. Écrivez à votre ami pour raconter votre expérience. (60 à 120 mots)"),
+    ("Achats, Alimentation & Services", 1,
+     "Votre ami vient visiter votre ville et souhaite découvrir la cuisine locale. Écrivez-lui pour recommander quelques spécialités. (60 à 120 mots)"),
+    ("Achats, Alimentation & Services", 1,
+     "Vous organisez un repas international avec vos collègues. Écrivez un message pour expliquer le principe et demander à chacun d'apporter un plat. (60 à 120 mots)"),
+    ("Achats, Alimentation & Services", 1,
+     "Vous avez participé à un cours de cuisine. Écrivez à votre ami pour raconter votre expérience et lui recommander le cours. (60 à 120 mots)"),
+    ("Achats, Alimentation & Services", 1,
+     "Vous souhaitez organiser un pique-nique. Écrivez à vos amis pour proposer le menu et répartir les tâches. (60 à 120 mots)"),
+    ("Achats, Alimentation & Services", 1,
+     "Vous avez acheté un cadeau pour un ami. Écrivez-lui pour lui présenter le cadeau et expliquer pourquoi vous l'avez choisi. (60 à 120 mots)"),
+    ("Achats, Alimentation & Services", 1,
+     "Vous souhaitez vendre un vélo que vous n'utilisez plus. Rédigez une annonce pour décrire le vélo, son état et son prix. (60 à 120 mots)"),
+    ("Achats, Alimentation & Services", 1,
+     "Vous avez acheté un appareil électronique qui ne fonctionne pas correctement. Écrivez au magasin pour expliquer le problème. (60 à 120 mots)"),
+    ("Achats, Alimentation & Services", 1,
+     "Vous avez commandé un produit sur Internet mais la livraison est en retard. Écrivez au service client pour expliquer la situation. (60 à 120 mots)"),
+    ("Achats, Alimentation & Services", 1,
+     "Vous avez reçu un produit différent de celui que vous aviez commandé. Écrivez au vendeur pour demander un échange. (60 à 120 mots)"),
+    ("Achats, Alimentation & Services", 1,
+     "Votre ami souhaite acheter un ordinateur. Écrivez-lui pour lui recommander un modèle et expliquer votre choix. (60 à 120 mots)"),
+    ("Achats, Alimentation & Services", 1,
+     "Vous souhaitez louer du matériel pour une fête. Écrivez à une entreprise pour demander les prix et les conditions. (60 à 120 mots)"),
+    ("Achats, Alimentation & Services", 1,
+     "Vous avez trouvé une boutique proposant des produits locaux. Écrivez à votre ami pour lui présenter cette boutique. (60 à 120 mots)"),
+    ("Achats, Alimentation & Services", 1,
+     "Vous souhaitez acheter un cadeau commun pour un collègue. Écrivez à vos collègues pour proposer votre idée. (60 à 120 mots)"),
+    ("Achats, Alimentation & Services", 1,
+     "Vous avez eu une très bonne expérience dans un restaurant. Écrivez au restaurant pour remercier l'équipe et expliquer ce que vous avez apprécié. (60 à 120 mots)"),
+    ("Achats, Alimentation & Services", 1,
+     "Vous souhaitez organiser une sortie shopping avec vos amis. Écrivez-leur pour proposer un lieu, une date et un programme. (60 à 120 mots)"),
+
+    # ------------------------------------------------------------------
+    # THÈME 7 — VILLE, QUARTIER & VIE LOCALE — Tâche 1
+    # ------------------------------------------------------------------
+    ("Ville, Quartier & Vie locale", 1,
+     "Votre ami vient visiter votre ville. Écrivez-lui pour proposer un programme de découverte sur une journée. (60 à 120 mots)"),
+    ("Ville, Quartier & Vie locale", 1,
+     "Vous avez découvert un nouveau parc dans votre quartier. Écrivez à votre ami pour lui présenter cet endroit. (60 à 120 mots)"),
+    ("Ville, Quartier & Vie locale", 1,
+     "Votre quartier organise une journée communautaire. Écrivez à vos voisins pour les inviter et présenter le programme. (60 à 120 mots)"),
+    ("Ville, Quartier & Vie locale", 1,
+     "Vous avez découvert un marché local intéressant. Écrivez à votre ami pour lui proposer de le visiter ensemble. (60 à 120 mots)"),
+    ("Ville, Quartier & Vie locale", 1,
+     "Votre ville organise un festival. Écrivez à vos amis pour les inviter et présenter les activités prévues. (60 à 120 mots)"),
+    ("Ville, Quartier & Vie locale", 1,
+     "Vous souhaitez organiser une visite culturelle dans votre ville. Écrivez à vos amis pour proposer une date et un programme. (60 à 120 mots)"),
+    ("Ville, Quartier & Vie locale", 1,
+     "Votre ami cherche un bon endroit pour passer une journée tranquille. Écrivez-lui pour recommander un lieu dans votre ville. (60 à 120 mots)"),
+    ("Ville, Quartier & Vie locale", 1,
+     "Vous souhaitez proposer une promenade dans votre quartier à un ami qui vient vous rendre visite. Écrivez-lui pour présenter le parcours. (60 à 120 mots)"),
+    ("Ville, Quartier & Vie locale", 1,
+     "Vous avez découvert un nouveau centre de loisirs dans votre ville. Écrivez à votre ami pour lui présenter les activités disponibles. (60 à 120 mots)"),
+    ("Ville, Quartier & Vie locale", 1,
+     "Votre quartier organise une activité sportive gratuite. Écrivez à vos voisins pour les informer et les inviter. (60 à 120 mots)"),
+    ("Ville, Quartier & Vie locale", 1,
+     "Vous souhaitez organiser une journée de nettoyage dans votre quartier. Écrivez à vos voisins pour demander leur participation. (60 à 120 mots)"),
+    ("Ville, Quartier & Vie locale", 1,
+     "Vous avez découvert un lieu historique près de chez vous. Écrivez à votre ami pour lui proposer de le visiter. (60 à 120 mots)"),
+    ("Ville, Quartier & Vie locale", 1,
+     "Votre ville propose une nouvelle activité culturelle. Écrivez à vos amis pour leur présenter l'activité. (60 à 120 mots)"),
+    ("Ville, Quartier & Vie locale", 1,
+     "Vous souhaitez organiser une sortie en famille dans votre ville. Écrivez à un proche pour présenter votre programme. (60 à 120 mots)"),
+    ("Ville, Quartier & Vie locale", 1,
+     "Votre ami vous demande quels sont les meilleurs endroits pour sortir dans votre ville. Répondez-lui avec quelques recommandations. (60 à 120 mots)"),
+    ("Ville, Quartier & Vie locale", 1,
+     "Vous avez découvert un nouveau café dans votre quartier. Écrivez à votre ami pour lui présenter le café et proposer d'y aller ensemble. (60 à 120 mots)"),
+    ("Ville, Quartier & Vie locale", 1,
+     "Vous souhaitez organiser une activité pour rencontrer vos voisins. Écrivez-leur pour présenter votre idée et proposer une date. (60 à 120 mots)"),
+    ("Ville, Quartier & Vie locale", 1,
+     "Vous avez participé à un événement organisé par votre mairie. Écrivez à votre ami pour raconter votre expérience. (60 à 120 mots)"),
+    ("Ville, Quartier & Vie locale", 1,
+     "Vous souhaitez proposer à vos voisins de créer un groupe pour organiser des activités locales. Écrivez un message pour expliquer votre idée. (60 à 120 mots)"),
+    ("Ville, Quartier & Vie locale", 1,
+     "Votre ami souhaite s'installer dans votre ville. Écrivez-lui pour présenter les avantages de votre ville et lui recommander quelques quartiers. (60 à 120 mots)"),
+
+    # ==================================================================
+    # TÂCHE 2 — article / blog (120 à 150 mots) — 7 thèmes x 20 sujets
+    # ==================================================================
+
+    # --- THÈME 1 — VIE QUOTIDIENNE & LOGEMENT ---
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez récemment déménagé dans un nouveau logement. Racontez cette expérience sur votre blog et expliquez pourquoi vous avez décidé de changer de logement. (120 à 150 mots)"),
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez vécu une expérience particulière avec un voisin. Racontez cette situation et expliquez comment vous avez réagi. (120 à 150 mots)"),
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez récemment commencé une nouvelle routine quotidienne. Écrivez un article pour expliquer ce qui a changé dans votre vie et comment vous vous sentez maintenant. (120 à 150 mots)"),
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez vécu pendant quelques mois dans une autre ville. Racontez votre expérience et expliquez ce que vous avez apprécié dans cette nouvelle façon de vivre. (120 à 150 mots)"),
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez récemment aménagé votre appartement. Présentez cette expérience sur votre blog et expliquez comment vous avez organisé votre logement. (120 à 150 mots)"),
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez décidé de vivre en colocation. Racontez votre expérience et présentez les avantages et les difficultés de cette situation. (120 à 150 mots)"),
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez récemment acheté un objet important pour votre maison. Présentez votre achat et expliquez pourquoi vous en êtes satisfait(e). (120 à 150 mots)"),
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez eu un problème important dans votre logement, mais vous avez finalement trouvé une solution. Racontez cette expérience et expliquez comment vous avez résolu le problème. (120 à 150 mots)"),
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez accueilli un ami ou un membre de votre famille chez vous pendant plusieurs jours. Racontez cette expérience et expliquez ce que vous avez fait ensemble. (120 à 150 mots)"),
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez récemment changé une habitude dans votre vie quotidienne. Écrivez un article pour expliquer pourquoi vous avez fait ce changement et quels résultats vous avez obtenus. (120 à 150 mots)"),
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez passé une journée très différente de vos journées habituelles. Racontez cette journée et expliquez pourquoi elle vous a marqué(e). (120 à 150 mots)"),
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez décidé de mieux organiser votre temps. Racontez comment vous avez changé votre organisation et expliquez si cette nouvelle méthode est efficace. (120 à 150 mots)"),
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez récemment découvert un endroit très agréable près de chez vous. Présentez cet endroit sur votre blog et expliquez pourquoi vous le recommandez. (120 à 150 mots)"),
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez aidé un voisin ou un proche dans une situation difficile. Racontez cette expérience et expliquez ce que vous en avez pensé. (120 à 150 mots)"),
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez récemment fait quelque chose pour améliorer votre maison. Présentez ce que vous avez fait et expliquez pourquoi vous avez pris cette décision. (120 à 150 mots)"),
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez passé quelques jours seul(e) chez vous pendant l'absence de votre famille ou de vos colocataires. Racontez cette expérience et donnez vos impressions. (120 à 150 mots)"),
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez récemment rencontré une personne qui habite dans votre quartier et qui vous a beaucoup aidé(e). Racontez votre rencontre et expliquez pourquoi vous l'avez appréciée. (120 à 150 mots)"),
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez participé à une activité organisée dans votre immeuble ou votre quartier. Racontez votre expérience et expliquez ce que vous avez aimé. (120 à 150 mots)"),
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez décidé de simplifier votre vie quotidienne. Écrivez un article pour expliquer les changements que vous avez faits et leurs effets. (120 à 150 mots)"),
+    ("Logement & Vie quotidienne", 2,
+     "Vous avez récemment réalisé une tâche que vous trouviez difficile, comme déménager, réorganiser votre logement ou faire des travaux. Racontez votre expérience et expliquez ce que vous avez appris. (120 à 150 mots)"),
+
+    # --- THÈME 2 — TRAVAIL & ÉTUDES ---
     ("Travail & Études", 2,
-     "Racontez dans un article une expérience professionnelle ou un stage qui vous a beaucoup appris. (120 à 150 mots)"),
+     "Vous avez commencé un nouvel emploi. Écrivez un article pour raconter votre première semaine et expliquer vos premières impressions. (120 à 150 mots)"),
+    ("Travail & Études", 2,
+     "Vous avez participé à une formation professionnelle qui vous a beaucoup appris. Racontez cette expérience et expliquez pourquoi vous la recommandez. (120 à 150 mots)"),
+    ("Travail & Études", 2,
+     "Vous avez rencontré une personne intéressante dans votre environnement professionnel. Racontez cette rencontre et expliquez pourquoi elle vous a marqué(e). (120 à 150 mots)"),
+    ("Travail & Études", 2,
+     "Vous avez récemment changé de poste ou de service. Présentez cette expérience et expliquez comment votre vie professionnelle a changé. (120 à 150 mots)"),
+    ("Travail & Études", 2,
+     "Vous avez vécu une journée particulièrement difficile au travail, mais vous avez réussi à résoudre les problèmes. Racontez cette journée et expliquez ce que vous avez appris. (120 à 150 mots)"),
+    ("Travail & Études", 2,
+     "Vous avez participé à un projet avec plusieurs collègues. Racontez votre expérience et expliquez ce que vous avez apprécié dans le travail en équipe. (120 à 150 mots)"),
+    ("Travail & Études", 2,
+     "Vous avez reçu une promotion ou une bonne nouvelle professionnelle. Écrivez à un ami pour raconter ce qui s'est passé et expliquer ce que cela représente pour vous. (120 à 150 mots)"),
+    ("Travail & Études", 2,
+     "Vous avez décidé de changer votre façon de travailler. Racontez les changements que vous avez faits et expliquez leurs résultats. (120 à 150 mots)"),
+    ("Travail & Études", 2,
+     "Vous avez travaillé à distance pendant plusieurs semaines. Racontez votre expérience et expliquez les avantages et les difficultés que vous avez rencontrés. (120 à 150 mots)"),
+    ("Travail & Études", 2,
+     "Vous avez participé à un événement organisé par votre entreprise. Écrivez un article pour raconter cette expérience et donner vos impressions. (120 à 150 mots)"),
+    ("Travail & Études", 2,
+     "Vous avez commencé à apprendre une nouvelle langue. Racontez votre expérience et expliquez pourquoi vous avez décidé de l'apprendre. (120 à 150 mots)"),
+    ("Travail & Études", 2,
+     "Vous avez récemment commencé une nouvelle formation ou un nouveau cours. Présentez cette expérience et expliquez ce qui vous plaît le plus. (120 à 150 mots)"),
+    ("Travail & Études", 2,
+     "Vous avez obtenu de bons résultats à un examen important. Racontez comment vous vous êtes préparé(e) et expliquez ce que vous avez ressenti. (120 à 150 mots)"),
+    ("Travail & Études", 2,
+     "Vous avez rencontré un professeur qui a beaucoup influencé votre façon d'apprendre. Racontez cette rencontre et expliquez pourquoi cette personne vous a marqué(e). (120 à 150 mots)"),
+    ("Travail & Études", 2,
+     "Vous avez participé à un projet scolaire ou universitaire avec d'autres étudiants. Racontez votre expérience et expliquez les difficultés que vous avez rencontrées. (120 à 150 mots)"),
+    ("Travail & Études", 2,
+     "Vous avez découvert une méthode d'apprentissage particulièrement efficace. Présentez cette méthode et expliquez comment elle vous a aidé(e). (120 à 150 mots)"),
+    ("Travail & Études", 2,
+     "Vous avez dû travailler ou étudier sous pression. Racontez cette expérience et expliquez comment vous avez réussi à gérer la situation. (120 à 150 mots)"),
+    ("Travail & Études", 2,
+     "Vous avez changé votre programme d'études ou votre orientation professionnelle. Expliquez ce qui vous a poussé(e) à faire ce choix et racontez votre expérience. (120 à 150 mots)"),
+    ("Travail & Études", 2,
+     "Vous avez aidé un collègue ou un camarade à résoudre un problème. Racontez la situation et expliquez comment vous vous êtes senti(e). (120 à 150 mots)"),
+    ("Travail & Études", 2,
+     "Vous avez participé à une activité organisée par votre école, votre université ou votre entreprise. Racontez cette expérience et expliquez pourquoi vous l'avez appréciée. (120 à 150 mots)"),
+
+    # --- THÈME 3 — VOYAGES & DÉCOUVERTES ---
+    ("Voyage & Déplacements", 2,
+     "Vous avez récemment fait un voyage qui vous a beaucoup marqué(e). Racontez cette expérience sur votre blog et expliquez pourquoi vous vous en souvenez encore. (120 à 150 mots)"),
+    ("Voyage & Déplacements", 2,
+     "Vous avez découvert une ville pour la première fois. Présentez votre voyage et expliquez ce que vous avez particulièrement apprécié. (120 à 150 mots)"),
+    ("Voyage & Déplacements", 2,
+     "Vous avez passé des vacances dans un endroit différent de vos habitudes. Racontez votre séjour et donnez vos impressions. (120 à 150 mots)"),
+    ("Voyage & Déplacements", 2,
+     "Vous avez fait un voyage avec des amis. Racontez cette expérience et expliquez ce qui a rendu ce voyage spécial. (120 à 150 mots)"),
+    ("Voyage & Déplacements", 2,
+     "Vous avez voyagé seul(e) pour la première fois. Racontez votre expérience et expliquez ce que vous avez appris. (120 à 150 mots)"),
+    ("Voyage & Déplacements", 2,
+     "Vous avez découvert une région de votre pays que vous ne connaissiez pas. Présentez cette découverte et expliquez pourquoi vous la recommandez. (120 à 150 mots)"),
+    ("Voyage & Déplacements", 2,
+     "Vous avez vécu une aventure inattendue pendant un voyage. Racontez ce qui s'est passé et expliquez comment vous avez réagi. (120 à 150 mots)"),
+    ("Voyage & Déplacements", 2,
+     "Vous avez rencontré une personne intéressante pendant un voyage. Racontez votre rencontre et expliquez pourquoi elle vous a marqué(e). (120 à 150 mots)"),
+    ("Voyage & Déplacements", 2,
+     "Vous avez découvert une tradition culturelle pendant vos vacances. Présentez cette expérience et expliquez ce que vous avez appris. (120 à 150 mots)"),
+    ("Voyage & Déplacements", 2,
+     "Vous avez essayé une activité inhabituelle pendant un voyage. Racontez votre expérience et expliquez si vous la recommandez. (120 à 150 mots)"),
+    ("Voyage & Déplacements", 2,
+     "Vous avez passé un week-end dans une petite ville ou à la campagne. Racontez votre séjour et expliquez ce que vous avez apprécié. (120 à 150 mots)"),
+    ("Voyage & Déplacements", 2,
+     "Vous avez visité un lieu historique ou culturel pendant un voyage. Présentez votre visite et donnez vos impressions. (120 à 150 mots)"),
+    ("Voyage & Déplacements", 2,
+     "Vous avez eu un problème pendant un voyage, mais vous avez trouvé une solution. Racontez cette expérience et expliquez comment vous avez géré la situation. (120 à 150 mots)"),
+    ("Voyage & Déplacements", 2,
+     "Vous avez découvert un restaurant ou une spécialité locale pendant un voyage. Racontez votre expérience et expliquez pourquoi vous avez apprécié cette découverte. (120 à 150 mots)"),
+    ("Voyage & Déplacements", 2,
+     "Vous avez fait un voyage qui ne s'est pas déroulé comme prévu. Racontez ce qui s'est passé et expliquez ce que vous en avez appris. (120 à 150 mots)"),
+    ("Voyage & Déplacements", 2,
+     "Vous avez participé à une excursion organisée. Racontez votre journée et expliquez si vous recommanderiez cette activité. (120 à 150 mots)"),
+    ("Voyage & Déplacements", 2,
+     "Vous avez récemment voyagé dans un pays étranger. Écrivez un article pour présenter votre expérience et les principales différences culturelles que vous avez remarquées. (120 à 150 mots)"),
+    ("Voyage & Déplacements", 2,
+     "Vous avez découvert un endroit naturel exceptionnel pendant vos vacances. Présentez ce lieu et expliquez pourquoi il vous a impressionné(e). (120 à 150 mots)"),
+    ("Voyage & Déplacements", 2,
+     "Vous avez organisé vous-même un voyage pour plusieurs personnes. Racontez comment vous avez préparé ce voyage et expliquez comment il s'est déroulé. (120 à 150 mots)"),
+    ("Voyage & Déplacements", 2,
+     "Vous avez réalisé un voyage dont vous rêviez depuis longtemps. Racontez cette expérience et expliquez si elle a répondu à vos attentes. (120 à 150 mots)"),
+
+    # --- THÈME 4 — VIE SOCIALE & ÉVÉNEMENTS ---
+    ("Vie sociale & Événements", 2,
+     "Vous avez récemment organisé une fête pour vos amis. Racontez cette expérience et expliquez pourquoi vous avez décidé d'organiser cet événement. (120 à 150 mots)"),
+    ("Vie sociale & Événements", 2,
+     "Vous avez participé à une fête ou à une célébration traditionnelle. Écrivez un article pour raconter votre expérience et présenter ce que vous avez apprécié. (120 à 150 mots)"),
+    ("Vie sociale & Événements", 2,
+     "Vous avez rencontré une personne intéressante lors d'un événement. Racontez cette rencontre et expliquez pourquoi elle vous a marqué(e). (120 à 150 mots)"),
+    ("Vie sociale & Événements", 2,
+     "Vous avez participé à un événement familial important. Racontez ce moment et donnez vos impressions. (120 à 150 mots)"),
+    ("Vie sociale & Événements", 2,
+     "Vous avez organisé une fête surprise pour quelqu'un. Racontez comment vous avez préparé cette surprise et expliquez comment la personne a réagi. (120 à 150 mots)"),
+    ("Vie sociale & Événements", 2,
+     "Vous avez retrouvé un ancien ami après plusieurs années. Racontez votre rencontre et expliquez ce que vous avez ressenti. (120 à 150 mots)"),
+    ("Vie sociale & Événements", 2,
+     "Vous avez participé à une activité avec vos voisins. Racontez cette expérience et expliquez pourquoi vous aimeriez la refaire. (120 à 150 mots)"),
+    ("Vie sociale & Événements", 2,
+     "Vous avez récemment fait une nouvelle connaissance qui est devenue importante pour vous. Racontez votre rencontre et expliquez pourquoi. (120 à 150 mots)"),
+    ("Vie sociale & Événements", 2,
+     "Vous avez organisé une sortie avec un groupe d'amis. Racontez cette journée et expliquez ce que vous avez particulièrement apprécié. (120 à 150 mots)"),
+    ("Vie sociale & Événements", 2,
+     "Vous avez participé à une activité bénévole. Écrivez un article pour raconter votre expérience et expliquer pourquoi vous avez décidé d'y participer. (120 à 150 mots)"),
+    ("Vie sociale & Événements", 2,
+     "Vous avez aidé une personne de votre communauté. Racontez ce qui s'est passé et expliquez comment cette expérience vous a fait réfléchir. (120 à 150 mots)"),
+    ("Vie sociale & Événements", 2,
+     "Vous avez assisté à une célébration dans un autre pays ou une autre région. Présentez cette expérience et expliquez ce qui vous a surpris(e). (120 à 150 mots)"),
+    ("Vie sociale & Événements", 2,
+     "Vous avez organisé une réunion entre anciens camarades. Racontez comment la rencontre s'est déroulée et donnez vos impressions. (120 à 150 mots)"),
+    ("Vie sociale & Événements", 2,
+     "Vous avez reçu une invitation à un événement que vous n'oublierez jamais. Racontez cette expérience et expliquez pourquoi elle était spéciale. (120 à 150 mots)"),
+    ("Vie sociale & Événements", 2,
+     "Vous avez participé à une activité qui vous a permis de rencontrer beaucoup de nouvelles personnes. Racontez votre expérience et expliquez ce que vous en avez pensé. (120 à 150 mots)"),
+    ("Vie sociale & Événements", 2,
+     "Vous avez organisé une activité pour accueillir une nouvelle personne dans votre groupe. Racontez cette expérience et expliquez comment elle s'est déroulée. (120 à 150 mots)"),
+    ("Vie sociale & Événements", 2,
+     "Vous avez participé à une journée communautaire dans votre quartier. Écrivez un article pour raconter les activités et donner votre opinion. (120 à 150 mots)"),
+    ("Vie sociale & Événements", 2,
+     "Vous avez vécu un moment particulièrement émouvant avec votre famille ou vos amis. Racontez cette expérience et expliquez pourquoi elle vous a marqué(e). (120 à 150 mots)"),
+    ("Vie sociale & Événements", 2,
+     "Vous avez fait quelque chose pour remercier une personne qui vous avait beaucoup aidé(e). Racontez ce que vous avez organisé et expliquez votre motivation. (120 à 150 mots)"),
+    ("Vie sociale & Événements", 2,
+     "Vous avez participé à un événement qui vous a permis de mieux connaître les personnes de votre quartier. Racontez cette expérience et expliquez ce que vous avez découvert. (120 à 150 mots)"),
+
+    # --- THÈME 5 — LOISIRS, CULTURE & SPORT ---
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez récemment commencé une nouvelle activité sportive. Racontez votre expérience et expliquez pourquoi vous avez décidé de pratiquer ce sport. (120 à 150 mots)"),
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez assisté à un concert exceptionnel. Écrivez un article pour raconter la soirée et donner vos impressions. (120 à 150 mots)"),
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez vu un film qui vous a beaucoup marqué(e). Présentez cette expérience et expliquez pourquoi vous recommandez ce film. (120 à 150 mots)"),
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez lu un livre qui a changé votre façon de penser. Racontez votre expérience et expliquez ce que vous avez appris. (120 à 150 mots)"),
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez visité un musée pour la première fois. Racontez votre visite et expliquez ce que vous avez particulièrement apprécié. (120 à 150 mots)"),
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez participé à un festival culturel. Écrivez un article pour présenter l'événement et raconter votre expérience. (120 à 150 mots)"),
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez découvert un nouveau loisir grâce à un ami. Racontez comment vous avez commencé et expliquez pourquoi vous continuez à pratiquer cette activité. (120 à 150 mots)"),
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez participé à une compétition sportive. Racontez cette expérience et expliquez comment vous vous êtes préparé(e). (120 à 150 mots)"),
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez essayé une activité sportive que vous n'aviez jamais pratiquée auparavant. Racontez votre expérience et donnez vos impressions. (120 à 150 mots)"),
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez assisté à un spectacle qui vous a beaucoup plu. Présentez cette expérience et expliquez pourquoi vous la recommandez. (120 à 150 mots)"),
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez commencé à jouer d'un instrument de musique. Racontez votre expérience et expliquez ce qui vous plaît dans cette activité. (120 à 150 mots)"),
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez participé à un atelier artistique. Racontez votre expérience et expliquez ce que vous avez appris. (120 à 150 mots)"),
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez découvert un artiste ou un écrivain que vous ne connaissiez pas. Présentez votre découverte et expliquez pourquoi vous l'appréciez. (120 à 150 mots)"),
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez organisé une journée sportive avec des amis. Racontez comment la journée s'est déroulée et expliquez ce que vous avez aimé. (120 à 150 mots)"),
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez passé une journée dans un parc d'attractions. Racontez votre expérience et présentez les activités que vous avez préférées. (120 à 150 mots)"),
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez participé à une randonnée particulièrement intéressante. Écrivez un article pour raconter cette expérience et expliquer pourquoi vous la recommandez. (120 à 150 mots)"),
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez découvert une activité culturelle gratuite dans votre ville. Racontez votre expérience et expliquez pourquoi vous conseillez cette activité. (120 à 150 mots)"),
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez repris une activité que vous pratiquiez quand vous étiez plus jeune. Racontez votre expérience et expliquez comment vous vous êtes senti(e). (120 à 150 mots)"),
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez passé une journée sans téléphone ni Internet en pratiquant différentes activités. Racontez votre expérience et donnez votre opinion. (120 à 150 mots)"),
+    ("Loisirs, Culture & Sport", 2,
+     "Vous avez convaincu un ami de pratiquer une activité avec vous et vous avez finalement beaucoup apprécié cette expérience. Racontez ce qui s'est passé. (120 à 150 mots)"),
+
+    # --- THÈME 6 — SANTÉ, ENVIRONNEMENT & MODE DE VIE ---
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez décidé de commencer à faire du sport régulièrement. Racontez votre expérience et expliquez les changements que vous avez remarqués. (120 à 150 mots)"),
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez changé votre alimentation pour avoir un mode de vie plus sain. Écrivez un article pour raconter votre expérience. (120 à 150 mots)"),
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez décidé de réduire votre utilisation de la voiture. Racontez ce changement et expliquez pourquoi vous avez pris cette décision. (120 à 150 mots)"),
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez participé à une activité de nettoyage d'un parc ou d'une plage. Racontez votre expérience et expliquez pourquoi vous avez apprécié cette activité. (120 à 150 mots)"),
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez commencé à utiliser davantage les transports publics. Présentez votre expérience et expliquez les avantages que vous avez constatés. (120 à 150 mots)"),
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez participé à une activité de protection de l'environnement. Racontez ce que vous avez fait et expliquez pourquoi cette expérience vous a marqué(e). (120 à 150 mots)"),
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez décidé de réduire votre consommation de plastique. Racontez les changements que vous avez faits et expliquez si cela a été facile. (120 à 150 mots)"),
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez commencé à pratiquer la méditation ou le yoga. Racontez votre expérience et expliquez les effets que vous avez remarqués. (120 à 150 mots)"),
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez adopté une nouvelle habitude pour mieux dormir. Présentez votre expérience et expliquez si cette habitude vous aide. (120 à 150 mots)"),
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez participé à une journée sans voiture organisée dans votre ville. Racontez cette expérience et donnez votre opinion. (120 à 150 mots)"),
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez récemment passé plusieurs jours dans la nature. Écrivez un article pour raconter votre expérience et expliquer comment vous vous êtes senti(e). (120 à 150 mots)"),
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez décidé de passer moins de temps devant les écrans. Racontez votre expérience et expliquez ce que vous avez changé dans votre quotidien. (120 à 150 mots)"),
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez commencé à acheter davantage de produits locaux. Présentez cette nouvelle habitude et expliquez pourquoi vous avez fait ce choix. (120 à 150 mots)"),
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez participé à une activité de sensibilisation à l'environnement. Racontez ce que vous avez découvert et expliquez ce qui vous a surpris(e). (120 à 150 mots)"),
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez réussi à changer une mauvaise habitude. Racontez votre expérience et expliquez les difficultés que vous avez rencontrées. (120 à 150 mots)"),
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez commencé à marcher davantage au lieu d'utiliser les transports. Racontez cette expérience et expliquez les effets sur votre quotidien. (120 à 150 mots)"),
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez participé à une activité de jardinage ou de plantation d'arbres. Racontez cette expérience et expliquez pourquoi vous l'avez appréciée. (120 à 150 mots)"),
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez passé une semaine en suivant un mode de vie plus sain. Écrivez un article pour raconter cette expérience et donner vos impressions. (120 à 150 mots)"),
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez découvert une activité qui vous aide à réduire votre stress. Présentez cette activité et expliquez pourquoi vous la recommandez. (120 à 150 mots)"),
+    ("Santé, Environnement & Mode de vie", 2,
+     "Vous avez participé à un projet visant à améliorer votre environnement local. Racontez votre expérience et expliquez ce que vous avez appris. (120 à 150 mots)"),
+
+    # --- THÈME 7 — TECHNOLOGIE, ACHATS & SERVICES ---
+    ("Technologie, Achats & Services", 2,
+     "Vous avez acheté un appareil électronique qui vous facilite beaucoup la vie. Présentez votre achat et expliquez pourquoi vous en êtes satisfait(e). (120 à 150 mots)"),
+    ("Technologie, Achats & Services", 2,
+     "Vous avez découvert une application très utile. Écrivez un article pour présenter cette application et expliquer comment elle vous aide. (120 à 150 mots)"),
+    ("Technologie, Achats & Services", 2,
+     "Vous avez acheté un produit sur Internet pour la première fois. Racontez votre expérience et expliquez ce que vous en avez pensé. (120 à 150 mots)"),
+    ("Technologie, Achats & Services", 2,
+     "Vous avez eu une mauvaise expérience avec un service client. Racontez ce qui s'est passé et expliquez comment le problème a été résolu. (120 à 150 mots)"),
+    ("Technologie, Achats & Services", 2,
+     "Vous avez découvert un site Internet qui vous aide dans vos études ou votre travail. Présentez votre découverte et expliquez pourquoi vous le recommandez. (120 à 150 mots)"),
+    ("Technologie, Achats & Services", 2,
+     "Vous avez acheté un cadeau en ligne pour quelqu'un. Racontez votre expérience et expliquez pourquoi vous avez choisi ce cadeau. (120 à 150 mots)"),
+    ("Technologie, Achats & Services", 2,
+     "Vous avez utilisé une nouvelle application pour organiser votre quotidien. Racontez votre expérience et expliquez pourquoi vous continuez à l'utiliser. (120 à 150 mots)"),
+    ("Technologie, Achats & Services", 2,
+     "Vous avez eu un problème avec une commande en ligne. Racontez ce qui s'est passé et expliquez comment vous avez trouvé une solution. (120 à 150 mots)"),
+    ("Technologie, Achats & Services", 2,
+     "Vous avez découvert un nouveau moyen de paiement. Présentez votre expérience et expliquez pourquoi vous trouvez ce système pratique. (120 à 150 mots)"),
+    ("Technologie, Achats & Services", 2,
+     "Vous avez utilisé un service de livraison particulièrement efficace. Écrivez un article pour raconter votre expérience et expliquer pourquoi vous le recommandez. (120 à 150 mots)"),
+    ("Technologie, Achats & Services", 2,
+     "Vous avez acheté un produit après avoir lu plusieurs avis sur Internet. Racontez votre expérience et expliquez si vous êtes satisfait(e) de votre choix. (120 à 150 mots)"),
+    ("Technologie, Achats & Services", 2,
+     "Vous avez vendu un objet que vous n'utilisiez plus sur Internet. Racontez cette expérience et expliquez comment la vente s'est déroulée. (120 à 150 mots)"),
+    ("Technologie, Achats & Services", 2,
+     "Vous avez suivi un cours en ligne pour la première fois. Racontez votre expérience et expliquez ce que vous avez apprécié ou moins apprécié. (120 à 150 mots)"),
+    ("Technologie, Achats & Services", 2,
+     "Vous avez participé à un événement organisé entièrement en ligne. Présentez cette expérience et donnez vos impressions. (120 à 150 mots)"),
+    ("Technologie, Achats & Services", 2,
+     "Vous avez découvert un outil numérique qui vous permet de gagner du temps. Écrivez un article pour présenter cet outil et expliquer comment vous l'utilisez. (120 à 150 mots)"),
+    ("Technologie, Achats & Services", 2,
+     "Vous avez décidé de réduire votre utilisation des réseaux sociaux. Racontez votre expérience et expliquez les changements que vous avez remarqués. (120 à 150 mots)"),
+    ("Technologie, Achats & Services", 2,
+     "Vous avez recommandé un produit ou un service à un ami, mais son expérience a été différente de la vôtre. Racontez cette situation et expliquez ce que vous en pensez. (120 à 150 mots)"),
+    ("Technologie, Achats & Services", 2,
+     "Vous avez récemment changé de téléphone ou d'ordinateur. Présentez votre expérience et expliquez pourquoi vous avez choisi ce nouvel appareil. (120 à 150 mots)"),
+    ("Technologie, Achats & Services", 2,
+     "Vous avez utilisé une plateforme en ligne pour réserver un voyage, un logement ou une activité. Racontez votre expérience et expliquez si vous la recommandez. (120 à 150 mots)"),
+    ("Technologie, Achats & Services", 2,
+     "Vous avez découvert une nouvelle technologie qui a changé votre façon de travailler ou d'étudier. Racontez votre expérience et expliquez les avantages que vous avez constatés. (120 à 150 mots)"),
+
+    # ------------------------------------------------------------------
+    # TÂCHE 3 — texte argumentatif (120 à 180 mots)
+    # ------------------------------------------------------------------
+    ("Logement & Vie quotidienne", 3,
+     "« Il vaut mieux louer son logement que de l'acheter. » Comparez les deux points de vue et donnez votre opinion. (120 à 180 mots)"),
     ("Travail & Études", 3,
      "« Le télétravail devrait devenir la norme. » Comparez les avantages du bureau et du télétravail, puis donnez votre opinion. (120 à 180 mots)"),
-
-    # --- Santé & Bien-être (premium) ---
-    ("Santé & Bien-être", 1,
-     "Un ami se sent stressé. Écrivez-lui un message pour lui proposer des activités qui pourraient l'aider à se détendre. (60 à 120 mots)"),
-    ("Santé & Bien-être", 2,
-     "Rédigez un article sur les habitudes que vous avez adoptées pour rester en bonne santé. (120 à 150 mots)"),
-    ("Santé & Bien-être", 3,
-     "« La technologie nuit à notre santé. » Présentez les deux points de vue et défendez votre position. (120 à 180 mots)"),
-
-    # --- Environnement & Société (premium) ---
-    ("Environnement & Société", 1,
-     "Votre quartier organise une journée de nettoyage. Écrivez un message pour inviter vos voisins à y participer. (60 à 120 mots)"),
-    ("Environnement & Société", 2,
-     "Rédigez un article décrivant les gestes simples que chacun peut faire pour protéger l'environnement. (120 à 150 mots)"),
-    ("Environnement & Société", 3,
-     "« Les individus, et non les gouvernements, sont responsables de la protection de l'environnement. » Comparez les deux points de vue et donnez votre avis. (120 à 180 mots)"),
-
-    # --- Loisirs & Culture (premium) ---
-    ("Loisirs & Culture", 1,
-     "Vous organisez une sortie au restaurant pour l'anniversaire d'un ami. Écrivez un message pour inviter vos amis (date, lieu, organisation). (60 à 120 mots)"),
-    ("Loisirs & Culture", 2,
-     "Racontez dans un article un événement culturel (concert, exposition, festival) auquel vous avez assisté. (120 à 150 mots)"),
-    ("Loisirs & Culture", 3,
+    ("Voyage & Déplacements", 3,
+     "« Voyager seul est plus enrichissant que voyager en groupe. » Comparez les deux façons de voyager et donnez votre avis. (120 à 180 mots)"),
+    ("Voyage & Déplacements", 3,
+     "« Le tourisme de masse nuit aux destinations. » Présentez les deux points de vue et défendez le vôtre. (120 à 180 mots)"),
+    ("Vie sociale & Événements", 3,
+     "« Les réseaux sociaux rapprochent les gens. » D'autres affirment qu'ils nous isolent. Présentez les deux positions et défendez la vôtre. (120 à 180 mots)"),
+    ("Loisirs, Culture & Sport", 3,
      "« Les livres papier sont meilleurs que les livres numériques. » Comparez les deux et défendez votre position. (120 à 180 mots)"),
+    ("Loisirs, Culture & Sport", 3,
+     "« La technologie nuit à notre santé. » Présentez les deux points de vue et défendez votre position. (120 à 180 mots)"),
+    ("Achats, Alimentation & Services", 3,
+     "« Il vaut mieux acheter dans les commerces de quartier que dans les grandes surfaces. » Comparez les deux points de vue et donnez votre opinion. (120 à 180 mots)"),
+    ("Ville, Quartier & Vie locale", 3,
+     "« Vivre en ville est préférable à vivre à la campagne. » Présentez les avantages des deux modes de vie et défendez votre position. (120 à 180 mots)"),
+    ("Ville, Quartier & Vie locale", 3,
+     "« Les individus, et non les gouvernements, sont responsables de la protection de l'environnement. » Comparez les deux points de vue et donnez votre avis. (120 à 180 mots)"),
 ]
 
 # ----------------------------------------------------------------------------
