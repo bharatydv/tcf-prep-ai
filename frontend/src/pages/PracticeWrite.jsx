@@ -23,6 +23,11 @@ export default function PracticeWrite() {
 
   const [prompts, setPrompts] = useState([]);
   const [activePrompt, setActivePrompt] = useState(null);
+  // The chosen theme's topics for this tâche. They replace the generic test
+  // list in the sidebar, so the learner can work through all of them instead
+  // of being handed a single one.
+  const [topics, setTopics] = useState([]);
+  const [activeTopicId, setActiveTopicId] = useState(null);
   const [ownQuestion, setOwnQuestion] = useState('');
   const [text, setText] = useState('');
   const [stage, setStage] = useState(null);
@@ -47,18 +52,29 @@ export default function PracticeWrite() {
     setActivePrompt(prompts[0]);
   }, [prompts, themeId, navState]);
 
-  // Load a random question from the chosen theme + tâche
+  // Load every topic of the chosen theme + tâche, and open on the first one.
+  // It used to pick one at random and drop the other nineteen, which left no
+  // way to reach them short of reloading the page.
   useEffect(() => {
     if (!themeId || !tacheNum) return;
+    let cancelled = false;
     api.get(`/api/themes/${themeId}/questions?task_type=${tacheNum}`)
       .then(({ data }) => {
+        if (cancelled) return;
         const qs = data.questions || [];
-        if (qs.length) {
-          const pick = qs[Math.floor(Math.random() * qs.length)];
-          setOwnQuestion(pick.prompt_text);
-        }
+        setTopics(qs);
+        if (!qs.length) return;
+        // Don't clobber a topic carried in from the simulator or own-question
+        // panel — that is the learner's own text, not a default.
+        if (navState?.ownQuestion || navState?.text) return;
+        setActivePrompt(null);
+        setActiveTopicId(qs[0].question_id);
+        setOwnQuestion(qs[0].prompt_text);
       })
       .catch(() => {});
+    return () => { cancelled = true; };
+    // navState is read only to skip the default; it must not retrigger a fetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [themeId, tacheNum]);
 
   const freeMode = activePrompt === null;
@@ -66,6 +82,16 @@ export default function PracticeWrite() {
   const selectPrompt = (p) => {
     if (!user) return navigate('/login');
     setActivePrompt(p || null);
+    setTimeout(() => taRef.current?.focus(), 50);
+  };
+
+  // A theme topic rides the same path as a hand-typed question: no prompt_id,
+  // the text goes out as the topic. Grading is unchanged.
+  const selectTopic = (q) => {
+    if (!user) return navigate('/login');
+    setActivePrompt(null);
+    setActiveTopicId(q.question_id);
+    setOwnQuestion(q.prompt_text);
     setTimeout(() => taRef.current?.focus(), 50);
   };
 
@@ -128,6 +154,7 @@ export default function PracticeWrite() {
 
   // What the learner is writing about: their own topic, or the selected test's consigne.
   const question = freeMode ? ownQuestion.trim() : (activePrompt?.description || '');
+  const activeTopicIndex = topics.findIndex((q) => q.question_id === activeTopicId);
 
   return (
     <main className="overflow-x-clip bg-white">
@@ -136,12 +163,53 @@ export default function PracticeWrite() {
           fallback={themeId ? `/practice/themes?tache=${tacheNum}` : '/practice/tasks'} />
 
         <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
-          {/* LEFT: test list */}
+          {/* LEFT: the theme's topics, or the generic test list off-theme */}
           <aside className="rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-5 shadow-soft">
             <p className="flex items-center gap-2 font-heading text-sm font-bold text-gray-900">
-              <BookOpen size={18} weight="duotone" className="text-primary" /> {t('write.testsList')}
+              <BookOpen size={18} weight="duotone" className="text-primary" />
+              {themeId ? t('write.topicsList') : t('write.testsList')}
+              {themeId && topics.length > 0 && (
+                <span className="ml-auto rounded-full bg-violet-100 px-2.5 py-1 text-[10px] font-bold text-primary">
+                  {t('write.topicsCount', { n: topics.length })}
+                </span>
+              )}
             </p>
 
+            {themeId ? (
+              /* Twenty topics do not fit on screen, so the list scrolls inside
+                 the card rather than stretching the page past the editor. */
+              <div className="mt-4 max-h-[560px] space-y-2.5 overflow-y-auto pr-1">
+                {topics.map((q, i) => {
+                  const active = activeTopicId === q.question_id;
+                  return (
+                    <button
+                      key={q.question_id}
+                      onClick={() => selectTopic(q)}
+                      data-testid={`topic-${q.question_id}`}
+                      className={`flex w-full items-start gap-3 rounded-2xl border px-4 py-3 text-left transition ${
+                        active
+                          ? 'border-primary bg-white shadow-md shadow-violet-200/60 ring-1 ring-primary'
+                          : 'border-violet-100 bg-white/70 hover:bg-white hover:shadow-sm'
+                      }`}
+                    >
+                      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl font-heading text-sm font-bold ${
+                        active ? 'bg-primary text-white' : 'bg-violet-100 text-primary'
+                      }`}>
+                        {i + 1}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block font-heading text-sm font-bold text-gray-900">
+                          {t('write.topicN', { n: i + 1 })}
+                        </span>
+                        <span className="mt-0.5 line-clamp-2 block text-xs leading-snug text-gray-500">
+                          {q.prompt_text}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
             <div className="mt-4 space-y-2.5">
               {prompts.map((p, i) => {
                 const active = activePrompt?.prompt_id === p.prompt_id;
@@ -169,6 +237,7 @@ export default function PracticeWrite() {
                 );
               })}
             </div>
+            )}
           </aside>
 
           {/* RIGHT: writing panel */}
@@ -188,7 +257,9 @@ export default function PracticeWrite() {
             {question && (
               <div className="mb-4 rounded-2xl border border-violet-100 bg-violet-50/40 p-4" data-testid="question-display">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-primary">
-                  {freeMode ? t('write.yourQuestion') : activePrompt.title}
+                  {!freeMode ? activePrompt.title
+                    : activeTopicIndex >= 0 ? t('write.topicN', { n: activeTopicIndex + 1 })
+                    : t('write.yourQuestion')}
                 </p>
                 <p className="mt-1 text-sm leading-relaxed text-gray-800">{question}</p>
               </div>
@@ -212,7 +283,14 @@ export default function PracticeWrite() {
             <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
               <button
                 className="btn-outline"
-                onClick={() => { setText(''); setOwnQuestion(''); setActivePrompt(null); }}
+                /* Inside a theme, Clear wipes the draft but keeps the selected
+                   topic — clearing it too would leave the page with nothing to
+                   write about. */
+                onClick={() => {
+                  setText('');
+                  setActivePrompt(null);
+                  if (!themeId) setOwnQuestion('');
+                }}
               >
                 {t('write.clear')}
               </button>

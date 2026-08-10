@@ -24,10 +24,31 @@ const TACHE_DURATION = { 1: '2 min', 2: '5 min 30 s', 3: '4 min 30 s' };
 
 // Open practice: free users get a small monthly allowance (enforced server-side).
 const FREE_TALK_LIMIT = 2;
+/* The panel offers a run through all three tâches in one sitting, so the brief
+   walks the AI through them in order rather than leaving it on an open-ended
+   chat — otherwise the session would not deliver what the panel promises. */
 const FREE_TALK_CONSIGNE =
-  "Conversation libre : l'apprenant veut simplement discuter en français pour pratiquer. "
-  + "Choisissez un sujet du quotidien (travail, voyages, cuisine, actualité, vie au Canada), "
-  + "posez-lui des questions ouvertes et rebondissez sur ses réponses pour le faire parler.";
+  "Séance d'entraînement à l'expression orale du TCF Canada, couvrant les trois tâches "
+  + "dans l'ordre. Vous êtes l'examinateur et vous ne parlez qu'en français. "
+  + "1) Tâche 1 — entretien dirigé : demandez au candidat de se présenter, puis posez des "
+  + "questions simples sur son parcours, sa vie quotidienne et ses centres d'intérêt. "
+  + "2) Tâche 2 — exercice en interaction : proposez une situation concrète de la vie "
+  + "courante (réserver, se renseigner, régler un problème) et jouez le rôle de "
+  + "l'interlocuteur pendant que le candidat mène l'échange. "
+  + "3) Tâche 3 — point de vue : posez une question d'opinion sur un sujet de société et "
+  + "demandez-lui de justifier sa position. "
+  + "Annoncez chaque tâche avant de la commencer, posez une seule question à la fois et "
+  + "rebondissez sur ses réponses pour le faire parler le plus possible.";
+
+/* Tâche 1 is the entretien dirigé: there is no question bank to pick from, the
+   examiner simply interviews the candidate about themselves. The AI plays that
+   examiner, so the brief below is what drives it. */
+const TACHE1_CONSIGNE =
+  "Entretien dirigé (Tâche 1 du TCF) : vous êtes l'examinateur. Le candidat se présente "
+  + "pendant deux minutes. Posez-lui des questions simples et ouvertes sur lui-même — son "
+  + "parcours, sa famille, son travail ou ses études, sa vie quotidienne, ses loisirs et ses "
+  + "projets. Rebondissez sur ses réponses avec des questions de relance, une à la fois, "
+  + "comme un examinateur du TCF Canada.";
 
 // Tâche 2's 5 min 30 s already includes 2 min of preparation, so speaking time is the remainder.
 const TACHE_PREP_SECONDS = { 1: 0, 2: 120, 3: 0 };
@@ -520,6 +541,8 @@ export default function SpeakingTasks() {
   const [activeQid, setActiveQid] = useState(null);
   const [freeTalkOpen, setFreeTalkOpen] = useState(false);
   const [freeTalkResult, setFreeTalkResult] = useState(null);
+  const [interviewOpen, setInterviewOpen] = useState(false);
+  const [interviewResult, setInterviewResult] = useState(null);
 
   const isPremiumUser = user?.subscription_status === 'premium';
 
@@ -530,11 +553,26 @@ export default function SpeakingTasks() {
     setQuestions([]);
     setActiveQid(null);
     setThemes([]);
+    // Tâche 1 has no theme bank — it is a live interview about the candidate,
+    // so there is nothing to fetch and nothing to choose from.
+    if (t.n === 1) return;
     setLoadingThemes(true);
     api.get(`/api/themes?task_type=${t.n}&skill=speaking`)
       .then(({ data }) => setThemes(data.themes || []))
       .catch(() => setThemes([]))
       .finally(() => setLoadingThemes(false));
+  };
+
+  const startInterview = () => {
+    if (!user) return navigate('/login');
+    setInterviewOpen(true);
+  };
+
+  const onInterviewGraded = async (analysis) => {
+    setInterviewOpen(false);
+    setInterviewResult(analysis);
+    await refreshUser();
+    toast.success(t('st.conversationGraded', { level: analysis.tcf_level }));
   };
 
   const openTheme = (t) => {
@@ -576,6 +614,15 @@ export default function SpeakingTasks() {
           tacheTitle={t('st.freeTalkTitle')}
           onCancel={() => setFreeTalkOpen(false)}
           onGraded={onFreeTalkGraded}
+        />
+      )}
+      {interviewOpen && (
+        <ConversationModal
+          mode="tache1"
+          consigne={TACHE1_CONSIGNE}
+          tacheTitle={t('st.t1Title')}
+          onCancel={() => setInterviewOpen(false)}
+          onGraded={onInterviewGraded}
         />
       )}
       <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
@@ -663,6 +710,49 @@ export default function SpeakingTasks() {
                 )}
 
                 <p className="mt-5 text-xs text-gray-400">{t('st.orPickTask')}</p>
+              </div>
+            ) : activeTache === 1 ? (
+              /* Tâche 1: no theme list, straight into the guided interview. */
+              <div className="flex h-full flex-col justify-center rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-8 shadow-soft">
+                <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-100 text-primary">
+                  <ChatText size={28} weight="fill" />
+                </span>
+                <h2 className="mt-4 font-heading text-xl font-extrabold text-gray-900">{t('st.t1PanelTitle')}</h2>
+                <p className="mt-2 max-w-md text-sm leading-relaxed text-gray-600">{t('st.t1PanelBody')}</p>
+                <ul className="mt-4 space-y-2 text-sm text-gray-600">
+                  <li className="flex items-center gap-2"><CaretRight size={14} weight="bold" className="text-primary" /> {t('st.t1Step1')}</li>
+                  <li className="flex items-center gap-2"><CaretRight size={14} weight="bold" className="text-primary" /> {t('st.t1Step2')}</li>
+                  <li className="flex items-center gap-2"><CaretRight size={14} weight="bold" className="text-primary" /> {t('st.t1Step3')}</li>
+                </ul>
+                <button onClick={startInterview}
+                  className="btn-primary mt-6 w-fit !bg-gradient-to-r !from-primary !to-fuchsia-600">
+                  <Microphone size={18} weight="fill" /> {t('st.t1Start')}
+                </button>
+
+                {interviewResult && (
+                  <div className="mt-5 rounded-2xl border border-violet-100 bg-white/70 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs font-bold text-gray-900">{t('st.lastConversation')}</p>
+                      <p className="font-heading text-lg font-extrabold text-primary">
+                        {interviewResult.tcf_level}
+                        <span className="ml-1 text-[10px] font-semibold text-gray-400">
+                          {interviewResult.overall_score}/100
+                        </span>
+                      </p>
+                    </div>
+                    {interviewResult.relevance_comment && (
+                      <p className="mt-1 text-[11px] leading-relaxed text-gray-600">
+                        {interviewResult.relevance_comment}
+                      </p>
+                    )}
+                    {interviewResult.submission_id && (
+                      <button onClick={() => navigate(`/feedback/${interviewResult.submission_id}`)}
+                        className="mt-2 text-[11px] font-bold text-primary hover:underline">
+                        {t('st.seeDetail')}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             ) : activeTheme ? (
               <div>
