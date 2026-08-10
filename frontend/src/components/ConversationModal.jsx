@@ -10,9 +10,15 @@ import { useT } from '../i18n';
 /* Tache 2 is a live roleplay: the candidate asks, an examiner answers. This
    modal plays that examiner - live speech in, AI reply spoken back out. */
 
-const TACHE2_PREP_SECONDS = 120;   // the 2 min of preparation the task includes
-const TACHE2_SPEAK_SECONDS = 210;  // the remainder of the 5 min 30 s budget
-const FREE_TALK_SECONDS = 600;     // open practice: a longer, unpressured window
+/* Per-mode timings. Tâche 1 is the guided interview: no preparation, two
+   minutes of speaking. Tâche 2's 5 min 30 s includes 2 min of preparation, so
+   the exchange gets the remainder. Free practice is a longer, unpressured
+   window with no exam framing. */
+const TIMINGS = {
+  tache1: { prep: 0, speak: 120 },
+  tache2: { prep: 120, speak: 210 },
+  free: { prep: 0, speak: 600 },
+};
 
 const fmt = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
@@ -30,8 +36,8 @@ export default function ConversationModal({
   // Free practice has no exam framing: no preparation, a longer window, and it
   // is metered by its own monthly allowance rather than an AI credit.
   const isFree = mode === 'free';
-  const PREP_SECONDS = isFree ? 0 : TACHE2_PREP_SECONDS;
-  const SPEAK_SECONDS = isFree ? FREE_TALK_SECONDS : TACHE2_SPEAK_SECONDS;
+  const { prep: PREP_SECONDS, speak: SPEAK_SECONDS } = TIMINGS[mode] || TIMINGS.tache2;
+  const hasPrep = PREP_SECONDS > 0;
 
   const [phase, setPhase] = useState('brief');      // brief | prep | live | grading
   const [prepLeft, setPrepLeft] = useState(PREP_SECONDS);
@@ -140,7 +146,7 @@ export default function ConversationModal({
       };
       rec.onerror = (e) => {
         if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-          setError("Micro refusé. Autorisez le microphone puis relancez la conversation.");
+          setError(t('conv.micDenied'));
           doneRef.current = true;
         }
       };
@@ -157,7 +163,9 @@ export default function ConversationModal({
     } catch (e) {
       setStatus('idle');
     }
-  }, []);
+    // `t` is memoised on the active language, so this only rebuilds on a
+    // language switch — which is exactly when the error copy must change.
+  }, [t]);
   useEffect(() => { listenRef.current = listen; }, [listen]);
 
   /* ---------------- one exchange ---------------- */
@@ -176,9 +184,9 @@ export default function ConversationModal({
       if (!doneRef.current) listenRef.current?.();
     } catch (err) {
       setStatus('idle');
-      setError(errMsg(err, "L'interlocuteur IA n'a pas répondu."));
+      setError(errMsg(err, t('conv.errNoReply')));
     }
-  }, [consigne, speak]);
+  }, [consigne, speak, t]);
 
   const sendTurn = useCallback((text) => {
     const next = [...turnsRef.current, { role: 'candidate', text }];
@@ -211,7 +219,7 @@ export default function ConversationModal({
           else { setStatus('idle'); toast.error(t('conv.noSpeech')); }
         } catch (err) {
           setStatus('idle');
-          setError(errMsg(err, "La transcription a échoué."));
+          setError(errMsg(err, t('conv.errTranscription')));
         }
       };
       mr.start();
@@ -264,7 +272,7 @@ export default function ConversationModal({
         onCancel();
         return;
       }
-      toast.error(errMsg(err, "L'analyse a échoué."));
+      toast.error(errMsg(err, t('conv.errAnalysis')));
       doneRef.current = false;
       setPhase('live');
     }
@@ -287,10 +295,10 @@ export default function ConversationModal({
 
   const spokenTurns = turns.filter((t) => t.role === 'candidate').length;
   const statusLabel = {
-    listening: HAS_LIVE_STT ? 'À vous — parlez' : 'Enregistrement…',
-    thinking: 'L\'agent réfléchit…',
-    speaking: 'L\'agent parle…',
-    idle: HAS_LIVE_STT ? 'En pause' : 'Appuyez sur Parler',
+    listening: HAS_LIVE_STT ? t('conv.stListening') : t('conv.stRecording'),
+    thinking: t('conv.stThinking'),
+    speaking: t('conv.stSpeaking'),
+    idle: HAS_LIVE_STT ? t('conv.stPaused') : t('conv.stPressSpeak'),
   }[status];
 
   return (
@@ -305,13 +313,15 @@ export default function ConversationModal({
           <div className="min-w-0 flex-1">
             <p className="font-heading text-sm font-bold leading-snug">{tacheTitle}</p>
             <p className="text-[11px] text-white/80">
-              {isFree
-                ? `Conversation libre · ${fmt(SPEAK_SECONDS)}`
-                : `Conversation en direct · Préparation : ${fmt(PREP_SECONDS)} · Échange : ${fmt(SPEAK_SECONDS)}`}
+              {hasPrep
+                ? t('conv.metaRoleplay', { prep: fmt(PREP_SECONDS), speak: fmt(SPEAK_SECONDS) })
+                : isFree
+                  ? t('conv.metaAllTasks', { speak: fmt(SPEAK_SECONDS) })
+                  : t('conv.metaInterview', { speak: fmt(SPEAK_SECONDS) })}
             </p>
           </div>
           {phase === 'live' && (
-            <button onClick={() => setMuted((m) => !m)} aria-label={muted ? 'Activer la voix' : 'Couper la voix'}
+            <button onClick={() => setMuted((m) => !m)} aria-label={muted ? t('conv.unmuteAria') : t('conv.muteAria')}
               className="rounded-lg p-1.5 text-white/80 transition hover:bg-white/20 hover:text-white">
               {muted ? <SpeakerSlash size={18} weight="fill" /> : <SpeakerHigh size={18} weight="fill" />}
             </button>
@@ -337,17 +347,17 @@ export default function ConversationModal({
           <div className="px-6 py-6 text-center">
             <p className="text-sm leading-relaxed text-gray-600">
               {isFree ? (
-                <>Parlez librement en français avec l'IA — elle vous répond et relance la
-                  conversation. Vous avez {fmt(SPEAK_SECONDS)}, et vous pouvez arrêter quand vous voulez.</>
+                t('conv.briefAllTasks', { speak: fmt(SPEAK_SECONDS) })
+              ) : hasPrep ? (
+                <>{t('conv.twoWayA')} <strong>{t('conv.twoWayB')}</strong>
+                  {t('conv.twoWayC', { prep: fmt(PREP_SECONDS), speak: fmt(SPEAK_SECONDS) })}</>
               ) : (
-                <>{t('conv.twoWayA')} <strong>{t('conv.twoWayB')}</strong>, l'agent vous répond.
-                  Vous aurez {fmt(PREP_SECONDS)} de préparation, puis {fmt(SPEAK_SECONDS)} de conversation.</>
+                t('conv.briefInterview', { speak: fmt(SPEAK_SECONDS) })
               )}
             </p>
             {!HAS_LIVE_STT && (
               <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                Votre navigateur ne gère pas la transcription en direct : vous appuierez sur « Parler »
-                avant chaque réplique. Pour la reconnaissance en direct, utilisez Chrome ou Edge.
+                {t('conv.noLiveStt')}
               </p>
             )}
             <div className="mt-5 flex flex-col gap-2 sm:flex-row-reverse">
@@ -356,7 +366,7 @@ export default function ConversationModal({
                 {checking
                   ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> {t('conv.mic')}</>
                   : <><Microphone size={16} weight="fill" />
-                      {isFree ? 'Commencer à parler' : 'Commencer la préparation'}</>}
+                      {hasPrep ? t('conv.startPrep') : t('conv.startSpeak')}</>}
               </button>
               <button onClick={cancel} className="btn-outline flex-1 justify-center">{t('conv.cancel')}</button>
             </div>
@@ -460,7 +470,7 @@ export default function ConversationModal({
               </button>
             </div>
             <p className="px-6 pb-3 text-center text-[10px] text-gray-400">
-              {spokenTurns} question{spokenTurns > 1 ? 's' : ''} posée{spokenTurns > 1 ? 's' : ''} · visez au moins 4 échanges
+              {t('conv.turnHint', { n: spokenTurns })}
             </p>
           </>
         )}

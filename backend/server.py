@@ -1609,9 +1609,10 @@ class ConverseIn(BaseModel):
 class ConverseGradeIn(BaseModel):
     consigne: str = Field(min_length=1, max_length=4000)
     history: List[DialogueTurn] = Field(default_factory=list, max_length=MAX_DIALOGUE_TURNS)
-    # "tache2" spends a normal AI credit; "free" draws on the small
-    # open-ended-conversation allowance instead.
-    mode: str = Field(default="tache2", pattern="^(tache2|free)$")
+    # "tache1" (guided interview) and "tache2" (roleplay) are exam tasks and
+    # spend a normal AI credit; "free" draws on the small open-ended
+    # conversation allowance instead.
+    mode: str = Field(default="tache2", pattern="^(tache1|tache2|free)$")
 
 
 class AnalyzeIn(BaseModel):
