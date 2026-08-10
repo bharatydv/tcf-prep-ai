@@ -22,7 +22,9 @@ export default function SpeakingThemes() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get(`/api/themes?task_type=${tache}`)
+    /* Without skill=speaking the writing themes, which also have tâche 2 and 3
+       questions, are listed here too. */
+    api.get(`/api/themes?task_type=${tache}&skill=speaking`)
       .then(({ data }) => setThemes(data.themes || []))
       .catch(() => setThemes([]))
       .finally(() => setLoading(false));

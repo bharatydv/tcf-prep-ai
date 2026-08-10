@@ -20,7 +20,9 @@ export default function SelectTheme() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get(`/api/themes?task_type=${tache}`)
+    /* skill=writing matters: speaking themes also carry tâche 2 and 3
+       questions, so without it they show up on the writing theme page. */
+    api.get(`/api/themes?task_type=${tache}&skill=writing`)
       .then(({ data }) => setThemes(data.themes || []))
       .catch(() => setThemes([]))
       .finally(() => setLoading(false));
