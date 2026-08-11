@@ -8,6 +8,7 @@ import SpeakingHome from './pages/SpeakingHome';
 import SpeakingTasks from './pages/SpeakingTasks';
 import SpeakingThemes from './pages/SpeakingThemes';
 import SpeakingRecord from './pages/SpeakingRecord';
+import SpeakingExam from './pages/SpeakingExam';
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -56,6 +57,8 @@ export default function App() {
           <Route path="/speaking/tasks" element={<SpeakingTasks />} />
           <Route path="/speaking/themes" element={<SpeakingThemes />} />
           <Route path="/speaking/record" element={<SpeakingRecord />} />
+          {/* Test Mode: the three tâches of one sitting, in exam order. */}
+          <Route path="/speaking/test" element={<SpeakingExam />} />
           <Route path="/exam/:examType" element={<MockExam />} />
           <Route path="/recent-topics" element={<RecentTopics />} />
           <Route path="/recent-topics/:topicId" element={<RecentTopicDetail />} />
@@ -72,8 +75,12 @@ export default function App() {
           <Route path="/reading/practice/:testNumber" element={<ReadingTest />} />
           <Route path="/reading/test/:testNumber" element={<ReadingTest />} />
           <Route path="/listening" element={<ListeningHome />} />
+          {/* "Exam simulator" now means the SPEAKING exam. The writing
+              simulator keeps its own path so the writing Test Mode still
+              reaches a writing paper. */}
+          <Route path="/exam-simulator" element={<SpeakingExam />} />
           <Route
-            path="/exam-simulator"
+            path="/practice/simulator"
             element={<ProtectedRoute><ExamSimulator /></ProtectedRoute>}
           />
           <Route path="/tef-tcf-writing-guide" element={<TefTcfWritingGuide />} />

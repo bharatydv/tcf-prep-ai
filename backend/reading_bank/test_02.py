@@ -13,6 +13,7 @@ _RAW = [
         "level": "A1",
         "band": "100 – 199 points",
         "doc_type": "Horaires / Opening hours",
+        "topic": "Santé & bien-être",
         "text": "PHARMACIE DU CENTRE\nOuverte de 9 h à 19 h du lundi au samedi.\nFermée le dimanche.\nPharmacie de garde : 12, rue Pasteur.",
         "question_fr": "Où aller le dimanche ?",
         "options": [
@@ -38,6 +39,7 @@ _RAW = [
         "level": "A1",
         "band": "100 – 199 points",
         "doc_type": "Mot de l'école / Note from school",
+        "topic": "Études & formation",
         "text": "Chers parents,\nJeudi, les enfants vont au musée. Départ à 9 h, retour à 16 h.\nPrévoir un pique-nique et un manteau.\nLa directrice",
         "question_fr": "Que doivent apporter les enfants ?",
         "options": [
@@ -63,6 +65,7 @@ _RAW = [
         "level": "A1",
         "band": "100 – 199 points",
         "doc_type": "Panneau / Sign",
+        "topic": "Vie quotidienne & logement",
         "text": "LAVERIE 24 H / 24\nMachine : 4 €. Séchoir : 1 € les 10 minutes.\nLessive en vente à l'accueil.\nNe pas laisser le linge sans surveillance.",
         "question_fr": "Combien coûte une machine ?",
         "options": [
@@ -89,6 +92,7 @@ _RAW = [
         "level": "A1",
         "band": "100 – 199 points",
         "doc_type": "SMS",
+        "topic": "Vie quotidienne & logement",
         "text": "Coucou,\nJ'ai oublié mes clés chez toi hier soir. Tu es là ce midi ? Je passe les chercher.\nSami",
         "question_fr": "Que veut faire Sami ?",
         "options": [
@@ -114,6 +118,7 @@ _RAW = [
         "level": "A1",
         "band": "100 – 199 points",
         "doc_type": "Affichette / Small notice",
+        "topic": "Sciences & technologies",
         "text": "WIFI GRATUIT\nRéseau : CAFE_PARIS\nMot de passe : bonjour2026\nDemandez le code à jour au comptoir.",
         "question_fr": "Que propose ce café ?",
         "options": [
@@ -140,6 +145,7 @@ _RAW = [
         "level": "A1",
         "band": "100 – 199 points",
         "doc_type": "Courriel / E-mail",
+        "topic": "Vie quotidienne & logement",
         "text": "Bonjour Claire,\nMerci beaucoup pour le cadeau, il me plaît énormément !\nÀ bientôt,\nInès",
         "question_fr": "Pourquoi Inès écrit-elle ?",
         "options": [
@@ -169,6 +175,7 @@ _RAW = [
         "level": "A2",
         "band": "200 – 299 points",
         "doc_type": "Petite annonce / Classified ad",
+        "topic": "Vie quotidienne & logement",
         "text": "COLOCATION\nChambre de 12 m² dans un appartement partagé à trois.\n380 € charges comprises, Internet inclus.\nNon-fumeur. Caution d'un mois demandée.\nDisponible immédiatement.",
         "question_fr": "Quelle condition l'annonce impose-t-elle ?",
         "options": [
@@ -195,6 +202,7 @@ _RAW = [
         "level": "A2",
         "band": "200 – 299 points",
         "doc_type": "Règlement / Rules",
+        "topic": "Loisirs, culture & médias",
         "text": "MUSÉE DES BEAUX-ARTS\nLes photos sans flash sont autorisées.\nLes sacs de plus de 30 cm doivent être déposés au vestiaire.\nLa dernière entrée se fait 45 minutes avant la fermeture.",
         "question_fr": "Que dit le règlement à propos des photographies ?",
         "options": [
@@ -221,6 +229,7 @@ _RAW = [
         "level": "A2",
         "band": "200 – 299 points",
         "doc_type": "Offre commerciale / Commercial offer",
+        "topic": "Sciences & technologies",
         "text": "FORFAIT MOBILE 12 €/MOIS\nAppels et SMS illimités en France.\n20 Go d'Internet, dont 5 Go utilisables en Europe.\nSans engagement. Carte SIM : 10 € à l'activation.",
         "question_fr": "Que faut-il payer en plus des 12 € mensuels ?",
         "options": [
@@ -247,6 +256,7 @@ _RAW = [
         "level": "A2",
         "band": "200 – 299 points",
         "doc_type": "Conditions / Terms",
+        "topic": "Alimentation & consommation",
         "text": "COURS DE CUISINE — ANNULATION\nAnnulation plus de 7 jours avant le cours : remboursement total.\nEntre 7 et 2 jours : avoir valable un an.\nMoins de 48 h : aucun remboursement.",
         "question_fr": "Que reçoit un client qui annule quatre jours avant ?",
         "options": [
@@ -273,6 +283,7 @@ _RAW = [
         "level": "A2",
         "band": "200 – 299 points",
         "doc_type": "Consigne / Instructions",
+        "topic": "Vie quotidienne & logement",
         "text": "CASIER À COLIS\nEntrez le code reçu par SMS.\nLa porte s'ouvre automatiquement : prenez votre colis et refermez.\nLes colis non retirés sous 3 jours sont renvoyés à l'expéditeur.",
         "question_fr": "Que se passe-t-il après trois jours ?",
         "options": [
@@ -299,6 +310,7 @@ _RAW = [
         "level": "A2",
         "band": "200 – 299 points",
         "doc_type": "Carte de fidélité / Loyalty card",
+        "topic": "Loisirs, culture & médias",
         "text": "CINÉMA LUX — CARTE FIDÉLITÉ\nUne place achetée = 1 point.\n10 points = une séance offerte.\nCarte valable deux ans, non cumulable avec les tarifs réduits.",
         "question_fr": "Que faut-il pour obtenir une séance gratuite ?",
         "options": [
@@ -325,6 +337,7 @@ _RAW = [
         "level": "A2",
         "band": "200 – 299 points",
         "doc_type": "Message de forum / Forum post",
+        "topic": "Alimentation & consommation",
         "text": "Bonjour,\nJe donne un canapé deux places, en bon état, à récupérer avant samedi.\nIl faut venir le chercher soi-même : je n'ai pas de voiture et il est au 3e sans ascenseur.\nPremier arrivé, premier servi.",
         "question_fr": "Quelle difficulté cette annonce signale-t-elle ?",
         "options": [
@@ -355,6 +368,7 @@ _RAW = [
         "level": "B1",
         "band": "300 – 399 points",
         "doc_type": "Article de presse / Press article",
+        "topic": "Environnement & nature",
         "text": "Un samedi par mois, le Repair Café du quartier réunit des bénévoles qui réparent gratuitement grille-pain, lampes et vélos.\n« Nous ne réparons pas à la place des gens, précise le fondateur. Nous réparons avec eux. Beaucoup repartent surtout avec l'idée qu'ils peuvent le faire seuls. »",
         "question_fr": "Quel est l'objectif principal du Repair Café, selon son fondateur ?",
         "options": [
@@ -381,6 +395,7 @@ _RAW = [
         "level": "B1",
         "band": "300 – 399 points",
         "doc_type": "Enquête / Survey report",
+        "topic": "Loisirs, culture & médias",
         "text": "Le nombre de livres lus par habitant baisse légèrement, mais le temps consacré à la lecture, lui, augmente.\nL'explication tient au format : on lit davantage d'articles longs et de textes en ligne, moins de livres entiers.",
         "question_fr": "Comment expliquer ces résultats apparemment contradictoires ?",
         "options": [
@@ -407,6 +422,7 @@ _RAW = [
         "level": "B1",
         "band": "300 – 399 points",
         "doc_type": "Lettre de réclamation / Letter of complaint",
+        "topic": "Alimentation & consommation",
         "text": "Madame, Monsieur,\nJ'ai reçu ce matin une commande incomplète : sur les quatre articles payés, deux manquaient.\nJe ne conteste pas le retard, que votre site annonçait. Je demande simplement l'envoi des articles manquants, ou leur remboursement si vous ne les avez plus en stock.",
         "question_fr": "Sur quoi porte exactement la réclamation ?",
         "options": [
@@ -433,6 +449,7 @@ _RAW = [
         "level": "B1",
         "band": "300 – 399 points",
         "doc_type": "Chronique santé / Health column",
+        "topic": "Santé & bien-être",
         "text": "Les écrans ne détériorent pas la vue de façon permanente, contrairement à ce que l'on entend souvent.\nIls provoquent en revanche une fatigue bien réelle, parce qu'on cligne des yeux deux fois moins devant un écran. La règle des 20 minutes — regarder au loin vingt secondes — suffit le plus souvent.",
         "question_fr": "Que dit l'auteur sur l'effet des écrans ?",
         "options": [
@@ -459,6 +476,7 @@ _RAW = [
         "level": "B1",
         "band": "300 – 399 points",
         "doc_type": "Offre d'emploi / Job advert",
+        "topic": "Travail & emploi",
         "text": "Société de livraison recherche un chauffeur.\nPermis B depuis au moins trois ans exigé. Le véhicule est fourni.\nLa connaissance de la ville est un atout, mais un GPS est installé dans chaque camionnette.",
         "question_fr": "Quelle est la condition obligatoire pour ce poste ?",
         "options": [
@@ -485,6 +503,7 @@ _RAW = [
         "level": "B1",
         "band": "300 – 399 points",
         "doc_type": "Article municipal / Local news",
+        "topic": "Vie quotidienne & logement",
         "text": "Le marché du mercredi déménage place de la Liberté, le temps des travaux de la place centrale.\nLes commerçants craignaient de perdre leur clientèle ; après un mois, la fréquentation a légèrement augmenté, la nouvelle place étant mieux desservie par les bus.",
         "question_fr": "Quel a été l'effet du déménagement du marché ?",
         "options": [
@@ -511,6 +530,7 @@ _RAW = [
         "level": "B1",
         "band": "300 – 399 points",
         "doc_type": "Appel aux donneurs / Call for donors",
+        "topic": "Santé & bien-être",
         "text": "L'établissement du sang lance un appel : les réserves baissent chaque été, quand les donneurs partent en vacances alors que les besoins, eux, ne diminuent pas.\nUn don prend une heure, rendez-vous compris, et peut être fait tous les deux mois.",
         "question_fr": "Pourquoi les réserves baissent-elles en été ?",
         "options": [
@@ -541,6 +561,7 @@ _RAW = [
         "level": "B2",
         "band": "400 – 499 points",
         "doc_type": "Tribune d'opinion / Opinion piece",
+        "topic": "Travail & emploi",
         "text": "On présente le pourboire comme une récompense du bon service. C'est oublier qu'il varie surtout selon l'humeur du client, l'heure et la taille de l'addition.\nUne récompense qui dépend si peu de ce qu'elle récompense mérite un autre nom.",
         "question_fr": "Que soutient l'auteur au sujet du pourboire ?",
         "options": [
@@ -567,6 +588,7 @@ _RAW = [
         "level": "B2",
         "band": "400 – 499 points",
         "doc_type": "Article de fond / Feature article",
+        "topic": "Vie quotidienne & logement",
         "text": "Construire des résidences étudiantes ne résout le problème du logement que si elles sont proches des campus. Là où elles ont été bâties en périphérie, faute de terrain disponible, elles restent partiellement vides.\nLes étudiants préfèrent une chambre plus petite et plus chère à quarante minutes de trajet quotidien.",
         "question_fr": "Pourquoi certaines résidences restent-elles vides ?",
         "options": [
@@ -593,6 +615,7 @@ _RAW = [
         "level": "B2",
         "band": "400 – 499 points",
         "doc_type": "Critique de théâtre / Theatre review",
+        "topic": "Loisirs, culture & médias",
         "text": "La mise en scène est inventive, le décor superbe, la troupe irréprochable. Trois heures durant, on ne s'ennuie pas une minute.\nOn se demande simplement, en sortant, ce que tout cela voulait dire.",
         "question_fr": "Quelle réserve le critique formule-t-il ?",
         "options": [
@@ -619,6 +642,7 @@ _RAW = [
         "level": "B2",
         "band": "400 – 499 points",
         "doc_type": "Vulgarisation / Popular science",
+        "topic": "Sciences & technologies",
         "text": "Les montres qui mesurent le sommeil estiment, elles ne mesurent pas : elles déduisent les phases à partir des mouvements et du rythme cardiaque.\nLe risque est connu des spécialistes : à force de consulter son score, certains dormeurs s'inquiètent et dorment plus mal. L'outil crée alors le trouble qu'il prétend suivre.",
         "question_fr": "Quel paradoxe l'auteur relève-t-il ?",
         "options": [
@@ -645,6 +669,7 @@ _RAW = [
         "level": "B2",
         "band": "400 – 499 points",
         "doc_type": "Courriel professionnel / Professional e-mail",
+        "topic": "Travail & emploi",
         "text": "Bonjour,\nNous avons reçu quarante candidatures pour le poste, dont une dizaine d'excellentes. Je préfère prévenir : nous n'en retiendrons qu'une, et le choix se jouera sur des détails.\nMerci de répondre à tous les candidats reçus en entretien, y compris ceux que nous ne prendrons pas.",
         "question_fr": "Que demande l'auteur du message ?",
         "options": [
@@ -671,6 +696,7 @@ _RAW = [
         "level": "B2",
         "band": "400 – 499 points",
         "doc_type": "Analyse économique / Economic analysis",
+        "topic": "Travail & emploi",
         "text": "La région se félicite des emplois créés par le tourisme. Le chiffre est exact, mais il faudrait l'accompagner d'un second : sept sur dix de ces postes durent moins de six mois.\nCompter des emplois sans compter leur durée revient à confondre l'activité et la stabilité.",
         "question_fr": "Que reproche l'auteur à cette présentation des chiffres ?",
         "options": [
@@ -697,6 +723,7 @@ _RAW = [
         "level": "B2",
         "band": "400 – 499 points",
         "doc_type": "Article environnement / Environmental article",
+        "topic": "Environnement & nature",
         "text": "On demande aux habitants d'économiser l'eau, et ils le font : la consommation domestique baisse depuis dix ans.\nDans le même temps, un cinquième de l'eau potable se perd dans des canalisations percées. Tant que ce chiffre ne bougera pas, les efforts individuels resteront symboliques.",
         "question_fr": "Quelle est la position de l'auteur ?",
         "options": [
@@ -727,6 +754,7 @@ _RAW = [
         "level": "C1",
         "band": "500 – 599 points",
         "doc_type": "Essai / Essay",
+        "topic": "Sciences & technologies",
         "text": "Une carte utile est une carte fausse. Elle efface, simplifie, redresse — et c'est à ce prix qu'elle nous conduit quelque part.\nCelui qui exigerait d'elle une exactitude complète obtiendrait le territoire lui-même, c'est-à-dire rien qui puisse tenir dans une poche.",
         "question_fr": "Quelle idée l'auteur défend-il ?",
         "options": [
@@ -753,6 +781,7 @@ _RAW = [
         "level": "C1",
         "band": "500 – 599 points",
         "doc_type": "Chronique ironique / Ironic column",
+        "topic": "Sciences & technologies",
         "text": "Le service client a été « modernisé » : un assistant automatique répond désormais en trois secondes, contre onze minutes d'attente auparavant.\nIl ne résout rien, mais il le fait vite. Le délai moyen de traitement, lui, a doublé — on ne saurait tout avoir.",
         "question_fr": "Que critique l'auteur dans cette modernisation ?",
         "options": [
@@ -779,6 +808,7 @@ _RAW = [
         "level": "C1",
         "band": "500 – 599 points",
         "doc_type": "Analyse prospective / Forward-looking analysis",
+        "topic": "Société, citoyenneté & administration",
         "text": "La disparition des espèces est annoncée à chaque nouveau moyen de paiement, et pourtant elles circulent encore.\nCe qui change n'est pas leur volume mais leur fonction : on ne paie plus en liquide, on y a recours quand tout le reste échoue. La monnaie devient un filet plutôt qu'un outil.",
         "question_fr": "Quelle évolution du liquide l'auteur décrit-il ?",
         "options": [
@@ -805,6 +835,7 @@ _RAW = [
         "level": "C1",
         "band": "500 – 599 points",
         "doc_type": "Extrait littéraire / Literary extract",
+        "topic": "Loisirs, culture & médias",
         "text": "Sa mère rangeait la maison chaque dimanche, non parce qu'elle était sale, mais parce que ranger l'occupait.\nIl comprit bien plus tard qu'on peut passer une vie entière à mettre de l'ordre dans ce qui n'en manquait pas, pour ne pas regarder ce qui en manquait vraiment.",
         "question_fr": "Que comprend le personnage à propos de sa mère ?",
         "options": [
@@ -831,6 +862,7 @@ _RAW = [
         "level": "C1",
         "band": "500 – 599 points",
         "doc_type": "Article scientifique / Scientific article",
+        "topic": "Sciences & technologies",
         "text": "L'effet placebo n'est pas une illusion à écarter : il est un effet, mesurable et reproductible.\nC'est précisément pour cela qu'un essai sérieux le neutralise. On ne cherche pas à savoir si un traitement agit, mais s'il agit au-delà de ce que produirait n'importe quoi d'administré avec conviction.",
         "question_fr": "Pourquoi les essais neutralisent-ils l'effet placebo ?",
         "options": [
@@ -857,6 +889,7 @@ _RAW = [
         "level": "C1",
         "band": "500 – 599 points",
         "doc_type": "Commentaire institutionnel / Institutional commentary",
+        "topic": "Société, citoyenneté & administration",
         "text": "La charte adoptée par la profession énonce de beaux principes et prévoit un comité chargé d'en contrôler l'application.\nCe comité est composé des signataires, se réunit à leur initiative et ne publie rien. On appellera cela de l'autorégulation, faute d'un mot plus exact.",
         "question_fr": "Que suggère l'auteur à propos de ce comité ?",
         "options": [
@@ -883,6 +916,7 @@ _RAW = [
         "level": "C1",
         "band": "500 – 599 points",
         "doc_type": "Analyse du monde du travail / Workplace analysis",
+        "topic": "Travail & emploi",
         "text": "Le courriel a été adopté pour éviter des réunions ; il en a créé la version écrite et permanente.\nCe n'est pas l'outil qu'il faudrait blâmer : une organisation qui n'a pas décidé qui décide produira toujours de la circulation à la place de la décision.",
         "question_fr": "Où l'auteur situe-t-il la cause du problème ?",
         "options": [
@@ -913,6 +947,7 @@ _RAW = [
         "level": "C2",
         "band": "600 – 699 points",
         "doc_type": "Essai sur les noms / Essay on names",
+        "topic": "Société, citoyenneté & administration",
         "text": "Nommer, c'est déjà trancher. Le mot que l'on choisit pour un phénomène décide de ceux qui s'en occuperont : appelez-le crise, et vous convoquez des experts ; appelez-le injustice, et vous convoquez des juges.\nLe débat sur les mots n'est pas un préliminaire au débat de fond : il en est la première manche.",
         "question_fr": "Que soutient l'auteur ?",
         "options": [
@@ -939,6 +974,7 @@ _RAW = [
         "level": "C2",
         "band": "600 – 699 points",
         "doc_type": "Essai politique / Political essay",
+        "topic": "Société, citoyenneté & administration",
         "text": "Le chiffre a ceci de commode qu'il paraît clore la discussion. On oublie qu'il a fallu, en amont, décider ce que l'on comptait, et donc ce que l'on ne comptait pas.\nToute statistique est une opinion qui a réussi à se faire oublier comme telle.",
         "question_fr": "Quelle est la thèse de l'auteur sur les statistiques ?",
         "options": [
@@ -965,6 +1001,7 @@ _RAW = [
         "level": "C2",
         "band": "600 – 699 points",
         "doc_type": "Critique de danse / Dance review",
+        "topic": "Loisirs, culture & médias",
         "text": "La chorégraphie exige des interprètes une précision d'horloger, qu'ils atteignent sans faillir.\nIl leur manque pourtant cette hésitation infime qui distingue un corps d'un mécanisme — et sans laquelle la virtuosité n'émeut personne.",
         "question_fr": "Que reproche le critique aux interprètes ?",
         "options": [
@@ -991,6 +1028,7 @@ _RAW = [
         "level": "C2",
         "band": "600 – 699 points",
         "doc_type": "Réflexion épistémologique / Epistemological reflection",
+        "topic": "Sciences & technologies",
         "text": "Un modèle qui prévoit tout ne prévoit rien : à force d'ajouter des variables pour rattraper chaque écart, on finit par décrire le passé au lieu d'anticiper l'avenir.\nLa valeur d'un modèle se mesure à ce qu'il refuse d'expliquer.",
         "question_fr": "Quel critère l'auteur propose-t-il pour juger un modèle ?",
         "options": [
@@ -1017,6 +1055,7 @@ _RAW = [
         "level": "C2",
         "band": "600 – 699 points",
         "doc_type": "Chronique urbaine / Urban column",
+        "topic": "Environnement & nature",
         "text": "On a éclairé la rue toute la nuit pour rassurer, et l'on s'étonne que plus personne n'y lève les yeux.\nUne ville qui supprime ses ombres supprime aussi ce qu'elles rendaient visible : le ciel, et l'heure qu'il indique.",
         "question_fr": "Que déplore l'auteur ?",
         "options": [
@@ -1043,6 +1082,7 @@ _RAW = [
         "level": "C2",
         "band": "600 – 699 points",
         "doc_type": "Essai sur l'attente / Essay on waiting",
+        "topic": "Société, citoyenneté & administration",
         "text": "Nous avons supprimé l'attente partout où nous l'avons pu, sans remarquer qu'elle ne servait pas seulement à patienter.\nElle donnait sa forme au désir : ce qui s'obtient à l'instant se désire mal, et finit par ne plus se désirer du tout.",
         "question_fr": "Que perd-on, selon l'auteur, en supprimant l'attente ?",
         "options": [
