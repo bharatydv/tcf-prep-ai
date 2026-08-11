@@ -6,6 +6,38 @@ import { ACCENTS, CATEGORY_META } from '../lib/api';
 import { WRITING_TASKS, countWords, wordStatus } from '../lib/tcf';
 import { LANGUAGES, useI18n, useT } from '../i18n';
 
+/* --------------------------------------------------------- ComingSoon ---- */
+/* A skill that is not ready yet. Deliberately a full replacement for the page
+   body rather than a badge on it: leaving the real controls visible but inert
+   is what made Listening look broken instead of unfinished. Delete the call in
+   the page when the skill opens; nothing else references it. */
+export function ComingSoon({ icon, title, body }) {
+  const t = useT();
+  return (
+    <main className="mx-auto flex min-h-[62vh] max-w-2xl items-center px-4 py-12 sm:px-6">
+      <div className="w-full overflow-hidden rounded-3xl border border-violet-100 bg-white text-center shadow-soft">
+        <div className="h-1.5 w-full bg-gradient-to-r from-primary to-fuchsia-500" />
+        <div className="px-6 py-12">
+          <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-violet-100 text-primary">
+            {icon}
+          </span>
+          <span className="mt-5 inline-block rounded-full bg-amber-100 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-amber-700">
+            {t('common.comingSoon')}
+          </span>
+          <h1 className="mt-3 font-heading text-2xl font-extrabold text-gray-900">{title}</h1>
+          <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-gray-600">{body}</p>
+          <div className="mt-7 flex flex-wrap justify-center gap-3">
+            <Link to="/practice" className="btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600">
+              {t('common.soonWriting')}
+            </Link>
+            <Link to="/reading" className="btn-outline">{t('common.soonReading')}</Link>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
+
 /* ----------------------------------------------------------- BackLink ---- */
 /* `to` pins a fixed parent; omit it to return wherever the user came from, and
    pass `fallback` for where that should land when there is no history to pop.

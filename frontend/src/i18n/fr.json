@@ -241,11 +241,14 @@
   },
   "common": {
     "back": "Retour",
+    "comingSoon": "Bientôt disponible",
     "dashboard": "Tableau de bord",
     "disclaimerLevels": "Ceci est un outil d'entraînement, pas l'examen officiel TEF/TCF. Les scores et les niveaux sont des estimations destinées à guider votre préparation.",
     "disclaimerScores": "Ceci est un outil d'entraînement, pas l'examen officiel TEF/TCF. Les scores sont des estimations destinées à guider votre préparation.",
     "optional": "facultatif",
-    "pro": "Pro"
+    "pro": "Pro",
+    "soonReading": "S'entraîner en lecture",
+    "soonWriting": "S'entraîner à l'écrit"
   },
   "conv": {
     "agentThinking": "L'agent se prépare…",
@@ -547,7 +550,9 @@
     "chooseSub": "Entraînez-vous sur les documents audio un par un, ou passez un test de compréhension orale complet et chronométré.",
     "chooseTitle": "Compréhension orale — choisissez votre façon de travailler",
     "practiceBody": "Écoutez les documents audio un par un et vérifiez vos réponses immédiatement.",
-    "practiceBullet": "Audio + questions à choix multiple"
+    "practiceBullet": "Audio + questions à choix multiple",
+    "soonBody": "Nous enregistrons les audios et rédigeons les banques de questions. L'expression écrite, l'expression orale et la compréhension écrite sont déjà disponibles.",
+    "soonTitle": "La compréhension orale arrive bientôt"
   },
   "mock": {
     "answersInGreen": "Les bonnes réponses sont indiquées en vert ci-dessous.",
@@ -561,6 +566,8 @@
     "reading": "Compréhension écrite",
     "restart": "Recommencer",
     "score": "Score : {{score}} / {{total}}",
+    "soonBody": "Les épreuves blanches chronométrées sont en préparation. Vous pouvez déjà passer des sujets complets à l'écrit, à l'oral et en lecture.",
+    "soonTitle": "Les examens blancs arrivent bientôt",
     "transcriptNote": "Les transcriptions remplacent l'audio dans cette version d'entraînement.",
     "unknownType": "Type d'examen inconnu."
   },

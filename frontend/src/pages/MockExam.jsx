@@ -5,6 +5,11 @@ import { toast } from 'sonner';
 import { api, errMsg } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
+import { ComingSoon } from '../components/shared';
+
+// Mock exams are not open yet. Module scope, so the fetch effect below does
+// not take it as a dependency. Flip to false to restore the page.
+const NOT_READY = true;
 
 const TYPES = {
   'reading-comprehension': { label: 'mock.reading', icon: BookOpen },
@@ -24,6 +29,7 @@ export default function MockExam() {
   const done = result !== null;
 
   useEffect(() => {
+    if (NOT_READY) return;
     setQuestions(null); setAnswers({}); setResult(null);
     api.get(`/api/exam/questions/${examType}`).then(({ data }) => setQuestions(data.questions)).catch(() => setQuestions([]));
   }, [examType]);
@@ -62,6 +68,11 @@ export default function MockExam() {
     );
   }
   if (!questions) return <main className="flex min-h-[60vh] items-center justify-center"><div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" /></main>;
+
+  if (NOT_READY) {
+    return <ComingSoon icon={<Headphones size={30} weight="fill" />}
+      title={t('mock.soonTitle')} body={t('mock.soonBody')} />;
+  }
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10">
