@@ -67,6 +67,43 @@ TOPICS = (
 # fewer than this is too narrow to be representative.
 MIN_TOPICS_PER_TEST = 8
 
+# A question has to be as hard as the level it claims. Nothing here measures
+# CEFR difficulty properly — that is a judgement about abstraction, inference
+# and idiom, which no word count captures. These bands catch the gross
+# mismatches instead: a 90-word argumentative essay filed as A1, or a two-line
+# sign filed as C1. Length and sentence length climb steeply to B1 and then
+# level off, because past B1 the difficulty stops coming from how much there is
+# to read and starts coming from what has to be inferred from it.
+#
+# Only an upper bound on sentence length. A lower bound sounds symmetrical but
+# fails honest documents: a B1 job advert or a C1 notice is legitimately written
+# in short clauses, and the minimum word count already stops a two-line sign
+# being filed as C1.
+#
+# (min_words, max_words, max_words_per_sentence)
+LEVEL_SHAPE = {
+    "A1": (8,  35, 14),
+    "A2": (18, 55, 18),
+    "B1": (28, 75, 26),
+    "B2": (30, 85, 30),
+    "C1": (30, 90, 32),
+    "C2": (30, 95, 32),
+}
+
+
+def _shape(text: str):
+    """Word count and mean words per sentence for one document.
+
+    Line breaks end a unit as surely as a full stop does: a sign or an advert
+    is written one item per line and often carries no punctuation at all, so
+    splitting on [.!?] alone reported a four-line notice as one 17-word
+    sentence and failed it for complexity it did not have.
+    """
+    import re
+    words = len(text.split())
+    units = [s for s in re.split(r"[.!?…\n]+", text) if s.strip()]
+    return words, words / max(1, len(units))
+
 READING_TESTS = {
     1: test_01.QUESTIONS,
     2: test_02.QUESTIONS,
@@ -119,6 +156,18 @@ def validate() -> list:
                 if not o.get("explanation"):
                     problems.append(
                         f"{where}: option {o.get('id')} has no explanation")
+
+            # Does the document look like the level it claims?
+            lo, hi, sl_hi = LEVEL_SHAPE[q["level"]]
+            words, per_sentence = _shape(q["text"])
+            if not lo <= words <= hi:
+                problems.append(
+                    f"{where}: {q['level']} document is {words} words, "
+                    f"expected {lo}-{hi}")
+            if per_sentence > sl_hi:
+                problems.append(
+                    f"{where}: {q['level']} averages {per_sentence:.0f} words "
+                    f"per sentence, at most {sl_hi} expected")
 
         # A paper that drifts off the level profile stops being comparable to
         # the others, and one built from three subject areas stops being
