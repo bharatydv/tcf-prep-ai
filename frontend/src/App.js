@@ -26,6 +26,8 @@ import MockExam from "./pages/MockExam";
 import Admin from "./pages/Admin";
 import Combinations from './pages/Combinations';
 import ReadingHome from './pages/ReadingHome';
+import ReadingTests from './pages/ReadingTests';
+import ReadingTest from './pages/ReadingTest';
 import ListeningHome from './pages/ListeningHome';
 import Blog from './pages/Blog';
 import BlogPost from './pages/BlogPost';
@@ -63,6 +65,12 @@ export default function App() {
           />
           <Route path="/resources" element={<Resources />} />
           <Route path="/reading" element={<ReadingHome />} />
+          {/* Practice and test read the same papers; the mode decides whether a
+              question is marked as it is answered or only at hand-in. */}
+          <Route path="/reading/practice" element={<ReadingTests />} />
+          <Route path="/reading/test" element={<ReadingTests />} />
+          <Route path="/reading/practice/:testNumber" element={<ReadingTest />} />
+          <Route path="/reading/test/:testNumber" element={<ReadingTest />} />
           <Route path="/listening" element={<ListeningHome />} />
           <Route
             path="/exam-simulator"
