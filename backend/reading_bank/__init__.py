@@ -157,6 +157,18 @@ def validate() -> list:
                     problems.append(
                         f"{where}: option {o.get('id')} has no explanation")
 
+            # Nothing but French should reach a learner's screen. A stray CJK
+            # ideograph once survived into an option here, invisible in review
+            # because the sentence around it still read normally.
+            french = q["text"] + q["question_fr"] + "".join(
+                o.get("text", "") for o in q["options"])
+            stray = {c for c in french
+                     if ord(c) > 0x2200 or 0x0500 < ord(c) < 0x2000}
+            if stray:
+                problems.append(
+                    f"{where}: non-French character(s) {sorted(stray)!r} "
+                    f"in the question text")
+
             # Does the document look like the level it claims?
             lo, hi, sl_hi = LEVEL_SHAPE[q["level"]]
             words, per_sentence = _shape(q["text"])
