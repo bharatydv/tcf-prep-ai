@@ -41,6 +41,32 @@ BANDS = {
 }
 QUESTIONS_PER_TEST = 40
 
+# The level profile of one paper. The TCF compréhension écrite runs from A1 to
+# C2 in ascending difficulty so that a candidate meets their ceiling instead of
+# being stopped by the first hard item; every paper carries the same profile so
+# a score on test 3 means what it means on test 7.
+LEVEL_PROFILE = {"A1": 6, "A2": 7, "B1": 7, "B2": 7, "C1": 7, "C2": 6}
+
+# The subject areas the TCF draws its reading documents from. Checked, not
+# hoped for: without this list a hand-written paper drifts towards whatever the
+# author finds easy to write, and a candidate who prepared on it would meet
+# unfamiliar material on the day.
+TOPICS = (
+    "Vie quotidienne & logement",
+    "Travail & emploi",
+    "Études & formation",
+    "Santé & bien-être",
+    "Transports & voyages",
+    "Loisirs, culture & médias",
+    "Alimentation & consommation",
+    "Environnement & nature",
+    "Sciences & technologies",
+    "Société, citoyenneté & administration",
+)
+# A 40-question paper cannot carry all ten domains evenly, but one that covers
+# fewer than this is too narrow to be representative.
+MIN_TOPICS_PER_TEST = 8
+
 READING_TESTS = {
     1: test_01.QUESTIONS,
     2: test_02.QUESTIONS,
@@ -72,14 +98,16 @@ def validate() -> list:
                 f"expected {QUESTIONS_PER_TEST}")
         for i, q in enumerate(questions, start=1):
             where = f"test {number} q{i}"
-            missing = [f for f in ("level", "text", "question_fr", "options",
-                                   "correct_answer")
+            missing = [f for f in ("level", "topic", "text", "question_fr",
+                                   "options", "correct_answer")
                        if not q.get(f)]
             if missing:
                 problems.append(f"{where}: missing {', '.join(missing)}")
                 continue
             if q["level"] not in LEVELS:
                 problems.append(f"{where}: unknown level {q['level']!r}")
+            if q["topic"] not in TOPICS:
+                problems.append(f"{where}: unknown topic {q['topic']!r}")
             ids = [o.get("id") for o in q["options"]]
             if ids != ["a", "b", "c", "d"]:
                 problems.append(f"{where}: option ids are {ids}, expected a-d")
@@ -91,4 +119,36 @@ def validate() -> list:
                 if not o.get("explanation"):
                     problems.append(
                         f"{where}: option {o.get('id')} has no explanation")
+
+        # A paper that drifts off the level profile stops being comparable to
+        # the others, and one built from three subject areas stops being
+        # representative of the exam.
+        levels = {lvl: sum(1 for q in questions if q.get("level") == lvl)
+                  for lvl in LEVELS}
+        if levels != LEVEL_PROFILE:
+            problems.append(f"test {number}: level profile is {levels}, "
+                            f"expected {LEVEL_PROFILE}")
+        covered = {q.get("topic") for q in questions} & set(TOPICS)
+        if len(covered) < MIN_TOPICS_PER_TEST:
+            problems.append(
+                f"test {number}: covers {len(covered)} topic(s), "
+                f"expected at least {MIN_TOPICS_PER_TEST} — missing "
+                f"{sorted(set(TOPICS) - covered)}")
+
+    # Across the whole bank every domain must appear, or the programme as a
+    # whole leaves a hole a candidate could fall into on exam day.
+    written = [q for qs in READING_TESTS.values() for q in qs]
+    if written:
+        never = sorted(set(TOPICS) - {q.get("topic") for q in written})
+        if never:
+            problems.append(f"bank: no question anywhere on {never}")
     return problems
+
+
+def coverage() -> dict:
+    """Topic × level counts across every written test, for a quick eyeball."""
+    written = [q for qs in READING_TESTS.values() for q in qs]
+    return {topic: {lvl: sum(1 for q in written
+                             if q.get("topic") == topic and q.get("level") == lvl)
+                    for lvl in LEVELS}
+            for topic in TOPICS}

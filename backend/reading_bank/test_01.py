@@ -21,6 +21,7 @@ _RAW = [
         "level": "A1",
         "band": "100 – 199 points",
         "doc_type": "SMS",
+        "topic": "Loisirs, culture & médias",
         "text": "Salut Marc,\nJe suis malade, je ne peux pas aller au cinéma ce soir. On y va samedi ?\nJulie",
         "question_fr": "Pourquoi Julie écrit-elle ?",
         "options": [
@@ -46,6 +47,7 @@ _RAW = [
         "level": "A1",
         "band": "100 – 199 points",
         "doc_type": "Affiche / Notice",
+        "topic": "Loisirs, culture & médias",
         "text": "PISCINE MUNICIPALE\nFermée mercredi 6 mars pour nettoyage.\nRéouverture jeudi 7 mars à 8 h.",
         "question_fr": "Que se passe-t-il mercredi 6 mars ?",
         "options": [
@@ -71,6 +73,7 @@ _RAW = [
         "level": "A1",
         "band": "100 – 199 points",
         "doc_type": "Menu",
+        "topic": "Alimentation & consommation",
         "text": "FORMULE MIDI — 14 €\nEntrée + plat OU plat + dessert.\nBoisson non comprise.\nDu lundi au vendredi, de 12 h à 14 h.",
         "question_fr": "Que comprend la formule à 14 € ?",
         "options": [
@@ -96,6 +99,7 @@ _RAW = [
         "level": "A1",
         "band": "100 – 199 points",
         "doc_type": "Mot du voisin / Note from a neighbour",
+        "topic": "Vie quotidienne & logement",
         "text": "Bonjour,\nLe facteur est passé ce matin. J'ai pris votre colis. Il est chez moi, appartement 12.\nMme Roux",
         "question_fr": "Où est le colis ?",
         "options": [
@@ -121,6 +125,7 @@ _RAW = [
         "level": "A1",
         "band": "100 – 199 points",
         "doc_type": "Panneau / Sign",
+        "topic": "Vie quotidienne & logement",
         "text": "PARC DES TILLEULS\nLes chiens doivent être tenus en laisse.\nJeux interdits aux enfants de plus de 12 ans.",
         "question_fr": "Que dit ce panneau à propos des chiens ?",
         "options": [
@@ -146,6 +151,7 @@ _RAW = [
         "level": "A1",
         "band": "100 – 199 points",
         "doc_type": "Courriel / E-mail",
+        "topic": "Alimentation & consommation",
         "text": "Bonjour Paul,\nTu as encore mon livre de cuisine ? J'en ai besoin dimanche pour préparer le repas de famille.\nMerci ! Anne",
         "question_fr": "Que veut Anne ?",
         "options": [
@@ -175,6 +181,7 @@ _RAW = [
         "level": "A2",
         "band": "200 – 299 points",
         "doc_type": "Petite annonce / Classified ad",
+        "topic": "Travail & emploi",
         "text": "RESTAURANT LE PONT recherche un serveur (H/F).\nTravail le week-end obligatoire, deux jours de repos en semaine.\nDébutants acceptés, formation assurée.\nSe présenter avec un CV du mardi au jeudi, après 15 h.",
         "question_fr": "Quelle contrainte ce poste impose-t-il ?",
         "options": [
@@ -201,6 +208,7 @@ _RAW = [
         "level": "A2",
         "band": "200 – 299 points",
         "doc_type": "Règlement / Rules",
+        "topic": "Santé & bien-être",
         "text": "SALLE DE SPORT ÉNERGIE — RÈGLEMENT\nL'accès est réservé aux membres munis de leur badge.\nUne serviette est obligatoire sur les appareils.\nLes sacs restent dans les casiers, jamais dans la salle.",
         "question_fr": "Que doit apporter un membre pour utiliser les appareils ?",
         "options": [
@@ -227,6 +235,7 @@ _RAW = [
         "level": "A2",
         "band": "200 – 299 points",
         "doc_type": "Recette / Recipe",
+        "topic": "Alimentation & consommation",
         "text": "GÂTEAU AU YAOURT\nMélangez le yaourt, le sucre et les œufs.\nAjoutez la farine, puis l'huile en dernier.\nFaites cuire 35 minutes à 180 °C.\nLaissez refroidir avant de démouler.",
         "question_fr": "Quand faut-il ajouter l'huile ?",
         "options": [
@@ -253,6 +262,7 @@ _RAW = [
         "level": "A2",
         "band": "200 – 299 points",
         "doc_type": "Conditions de billet / Ticket conditions",
+        "topic": "Transports & voyages",
         "text": "BILLET TARIF ÉCO\nÉchange possible jusqu'à 24 h avant le départ, moyennant 15 €.\nAucun remboursement après l'achat.\nBillet nominatif, non transmissible.",
         "question_fr": "Que peut faire le voyageur avec ce billet ?",
         "options": [
@@ -279,6 +289,7 @@ _RAW = [
         "level": "A2",
         "band": "200 – 299 points",
         "doc_type": "Annonce de bibliothèque / Library announcement",
+        "topic": "Études & formation",
         "text": "ATELIER D'ÉCRITURE\nTous les samedis de 10 h à 12 h, salle 3.\nGratuit pour les inscrits à la bibliothèque.\nNombre de places limité : inscription obligatoire à l'accueil.",
         "question_fr": "Comment participer à cet atelier ?",
         "options": [
@@ -305,6 +316,7 @@ _RAW = [
         "level": "A2",
         "band": "200 – 299 points",
         "doc_type": "Confirmation de réservation / Booking confirmation",
+        "topic": "Transports & voyages",
         "text": "Votre réservation est confirmée.\nArrivée : à partir de 15 h. Départ : avant 11 h.\nLe petit-déjeuner est servi de 7 h à 9 h 30, en supplément (9 € par personne).\nAnnulation gratuite jusqu'à 48 h avant l'arrivée.",
         "question_fr": "Que dit ce message au sujet du petit-déjeuner ?",
         "options": [
@@ -330,6 +342,7 @@ _RAW = [
         "level": "A2",
         "band": "200 – 299 points",
         "doc_type": "Information aux voyageurs / Passenger information",
+        "topic": "Transports & voyages",
         "text": "LIGNE 14 — MODIFICATION\nÀ partir du 2 avril, le dernier bus partira à 22 h 15 au lieu de 23 h.\nLe premier départ reste inchangé.\nUne navette de nuit dessert la gare le vendredi et le samedi.",
         "question_fr": "Qu'est-ce qui change sur la ligne 14 ?",
         "options": [
@@ -360,6 +373,7 @@ _RAW = [
         "level": "B1",
         "band": "300 – 399 points",
         "doc_type": "Article de presse / Press article",
+        "topic": "Environnement & nature",
         "text": "Depuis janvier, l'entreprise a retiré toutes les bouteilles en plastique de ses bureaux et installé des fontaines à eau.\n« Certains salariés ont d'abord protesté », reconnaît la directrice. « Mais nous avons offert une gourde à chacun, et les réticences sont tombées en quelques semaines. »",
         "question_fr": "Comment l'entreprise a-t-elle fait accepter ce changement ?",
         "options": [
@@ -386,6 +400,7 @@ _RAW = [
         "level": "B1",
         "band": "300 – 399 points",
         "doc_type": "Enquête / Survey report",
+        "topic": "Alimentation & consommation",
         "text": "Selon une enquête menée auprès de 1 500 jeunes de 18 à 25 ans, huit sur dix déclarent aimer cuisiner.\nPourtant, la moitié d'entre eux préparent un vrai repas moins d'une fois par semaine, faute de temps plutôt que d'envie.",
         "question_fr": "Que révèle cette enquête ?",
         "options": [
@@ -412,6 +427,7 @@ _RAW = [
         "level": "B1",
         "band": "300 – 399 points",
         "doc_type": "Lettre de réclamation / Letter of complaint",
+        "topic": "Santé & bien-être",
         "text": "Madame, Monsieur,\nJe suis abonné à votre salle depuis deux ans. Or la piscine, qui figure dans mon abonnement, est fermée depuis six semaines sans qu'aucune date de réouverture ne soit annoncée.\nJe demande un geste commercial sur les mois concernés, ou la possibilité de suspendre mon abonnement sans frais.",
         "question_fr": "Que demande ce client ?",
         "options": [
@@ -438,6 +454,7 @@ _RAW = [
         "level": "B1",
         "band": "300 – 399 points",
         "doc_type": "Chronique santé / Health column",
+        "topic": "Santé & bien-être",
         "text": "Inutile de s'inscrire dans une salle pour être en forme : marcher trente minutes par jour d'un bon pas produit des effets comparables sur le cœur.\nL'avantage décisif de la marche n'est pas son efficacité, c'est qu'on l'abandonne rarement.",
         "question_fr": "Selon l'auteur, quel est le principal atout de la marche ?",
         "options": [
@@ -464,6 +481,7 @@ _RAW = [
         "level": "B1",
         "band": "300 – 399 points",
         "doc_type": "Offre d'emploi / Job advert",
+        "topic": "Travail & emploi",
         "text": "Cabinet médical recherche un(e) secrétaire.\nLe poste exige une parfaite maîtrise du français écrit ; la connaissance d'une seconde langue est appréciée.\nExpérience en milieu médical souhaitée mais non exigée : une formation interne est prévue.",
         "question_fr": "Quelle est la seule condition véritablement obligatoire ?",
         "options": [
@@ -490,6 +508,7 @@ _RAW = [
         "level": "B1",
         "band": "300 – 399 points",
         "doc_type": "Article municipal / Local news",
+        "topic": "Transports & voyages",
         "text": "La ville teste depuis six mois un service de bus de nuit le week-end. La fréquentation dépasse les prévisions, surtout chez les moins de trente ans.\nLes commerçants du centre, d'abord sceptiques, demandent aujourd'hui son extension au jeudi soir.",
         "question_fr": "Quelle est la position actuelle des commerçants ?",
         "options": [
@@ -516,6 +535,7 @@ _RAW = [
         "level": "B1",
         "band": "300 – 399 points",
         "doc_type": "Appel à participation / Call for participants",
+        "topic": "Environnement & nature",
         "text": "Le jardin partagé du quartier cherche de nouveaux participants.\nChaque famille dispose d'une parcelle et s'engage à venir au moins deux fois par mois, y compris en hiver.\n« Les récoltes se partagent, mais l'entretien aussi », rappelle le responsable.",
         "question_fr": "Qu'implique la participation à ce jardin ?",
         "options": [
@@ -546,6 +566,7 @@ _RAW = [
         "level": "B2",
         "band": "400 – 499 points",
         "doc_type": "Tribune d'opinion / Opinion piece",
+        "topic": "Études & formation",
         "text": "Le débat sur les devoirs oppose depuis trente ans les mêmes arguments. On oublie l'essentiel : à quantité égale, un devoir corrigé et repris en classe fait progresser, un devoir simplement rendu ne fait rien.\nCe n'est pas la charge qu'il faudrait discuter, c'est ce qu'on en fait ensuite.",
         "question_fr": "Quel déplacement l'auteur propose-t-il dans le débat ?",
         "options": [
@@ -572,6 +593,7 @@ _RAW = [
         "level": "B2",
         "band": "400 – 499 points",
         "doc_type": "Article de fond / Feature article",
+        "topic": "Santé & bien-être",
         "text": "Les campagnes manquent de médecins, et l'on répond par des primes à l'installation. Les résultats déçoivent : un médecin s'installe là où son conjoint trouve du travail et où ses enfants trouvent une école.\nTant que ces conditions manqueront, aucune prime ne sera assez élevée.",
         "question_fr": "Pourquoi les primes échouent-elles, selon l'auteur ?",
         "options": [
@@ -598,6 +620,7 @@ _RAW = [
         "level": "B2",
         "band": "400 – 499 points",
         "doc_type": "Critique de film / Film review",
+        "topic": "Loisirs, culture & médias",
         "text": "Le film tient sur les épaules de son actrice principale, absolument remarquable. Autour d'elle, hélas, le scénario multiplie les personnages sans jamais leur donner d'épaisseur.\nOn sort convaincu par une interprétation, pas par une histoire.",
         "question_fr": "Que reproche le critique à ce film ?",
         "options": [
@@ -624,6 +647,7 @@ _RAW = [
         "level": "B2",
         "band": "400 – 499 points",
         "doc_type": "Vulgarisation / Popular science",
+        "topic": "Environnement & nature",
         "text": "Trier ses déchets est utile, mais l'ordre des priorités est souvent inversé dans les esprits.\nRéduire ce que l'on achète évite cent fois plus d'émissions que recycler ce que l'on a acheté. Le recyclage est la dernière étape d'une chaîne, pas la première.",
         "question_fr": "Quelle idée l'auteur cherche-t-il à corriger ?",
         "options": [
@@ -650,6 +674,7 @@ _RAW = [
         "level": "B2",
         "band": "400 – 499 points",
         "doc_type": "Courriel professionnel / Professional e-mail",
+        "topic": "Travail & emploi",
         "text": "Bonjour à tous,\nLe client accepte le report de la livraison au 30 mai, ce qui nous laisse trois semaines de plus. Je préfère être claire : ce délai ne servira pas à ajouter des fonctionnalités, mais à stabiliser ce qui existe.\nToute nouvelle demande sera reportée à la version suivante.",
         "question_fr": "Que précise la responsable à propos du délai supplémentaire ?",
         "options": [
@@ -676,6 +701,7 @@ _RAW = [
         "level": "B2",
         "band": "400 – 499 points",
         "doc_type": "Analyse économique / Economic analysis",
+        "topic": "Travail & emploi",
         "text": "La hausse du salaire minimum a-t-elle détruit des emplois ? Les études récentes penchent pour un effet faible, parfois nul.\nCe résultat ne vaut cependant pas garantie : il a été observé lors de hausses modérées, dans des économies en croissance. Rien ne dit qu'il se répéterait dans d'autres conditions.",
         "question_fr": "Quelle précaution l'auteur ajoute-t-il ?",
         "options": [
@@ -702,6 +728,7 @@ _RAW = [
         "level": "B2",
         "band": "400 – 499 points",
         "doc_type": "Article environnement / Environmental article",
+        "topic": "Environnement & nature",
         "text": "L'industrie du vêtement produit deux fois plus qu'il y a vingt ans, et nous gardons chaque pièce deux fois moins longtemps.\nLes campagnes de collecte donnent bonne conscience, mais elles traitent l'aval d'un problème qui se joue entièrement à l'amont : dans le rythme des collections.",
         "question_fr": "Que reproche l'auteur aux campagnes de collecte ?",
         "options": [
@@ -732,6 +759,7 @@ _RAW = [
         "level": "C1",
         "band": "500 – 599 points",
         "doc_type": "Essai / Essay",
+        "topic": "Société, citoyenneté & administration",
         "text": "Nous confondons volontiers la vitesse et le mouvement. Une décision prise en trois minutes n'avance à rien si elle doit être défaite en trois mois.\nLa lenteur n'est pas l'ennemie de l'efficacité : elle en est parfois la condition, dès lors qu'elle sert à comprendre plutôt qu'à différer.",
         "question_fr": "Quelle nuance l'auteur apporte-t-il à l'éloge de la lenteur ?",
         "options": [
@@ -758,6 +786,7 @@ _RAW = [
         "level": "C1",
         "band": "500 – 599 points",
         "doc_type": "Chronique ironique / Ironic column",
+        "topic": "Société, citoyenneté & administration",
         "text": "La collectivité a publié, comme promis, l'intégralité de ses données : quatre-vingts fichiers, dans un format que trois logiciels seulement savent ouvrir, sans le moindre document expliquant ce que contient chaque colonne.\nLa transparence, décidément, ne se refuse rien.",
         "question_fr": "Que suggère la dernière phrase ?",
         "options": [
@@ -784,6 +813,7 @@ _RAW = [
         "level": "C1",
         "band": "500 – 599 points",
         "doc_type": "Analyse prospective / Forward-looking analysis",
+        "topic": "Travail & emploi",
         "text": "On annonce la fin du bureau depuis que le travail à distance s'est généralisé. L'observation dit autre chose : les entreprises réduisent les surfaces mais multiplient les lieux.\nCe n'est pas le bureau qui disparaît, c'est son unicité.",
         "question_fr": "Quelle évolution l'auteur décrit-il ?",
         "options": [
@@ -810,6 +840,7 @@ _RAW = [
         "level": "C1",
         "band": "500 – 599 points",
         "doc_type": "Extrait littéraire / Literary extract",
+        "topic": "Loisirs, culture & médias",
         "text": "Il connaissait la ville par ses odeurs avant de la connaître par ses rues.\nPlus tard, quand on lui demanderait d'où il venait, il donnerait un nom, une région, une date — tout sauf ce qui était vrai : une boulangerie à six heures du matin, en hiver.",
         "question_fr": "Que suggère ce passage sur le rapport du personnage à son origine ?",
         "options": [
@@ -835,6 +866,7 @@ _RAW = [
         "level": "C1",
         "band": "500 – 599 points",
         "doc_type": "Article scientifique / Scientific article",
+        "topic": "Sciences & technologies",
         "text": "En nutrition, la plupart des travaux reposent sur des questionnaires déclaratifs : on demande aux participants ce qu'ils ont mangé.\nOr on se souvient mal, et l'on se souvient favorablement. L'erreur n'est pas aléatoire, elle est orientée — ce qui est autrement plus gênant.",
         "question_fr": "Pourquoi cette erreur est-elle particulièrement problématique ?",
         "options": [
@@ -861,6 +893,7 @@ _RAW = [
         "level": "C1",
         "band": "500 – 599 points",
         "doc_type": "Commentaire institutionnel / Institutional commentary",
+        "topic": "Société, citoyenneté & administration",
         "text": "Le décret annonce une obligation, puis en confie l'application à des textes ultérieurs dont il ne fixe ni le contenu ni l'échéance.\nL'obligation existe donc, mais nul ne saurait dire à partir de quand ni en quoi elle consiste.",
         "question_fr": "Que souligne l'auteur au sujet de ce décret ?",
         "options": [
@@ -887,6 +920,7 @@ _RAW = [
         "level": "C1",
         "band": "500 – 599 points",
         "doc_type": "Analyse du monde du travail / Workplace analysis",
+        "topic": "Travail & emploi",
         "text": "On mesure la charge de travail en heures, jamais en interruptions. C'est pourtant là que se joue l'épuisement : non dans la durée d'une tâche, mais dans le nombre de fois qu'il faut la recommencer.\nUne journée de sept heures hachées fatigue davantage que neuf heures continues.",
         "question_fr": "Quelle est la thèse de l'auteur sur l'épuisement au travail ?",
         "options": [
@@ -917,6 +951,7 @@ _RAW = [
         "level": "C2",
         "band": "600 – 699 points",
         "doc_type": "Essai sur la photographie / Essay on photography",
+        "topic": "Loisirs, culture & médias",
         "text": "La photographie ne conserve pas le souvenir : elle le remplace. Ce dont nous nous souvenons d'une enfance abondamment photographiée, ce sont les photographies.\nElles n'ouvrent pas sur le passé, elles en tiennent lieu — et l'on prend cette substitution pour de la fidélité.",
         "question_fr": "Quelle est la thèse de l'auteur ?",
         "options": [
@@ -943,6 +978,7 @@ _RAW = [
         "level": "C2",
         "band": "600 – 699 points",
         "doc_type": "Essai politique / Political essay",
+        "topic": "Société, citoyenneté & administration",
         "text": "On reproche aux assemblées de mal représenter la société. Le reproche est juste, mais il vise souvent la mauvaise cible : ce n'est pas la composition des élus qui décide, c'est le calendrier qui les contraint.\nUne assemblée parfaitement représentative, sommée de trancher en huit jours, délibérerait aussi mal que la précédente.",
         "question_fr": "Où l'auteur situe-t-il le véritable problème ?",
         "options": [
@@ -969,6 +1005,7 @@ _RAW = [
         "level": "C2",
         "band": "600 – 699 points",
         "doc_type": "Critique d'architecture / Architecture review",
+        "topic": "Loisirs, culture & médias",
         "text": "Le bâtiment est irréprochable : proportions justes, matériaux nobles, lumière calculée. On l'admire comme on admire une démonstration.\nIl lui manque seulement ce qu'aucun plan ne prévoit — la trace de ceux qui l'habiteront, et le droit de le déformer.",
         "question_fr": "Que reproche le critique à ce bâtiment ?",
         "options": [
@@ -995,6 +1032,7 @@ _RAW = [
         "level": "C2",
         "band": "600 – 699 points",
         "doc_type": "Réflexion épistémologique / Epistemological reflection",
+        "topic": "Sciences & technologies",
         "text": "L'expert se distingue du profane moins par l'étendue de ce qu'il sait que par la précision de ce qu'il ignore.\nCelui qui ne peut pas dire où s'arrête sa compétence n'en a pas : il a des opinions, ce qui est une autre affaire.",
         "question_fr": "Quel critère définit l'expertise selon l'auteur ?",
         "options": [
@@ -1021,6 +1059,7 @@ _RAW = [
         "level": "C2",
         "band": "600 – 699 points",
         "doc_type": "Chronique urbaine / Urban column",
+        "topic": "Société, citoyenneté & administration",
         "text": "On a installé des bancs sans dossier, séparés par des accoudoirs, devant la gare rénovée.\nLe mobilier ne dit rien, bien sûr ; il se contente d'empêcher. Il aura fallu beaucoup de réunions pour qu'une ville apprenne à refuser sans jamais l'écrire.",
         "question_fr": "Que dénonce l'auteur ?",
         "options": [
@@ -1047,6 +1086,7 @@ _RAW = [
         "level": "C2",
         "band": "600 – 699 points",
         "doc_type": "Essai sur l'amitié / Essay on friendship",
+        "topic": "Société, citoyenneté & administration",
         "text": "Le réseau a fait de l'ami une unité comptable. On les additionne désormais, ce qui aurait paru absurde à toute époque antérieure.\nL'amitié ne supporte pourtant pas le nombre : elle demande du temps, et le temps, lui, ne se multiplie pas.",
         "question_fr": "Sur quoi repose l'argument de l'auteur ?",
         "options": [
