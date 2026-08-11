@@ -873,6 +873,8 @@
     "level": "Level",
     "mic": "Mic…",
     "micDenied": "Cannot access the microphone. Check your browser permissions.",
+    "missedQuestions": "What more could you have asked?",
+    "missedQuestionsHint": "Questions that would have got you the rest of the information the consigne asked for.",
     "newAnswer": "New answer",
     "noQuestions": "No questions available for this theme yet.",
     "noSpeech": "No speech detected. Please try again.",

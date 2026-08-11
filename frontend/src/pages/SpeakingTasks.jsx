@@ -4,6 +4,7 @@ import {
   ChatText, Handshake, Scales, ClockCountdown, ArrowLeft,
   Lock, CaretRight, BookOpen, Microphone, Star, Clock,
   Stop, ArrowClockwise, UploadSimple, Lightning, CheckCircle, XCircle, X, ChatsCircle,
+  Question,
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api } from '../lib/api';
@@ -490,6 +491,27 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* "What more could you have asked?" — tâche 2 only. The questions
+              are in French and ready to speak, so they are shown verbatim with
+              the English note explaining what each would have obtained. */}
+          {Array.isArray(result.missed_questions) && result.missed_questions.length > 0 && (
+            <div className="rounded-2xl border border-amber-100 bg-amber-50/50 p-4" data-testid="missed-questions">
+              <p className="flex items-center gap-1.5 text-xs font-bold text-gray-900">
+                <Question size={14} weight="fill" className="text-amber-600" />
+                {t('st.missedQuestions')}
+              </p>
+              <p className="mt-0.5 text-[11px] text-gray-500">{t('st.missedQuestionsHint')}</p>
+              <ul className="mt-2 space-y-2">
+                {result.missed_questions.map((m, i) => (
+                  <li key={i} className="rounded-xl border border-amber-100 bg-white p-2.5">
+                    <p className="text-xs font-semibold text-gray-900">« {m.question} »</p>
+                    {m.why && <p className="mt-0.5 text-[11px] leading-relaxed text-gray-500">{m.why}</p>}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

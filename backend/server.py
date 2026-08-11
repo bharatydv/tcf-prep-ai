@@ -1414,7 +1414,7 @@ INTERACTION_GRADER_SYSTEM = """You are a certified TCF Canada examiner grading T
 You receive the CONSIGNE (the scenario) and the full DIALOGUE. Grade ONLY the candidate's turns. The transcript comes from speech recognition, so judge charitably where a word is clearly a transcription artifact rather than a learner error.
 
 Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
-{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate obtained the information the consigne asked for", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"]}
+{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate obtained the information the consigne asked for", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "missed_questions":[{"question":"question in French the candidate should have asked","why":"what it would have obtained (English)"}]}
 
 Because this task is INTERACTION, weigh these alongside grammar and vocabulary:
 1. QUESTION QUALITY - did the candidate actually ask questions, and were they well formed? Flat statements, or questions built only by raising intonation ("vous avez des places ?") where inversion or est-ce que is expected, are the single most common Tâche 2 weakness. Report them as errors.
@@ -1426,7 +1426,11 @@ CEFR scoring (overall_score 0-100, tcf_level one of A1,A2,B1,B2,C1,C2):
 - A1 (5-19) A2 (20-39) B1 (40-54) B2 (55-69) C1 (70-84) C2 (85-100).
 Cap the score at B1 if the candidate asked fewer than three real questions or missed most of the required information.
 
-suggestions: 3-5 concrete English tips for THIS conversation. vocabulary_suggestions: French phrases that would have made the asking more idiomatic. You are grading a transcript, so do NOT comment on pronunciation or accent."""
+suggestions: 3-5 concrete English tips for THIS conversation. vocabulary_suggestions: French phrases that would have made the asking more idiomatic.
+
+missed_questions - "What more could you have asked?". List 2 to 5 questions, WORD FOR WORD IN FRENCH and ready to speak, that the candidate did not ask but should have. Draw them first from the points the consigne lists and the candidate skipped, then from the openings the agent left unexplored (a price mentioned without conditions, a date without a deadline). Never repeat a question the candidate already asked, even in other words. If the candidate genuinely covered everything, return the questions that would have deepened the exchange rather than an empty list.
+
+You are grading a transcript, so do NOT comment on pronunciation or accent."""
 
 # Keeps one exchange bounded so a runaway session cannot grow the prompt forever.
 MAX_DIALOGUE_TURNS = 40
@@ -1465,9 +1469,19 @@ async def grade_interaction(consigne: str, history: list, db=None) -> dict:
     analyze_speaking_with_ai so the existing result UI renders unchanged."""
     said = [t for t in history if t.get("role") == "candidate" and str(t.get("text", "")).strip()]
     if not said:
-        return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
-                "relevance_comment": "No speech was detected during the conversation.",
-                "suggestions": []}
+        # Handing in before saying anything is a normal thing to do — the
+        # learner ends the roleplay early, or the microphone caught nothing.
+        # It used to fall through FALLBACK_ANALYSIS, whose ai_unavailable flag
+        # made the endpoint answer 503 "the AI interlocutor is unavailable":
+        # false, alarming, and it threw away the attempt. Say what actually
+        # happened instead, and let the caller give the credit back.
+        return {**dict(FALLBACK_ANALYSIS), "ai_unavailable": False,
+                "no_speech": True, "answers_question": False,
+                "relevance_comment": ("Nothing was recorded, so there is no "
+                                      "answer to grade. Start the roleplay "
+                                      "again and ask the agent your first "
+                                      "question."),
+                "suggestions": [], "missed_questions": []}
     provider = (await get_provider(db, "speaking_grader_provider")) if db is not None else SPEAKING_GRADER_PROVIDER
     raw = await _grade_with_provider(provider, INTERACTION_GRADER_SYSTEM,
                                      _render_dialogue(history, consigne))
@@ -1592,6 +1606,19 @@ def _validate_speaking(data: dict) -> dict:
     base["answers_question"] = bool(data.get("answers_question", False))
     base["relevance_comment"] = str(data.get("relevance_comment", ""))[:400]
     base["suggestions"] = [str(x) for x in (data.get("suggestions") or [])][:8]
+    # "What more could you have asked?" — tâche 2 only, empty elsewhere. Models
+    # sometimes return bare strings instead of the {question, why} object, so
+    # both shapes are accepted rather than dropping the whole section.
+    missed = []
+    for item in (data.get("missed_questions") or [])[:5]:
+        if isinstance(item, dict):
+            question = str(item.get("question", "")).strip()
+            why = str(item.get("why", "")).strip()
+        else:
+            question, why = str(item).strip(), ""
+        if question:
+            missed.append({"question": question[:200], "why": why[:300]})
+    base["missed_questions"] = missed
     return base
 
 
@@ -3139,6 +3166,12 @@ async def speaking_converse_grade(body: ConverseGradeIn,
         if not free_mode:
             await refund_credit(db, user)
         raise HTTPException(status_code=503, detail=AI_UNAVAILABLE_DETAIL)
+    if analysis.get("no_speech"):
+        # Nothing was said, so nothing was graded: give the credit back rather
+        # than charging for an empty attempt, and still return 200 so the
+        # learner reads why instead of an unexplained failure.
+        if not free_mode:
+            await refund_credit(db, user)
     transcript = "\n".join(
         f"{'Candidat' if t['role'] == 'candidate' else 'Agent'} : {t['text']}"
         for t in history if str(t.get("text", "")).strip())

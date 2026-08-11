@@ -873,6 +873,8 @@
     "level": "Niveau",
     "mic": "Micro…",
     "micDenied": "Impossible d'accéder au microphone. Vérifiez les autorisations.",
+    "missedQuestions": "Qu'auriez-vous pu demander de plus ?",
+    "missedQuestionsHint": "Des questions qui vous auraient permis d'obtenir le reste des informations demandées par la consigne.",
     "newAnswer": "Nouvelle réponse",
     "noQuestions": "Aucune question disponible pour ce thème pour le moment.",
     "noSpeech": "Aucune parole détectée. Réessayez.",
