@@ -2470,10 +2470,31 @@ async def get_submission(submission_id: str,
 # ----------------------------------------------------------------------------
 # Exam simulator
 # ----------------------------------------------------------------------------
+@app.get("/api/simulator/sets")
+async def simulator_sets():
+    """The numbered writing sittings, for the chooser."""
+    return {"sets": [
+        {"set_number": n,
+         "task2": exam_sets.WRITING_EXAM_SETS[n - 1][1],
+         "task3_preview": exam_sets.WRITING_EXAM_SETS[n - 1][2]["doc_1"][:160]}
+        for n in range(1, len(exam_sets.WRITING_EXAM_SETS) + 1)]}
+
+
 @app.get("/api/simulator/start")
-async def simulator_start(user: User = Depends(get_current_user),
+async def simulator_start(set_number: Optional[int] = None,
+                          user: User = Depends(get_current_user),
                           db: AsyncSession = Depends(get_db)):
-    """Return one random active prompt per task."""
+    """The three tâches of one sitting.
+
+    With ?set_number=N it returns that fixed paper, so a set means the same
+    three tâches every time and two attempts at it can be compared. Without it
+    the old behaviour stands — one random prompt per tâche — which is kept only
+    so existing links do not break.
+    """
+    if set_number is not None:
+        if not 1 <= set_number <= len(exam_sets.WRITING_EXAM_SETS):
+            raise HTTPException(status_code=404, detail="Unknown exam set")
+        return exam_sets.writing_set(set_number)
     tasks = {}
     for t in (1, 2, 3):
         res = await db.execute(

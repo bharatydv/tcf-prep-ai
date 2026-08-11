@@ -22,6 +22,8 @@ export default function ExamSimulator() {
   const t = useT();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState(null);
+  const [sets, setSets] = useState([]);
+  const [setNumber, setSetNumber] = useState(null);
   const [phase, setPhase] = useState('intro'); // intro | exam | submitting | results
   const [current, setCurrent] = useState(1);
   const [texts, setTexts] = useState({ 1: '', 2: '', 3: '' });
@@ -31,8 +33,17 @@ export default function ExamSimulator() {
   const warned = useRef({ 10: false, 2: false });
   const restoredRef = useRef(false);
 
+  // A numbered set is a fixed paper: the same three tâches every time, so two
+  // attempts at set 7 can be compared. Without one the endpoint still draws at
+  // random, which is what the old simulator did.
   useEffect(() => {
-    api.get('/api/simulator/start').then(({ data }) => setTasks(data)).catch((e) => toast.error(errMsg(e)));
+    if (!setNumber) return;
+    api.get(`/api/simulator/start?set_number=${setNumber}`)
+      .then(({ data }) => setTasks(data)).catch((e) => toast.error(errMsg(e)));
+  }, [setNumber]);
+
+  useEffect(() => {
+    api.get('/api/simulator/sets').then(({ data }) => setSets(data.sets || [])).catch(() => setSets([]));
   }, []);
 
   // Restore an interrupted attempt. The remaining time is recomputed from the
@@ -117,6 +128,42 @@ export default function ExamSimulator() {
   };
 
   if (!tasks) return <main className="flex min-h-[60vh] items-center justify-center"><div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" /></main>;
+
+  /* Choose the sitting first. Twenty fixed papers, so a set means the same
+     three tâches every time. */
+  if (!setNumber) {
+    return (
+      <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
+        <div className="mb-3 text-center">
+          <h1 className="font-heading text-3xl font-extrabold text-gray-900">{t('sim.setsTitle')}</h1>
+          <p className="mx-auto mt-2 max-w-xl text-sm text-gray-600">{t('sim.setsSub')}</p>
+        </div>
+        <div className="mb-8 flex justify-center">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-4 py-1.5 text-xs font-bold text-primary">
+            <Timer size={14} weight="fill" /> {t('sim.setsBadge')}
+          </span>
+        </div>
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {sets.map((x) => (
+            <button key={x.set_number} onClick={() => setSetNumber(x.set_number)}
+              data-testid={`sim-set-${x.set_number}`}
+              className="group flex flex-col overflow-hidden rounded-3xl border border-violet-100 bg-white text-left shadow-soft transition hover:-translate-y-1 hover:shadow-xl hover:shadow-violet-200/50">
+              <div className="h-1.5 w-full bg-gradient-to-r from-primary to-fuchsia-600" />
+              <div className="flex flex-1 flex-col p-6">
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-100 font-heading text-lg font-extrabold text-primary">
+                  {x.set_number}
+                </span>
+                <h3 className="mt-4 font-heading text-base font-bold text-gray-900">
+                  {t('sim.setN', { n: x.set_number })}
+                </h3>
+                <p className="mt-1 flex-1 text-xs leading-relaxed text-gray-500">{x.task3_preview}…</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      </main>
+    );
+  }
 
   if (phase === 'intro') {
     return (
@@ -236,7 +283,22 @@ export default function ExamSimulator() {
 
         <div className="card mt-5 p-5">
           <h2 className="font-heading font-semibold">{g.name}</h2>
-          <p className="mt-2 text-sm leading-relaxed text-gray-700">{task?.text || t('sim.noConsigne')}</p>
+          {task?.doc_1 && (
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              {[task.doc_1, task.doc_2].map((doc, i) => (
+                <div key={i} className="rounded-2xl border border-violet-100 bg-violet-50/40 p-3.5" data-testid={`sim-document-${i + 1}`}>
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-primary">
+                    {t('sim.documentN', { n: i + 1 })}
+                  </p>
+                  <p className="mt-1 text-xs leading-relaxed text-gray-700">{doc}</p>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="mt-3 text-sm leading-relaxed text-gray-700">{task?.text || t('sim.noConsigne')}</p>
+          {task?.doc_1 && (
+            <p className="mt-1.5 text-[11px] italic text-gray-500">{t('sim.docsNotCounted')}</p>
+          )}
         </div>
 
         <div className="mt-4">
