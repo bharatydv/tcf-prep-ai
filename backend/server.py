@@ -36,6 +36,8 @@ from sqlalchemy.orm import (
     DeclarativeBase, Mapped, mapped_column, relationship,
 )
 
+import reading_bank
+
 load_dotenv()
 
 # ----------------------------------------------------------------------------
@@ -318,6 +320,57 @@ class ExamQuestion(Base):
     correct_answer: Mapped[str] = mapped_column(String(8))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ReadingQuestion(Base):
+    """One compréhension écrite item, belonging to a numbered test of 40.
+
+    Separate from ExamQuestion: a mock-exam item is a bare stem plus options,
+    whereas a reading-practice item carries the teaching material — a level, the
+    per-option explanation of why each distractor fails, the line that decides
+    the answer, and its vocabulary. Overloading ExamQuestion would have left
+    most columns null for every mock-exam row.
+    """
+    __tablename__ = "reading_questions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    reading_question_id: Mapped[str] = mapped_column(
+        String(64), unique=True, index=True)
+    test_number: Mapped[int] = mapped_column(Integer, index=True)   # 1-10
+    position: Mapped[int] = mapped_column(Integer)                  # 1-40
+    level: Mapped[str] = mapped_column(String(4))                   # A1-C2
+    band: Mapped[str] = mapped_column(String(40), default="")
+    doc_type: Mapped[str] = mapped_column(String(120), default="")
+    text: Mapped[str] = mapped_column(Text)
+    question_fr: Mapped[str] = mapped_column(Text)
+    question_en: Mapped[str] = mapped_column(Text, default="")
+    # [{id, text, text_en, explanation}] — the explanation is withheld from the
+    # question endpoint and only returned once the learner has answered.
+    options: Mapped[Any] = mapped_column(JSONB)
+    correct_answer: Mapped[str] = mapped_column(String(8))
+    key_line_fr: Mapped[str] = mapped_column(Text, default="")
+    key_line_en: Mapped[str] = mapped_column(Text, default="")
+    vocabulary: Mapped[Any] = mapped_column(JSONB, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ReadingAttempt(Base):
+    """A completed reading test, graded on the server."""
+    __tablename__ = "reading_attempts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    reading_attempt_id: Mapped[str] = mapped_column(
+        String(64), unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.user_id"), index=True)
+    test_number: Mapped[int] = mapped_column(Integer, index=True)
+    answers: Mapped[Any] = mapped_column(JSONB, default=dict)
+    score: Mapped[int] = mapped_column(Integer, default=0)
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    time_used_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True)
 
 
 class MockExamAttempt(Base):
@@ -1828,6 +1881,53 @@ async def seed_writing_themes(db) -> bool:
     return True
 
 
+async def seed_reading_questions(db) -> int:
+    """Sync the reading_questions table with the bank on disk.
+
+    The bank is static content that only ever changes with a deploy, and there
+    is no admin surface editing these rows, so the table is rebuilt from it
+    rather than diffed. Question ids are derived from test and position, so they
+    survive the rebuild and a recorded attempt keeps pointing at real questions.
+    """
+    problems = reading_bank.validate()
+    if problems:
+        # Refuse to seed a malformed bank: a question whose key names no option
+        # would reach a learner as an unanswerable exercise.
+        for p in problems[:10]:
+            log.error("Reading bank invalid: %s", p)
+        log.error("Reading bank has %d problem(s); skipping reading seed",
+                  len(problems))
+        return 0
+
+    rows = []
+    for number, questions in reading_bank.READING_TESTS.items():
+        for position, q in enumerate(questions, start=1):
+            rows.append(ReadingQuestion(
+                reading_question_id=f"rq_{number:02d}_{position:02d}",
+                test_number=number, position=position,
+                level=q["level"], band=q.get("band", ""),
+                doc_type=q.get("doc_type", ""), text=q["text"],
+                question_fr=q["question_fr"], question_en=q.get("question_en", ""),
+                options=q["options"], correct_answer=q["correct_answer"],
+                key_line_fr=q.get("key_line_fr", ""),
+                key_line_en=q.get("key_line_en", ""),
+                vocabulary=q.get("vocabulary", []),
+                is_active=True, created_at=now_utc()))
+    if not rows:
+        return 0
+
+    existing = await db.scalar(
+        select(func.count()).select_from(ReadingQuestion))
+    await db.execute(sa_delete(ReadingQuestion))
+    db.add_all(rows)
+    await db.commit()
+    log.info("Seeded %d reading questions across %d test(s) (was %d rows)",
+             len(rows),
+             sum(1 for qs in reading_bank.READING_TESTS.values() if qs),
+             existing or 0)
+    return len(rows)
+
+
 async def run_seeds():
     async with SessionLocal() as db:
         # Admin
@@ -1883,6 +1983,9 @@ async def run_seeds():
 
         # Writing themes + theme questions
         await seed_writing_themes(db)
+
+        # Compréhension écrite papers
+        await seed_reading_questions(db)
 
         # Seed SPEAKING themes (skill='speaking') separately so they can be
         # added even if writing themes already exist.
@@ -2757,6 +2860,180 @@ async def exam_attempts(user: User = Depends(get_current_user),
     res = await db.execute(
         select(MockExamAttempt).where(MockExamAttempt.user_id == user.user_id)
         .order_by(MockExamAttempt.created_at.desc()).limit(50))
+    return {"attempts": [_row_to_dict(a) for a in res.scalars().all()]}
+
+
+# ----------------------------------------------------------------------------
+# Compréhension écrite — numbered practice/test papers
+# ----------------------------------------------------------------------------
+class ReadingSubmitIn(BaseModel):
+    # Unanswered questions may be sent as null rather than omitted.
+    answers: Dict[str, Optional[str]] = Field(default_factory=dict)
+    time_used_seconds: int = Field(default=0, ge=0)
+
+
+class ReadingCheckIn(BaseModel):
+    picked: Optional[str] = None
+
+
+def _reading_question_public(q: ReadingQuestion) -> dict:
+    """The question as the learner sees it before answering.
+
+    Both the answer key and the per-option explanations are stripped: the
+    explanations name the correct option outright, so shipping them with the
+    paper would hand over the answers in DevTools.
+
+    The question itself is French only, like the real paper — the English
+    glosses stay in the bank and in question_en / text_en, but are not served
+    here, so a candidate reads the document without a translation beside it.
+    """
+    return {
+        "reading_question_id": q.reading_question_id,
+        "test_number": q.test_number,
+        "position": q.position,
+        "level": q.level,
+        "band": q.band,
+        "doc_type": q.doc_type,
+        "text": q.text,
+        "question_fr": q.question_fr,
+        "options": [{"id": o["id"], "text": o["text"]} for o in q.options],
+    }
+
+
+def _reading_correction(q: ReadingQuestion, picked: Optional[str]) -> dict:
+    """The full teaching payload, returned only once an answer is in.
+
+    The options stay French, as in the question; the explanations, the key
+    line's translation and the vocabulary glosses are the teaching layer and are
+    bilingual on purpose.
+    """
+    return {
+        "reading_question_id": q.reading_question_id,
+        "position": q.position,
+        "level": q.level,
+        "picked": picked,
+        "correct_answer": q.correct_answer,
+        "is_correct": picked == q.correct_answer,
+        "options": [{"id": o["id"], "text": o["text"],
+                     "explanation": o.get("explanation", ""),
+                     "is_correct": o["id"] == q.correct_answer}
+                    for o in q.options],
+        "key_line_fr": q.key_line_fr,
+        "key_line_en": q.key_line_en,
+        "vocabulary": q.vocabulary or [],
+    }
+
+
+@app.get("/api/reading/tests")
+async def reading_tests(db: AsyncSession = Depends(get_db)):
+    """The ten papers, with how many questions each currently holds.
+
+    Tests still being written are returned with question_count 0 so the page can
+    show them as coming soon rather than hiding them — the learner sees the full
+    programme either way.
+    """
+    res = await db.execute(
+        select(ReadingQuestion.test_number,
+               func.count(ReadingQuestion.id),
+               func.min(ReadingQuestion.level),
+               func.max(ReadingQuestion.level))
+        .where(ReadingQuestion.is_active == True)  # noqa: E712
+        .group_by(ReadingQuestion.test_number))
+    counts = {row[0]: {"question_count": row[1],
+                       "level_from": row[2], "level_to": row[3]}
+              for row in res.all()}
+    return {"tests": [
+        {"test_number": n,
+         "question_count": counts.get(n, {}).get("question_count", 0),
+         "level_from": counts.get(n, {}).get("level_from") or "A1",
+         "level_to": counts.get(n, {}).get("level_to") or "C2",
+         "is_ready": counts.get(n, {}).get("question_count", 0) > 0}
+        for n in sorted(reading_bank.READING_TESTS)]}
+
+
+@app.get("/api/reading/tests/{test_number}")
+async def reading_test_questions(test_number: int,
+                                 db: AsyncSession = Depends(get_db)):
+    if test_number not in reading_bank.READING_TESTS:
+        raise HTTPException(status_code=404, detail="Unknown test")
+    res = await db.execute(
+        select(ReadingQuestion)
+        .where(ReadingQuestion.test_number == test_number,
+               ReadingQuestion.is_active == True)  # noqa: E712
+        .order_by(ReadingQuestion.position.asc()))
+    questions = res.scalars().all()
+    if not questions:
+        raise HTTPException(status_code=503,
+                            detail="This test is not available yet")
+    return {"test_number": test_number,
+            "total": len(questions),
+            "questions": [_reading_question_public(q) for q in questions]}
+
+
+@app.post("/api/reading/questions/{reading_question_id}/check")
+async def reading_check_one(reading_question_id: str, body: ReadingCheckIn,
+                            db: AsyncSession = Depends(get_db)):
+    """Practice mode: mark a single question and explain it straight away.
+
+    Deliberately open to signed-out visitors — practice is the free surface, and
+    the answer key still never leaves the server unasked.
+    """
+    res = await db.execute(
+        select(ReadingQuestion).where(
+            ReadingQuestion.reading_question_id == reading_question_id,
+            ReadingQuestion.is_active == True))  # noqa: E712
+    q = res.scalar_one_or_none()
+    if not q:
+        raise HTTPException(status_code=404, detail="Question not found")
+    return {"correction": _reading_correction(q, body.picked)}
+
+
+@app.post("/api/reading/tests/{test_number}/submit")
+async def reading_submit(test_number: int, body: ReadingSubmitIn,
+                         user: User = Depends(get_current_user),
+                         db: AsyncSession = Depends(get_db)):
+    """Grade a whole paper, record it, and return every explanation."""
+    if test_number not in reading_bank.READING_TESTS:
+        raise HTTPException(status_code=404, detail="Unknown test")
+    res = await db.execute(
+        select(ReadingQuestion)
+        .where(ReadingQuestion.test_number == test_number,
+               ReadingQuestion.is_active == True)  # noqa: E712
+        .order_by(ReadingQuestion.position.asc()))
+    questions = res.scalars().all()
+    if not questions:
+        raise HTTPException(status_code=503,
+                            detail="This test is not available yet")
+
+    corrections = [_reading_correction(q, body.answers.get(q.reading_question_id))
+                   for q in questions]
+    score = sum(1 for c in corrections if c["is_correct"])
+    # Per-level breakdown: a candidate who is solid to B1 and collapses at B2
+    # learns far more from that shape than from a bare total.
+    by_level = {}
+    for c in corrections:
+        stat = by_level.setdefault(c["level"], {"correct": 0, "total": 0})
+        stat["total"] += 1
+        stat["correct"] += 1 if c["is_correct"] else 0
+
+    attempt = ReadingAttempt(
+        reading_attempt_id=new_id("rda"), user_id=user.user_id,
+        test_number=test_number, answers=body.answers, score=score,
+        total=len(questions), time_used_seconds=body.time_used_seconds,
+        created_at=now_utc())
+    db.add(attempt)
+    await db.commit()
+    streak = await update_streak(db, user.user_id)
+    return {"score": score, "total": len(questions), "by_level": by_level,
+            "corrections": corrections, "streak": streak}
+
+
+@app.get("/api/reading/attempts")
+async def reading_attempts(user: User = Depends(get_current_user),
+                           db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(ReadingAttempt).where(ReadingAttempt.user_id == user.user_id)
+        .order_by(ReadingAttempt.created_at.desc()).limit(50))
     return {"attempts": [_row_to_dict(a) for a in res.scalars().all()]}
 
 
