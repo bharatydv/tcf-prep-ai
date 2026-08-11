@@ -1433,6 +1433,25 @@ missed_questions - "What more could you have asked?". List 2 to 5 questions, WOR
 
 You are grading a transcript, so do NOT comment on pronunciation or accent."""
 
+INTERVIEW_GRADER_SYSTEM = """You are a certified TCF Canada examiner grading Tâche 1 (Entretien dirigé) - a guided interview in which the EXAMINER asks and the CANDIDATE answers questions about themselves: who they are, their studies or work, their daily life, their interests and their plans.
+
+You receive the BRIEF and the full DIALOGUE. Grade ONLY the candidate's turns. The transcript comes from speech recognition, so judge charitably where a word is clearly a transcription artifact rather than a learner error.
+
+Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
+{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate answered what was asked", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"]}
+
+This task is a PRESENTATION, not an interaction. The candidate is NOT expected to ask questions, and must never be penalised for not asking any. Weigh instead:
+1. ANSWERING - did the candidate actually answer each question, rather than talking past it?
+2. DEVELOPMENT - are the answers developed with a reason, an example or a detail, or are they bare one-liners?
+3. RANGE - varied tenses (present, past, future and plans), connectors, and vocabulary beyond the most basic.
+4. FLUENCY OF DISCOURSE - does the answer hold together, or is it a list of disconnected sentences?
+
+CEFR scoring (overall_score 0-100, tcf_level one of A1,A2,B1,B2,C1,C2):
+- A1 (5-19) A2 (20-39) B1 (40-54) B2 (55-69) C1 (70-84) C2 (85-100).
+Cap the score at B1 if the candidate answered only in short bare phrases with no development.
+
+suggestions: 3-5 concrete English tips for THIS interview. vocabulary_suggestions: French words and phrases that would have made the self-presentation richer. You are grading a transcript, so do NOT comment on pronunciation or accent."""
+
 # Keeps one exchange bounded so a runaway session cannot grow the prompt forever.
 MAX_DIALOGUE_TURNS = 40
 
@@ -1465,9 +1484,19 @@ async def interaction_reply(consigne: str, history: list, db=None) -> str:
     return reply[:600]
 
 
-async def grade_interaction(consigne: str, history: list, db=None) -> dict:
-    """Grade a finished Tache 2 dialogue, returning the same shape as
-    analyze_speaking_with_ai so the existing result UI renders unchanged."""
+async def grade_interaction(consigne: str, history: list, db=None,
+                            task_type: Optional[int] = 2) -> dict:
+    """Grade a finished spoken dialogue, returning the same shape as
+    analyze_speaking_with_ai so the existing result UI renders unchanged.
+
+    `task_type` picks the examiner. Tâche 1 is a guided interview in which the
+    candidate ANSWERS questions about themselves; tâche 2 is a roleplay in which
+    they ASK them. Grading both with the interaction examiner — as this did
+    until now — scored a tâche 1 self-presentation on "did the candidate ask
+    questions", which it is not supposed to contain, and capped a good answer at
+    B1. Pass None for open-ended practice, which is not an exam task and so
+    takes no exam caps.
+    """
     said = [t for t in history if t.get("role") == "candidate" and str(t.get("text", "")).strip()]
     if not said:
         # Handing in before saying anything is a normal thing to do — the
@@ -1484,7 +1513,9 @@ async def grade_interaction(consigne: str, history: list, db=None) -> dict:
                                       "question."),
                 "suggestions": [], "missed_questions": []}
     provider = (await get_provider(db, "speaking_grader_provider")) if db is not None else SPEAKING_GRADER_PROVIDER
-    raw = await _grade_with_provider(provider, INTERACTION_GRADER_SYSTEM,
+    grader = (INTERVIEW_GRADER_SYSTEM if task_type == 1
+              else INTERACTION_GRADER_SYSTEM)
+    raw = await _grade_with_provider(provider, grader,
                                      _render_dialogue(history, consigne))
     if raw is None:
         return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
@@ -1494,9 +1525,13 @@ async def grade_interaction(consigne: str, history: list, db=None) -> dict:
         _, _, model = _grader_backend(provider)
         result["ai_provider"] = provider
         result["ai_model"] = model
-        # Tâche 2 is the interaction task; grade only what the candidate said.
+        # Grade only what the candidate said, under their own tâche's caps.
         spoken = " ".join(str(t.get("text", "")) for t in said)
-        return apply_speaking_caps(result, spoken, 2)
+        if task_type != 2:
+            # "What more could you have asked?" is a tâche 2 idea: there is
+            # nothing to ask in a self-presentation or in free practice.
+            result["missed_questions"] = []
+        return apply_speaking_caps(result, spoken, task_type)
     except Exception as exc:  # noqa: BLE001
         log.warning("Could not parse interaction JSON (%s): %s", provider, exc)
         return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
@@ -3196,7 +3231,11 @@ async def speaking_converse_grade(body: ConverseGradeIn,
     else:
         user = await reserve_credit(db, user)
     history = [t.model_dump() for t in body.history]
-    analysis = await grade_interaction(body.consigne, history, db=db)
+    # The mode was validated on the way in and then thrown away, so a tâche 1
+    # interview reached the tâche 2 examiner. Carry it through.
+    task_type = {"tache1": 1, "tache2": 2}.get(body.mode)
+    analysis = await grade_interaction(body.consigne, history, db=db,
+                                       task_type=task_type)
     if analysis.get("ai_unavailable"):
         if not free_mode:
             await refund_credit(db, user)
