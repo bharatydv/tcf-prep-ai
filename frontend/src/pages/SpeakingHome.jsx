@@ -15,7 +15,7 @@ export default function SpeakingHome() {
   const startPractice = () => navigate('/speaking/tasks');
   const startTest = () => {
     if (!user) return navigate('/login');
-    navigate('/exam-simulator');
+    navigate('/speaking/test');
   };
 
   return (

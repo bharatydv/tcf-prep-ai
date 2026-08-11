@@ -750,6 +750,21 @@
     "writeNew": "écrivez un nouveau texte",
     "yourSentence": "Votre phrase (avec erreur)"
   },
+  "sexam": {
+    "title": "Mode examen — Expression orale",
+    "sub": "Vingt épreuves complètes. Chacune propose les trois tâches dans l'ordre de l'examen, avec les durées officielles.",
+    "badgeTimed": "Durées réelles de l'examen",
+    "badgeFree": "Gratuit — aucun crédit utilisé",
+    "testMode": "Mode examen",
+    "setN": "Sujet d'examen {{n}}",
+    "progress": "{{done}} tâche(s) sur {{total}} terminée(s)",
+    "startTask": "Commencer cette tâche",
+    "again": "Recommencer",
+    "metaT1": "2 min · sans préparation",
+    "metaT2": "2 min de préparation · 3 min 30 de parole",
+    "metaT3": "2 min de préparation · 2 min 30 de parole",
+    "footnote": "Les tâches 1 et 2 sont des jeux de rôle en direct. La tâche 3 est un monologue préparé et ouvre l'enregistreur, qui gère lui-même le temps de préparation."
+  },
   "sim": {
     "allErrors": "Toutes les erreurs par catégorie",
     "backToPractice": "Retour à l'entraînement",

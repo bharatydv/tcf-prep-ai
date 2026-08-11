@@ -8,6 +8,7 @@ import SpeakingHome from './pages/SpeakingHome';
 import SpeakingTasks from './pages/SpeakingTasks';
 import SpeakingThemes from './pages/SpeakingThemes';
 import SpeakingRecord from './pages/SpeakingRecord';
+import SpeakingExam from './pages/SpeakingExam';
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -56,6 +57,8 @@ export default function App() {
           <Route path="/speaking/tasks" element={<SpeakingTasks />} />
           <Route path="/speaking/themes" element={<SpeakingThemes />} />
           <Route path="/speaking/record" element={<SpeakingRecord />} />
+          {/* Test Mode: the three tâches of one sitting, in exam order. */}
+          <Route path="/speaking/test" element={<SpeakingExam />} />
           <Route path="/exam/:examType" element={<MockExam />} />
           <Route path="/recent-topics" element={<RecentTopics />} />
           <Route path="/recent-topics/:topicId" element={<RecentTopicDetail />} />

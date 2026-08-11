@@ -37,6 +37,7 @@ from sqlalchemy.orm import (
 )
 
 import reading_bank
+import exam_sets
 
 load_dotenv()
 
@@ -2904,6 +2905,40 @@ async def exam_attempts(user: User = Depends(get_current_user),
         select(MockExamAttempt).where(MockExamAttempt.user_id == user.user_id)
         .order_by(MockExamAttempt.created_at.desc()).limit(50))
     return {"attempts": [_row_to_dict(a) for a in res.scalars().all()]}
+
+
+# ----------------------------------------------------------------------------
+# Expression orale — Test Mode: the three tâches of one sitting, in order
+# ----------------------------------------------------------------------------
+@app.get("/api/speaking/exam-sets")
+async def speaking_exam_sets():
+    """The numbered sittings, with just enough to render the chooser.
+
+    Public and unmetered: the exam itself is free, so there is nothing to gate
+    here either. Grading each tâche still goes through the existing speaking
+    endpoints, which is where any charging decision lives.
+    """
+    return {"sets": [
+        {"set_number": n,
+         "task2_theme": s["task2"]["theme"],
+         "task3_theme": s["task3"]["theme"],
+         "task3_question": s["task3"]["question"]}
+        for n, s in ((i, exam_sets.speaking_set(i))
+                     for i in range(1, len(exam_sets.SPEAKING_EXAM_SETS) + 1))]}
+
+
+@app.get("/api/speaking/exam-sets/{set_number}")
+async def speaking_exam_set(set_number: int):
+    if not 1 <= set_number <= len(exam_sets.SPEAKING_EXAM_SETS):
+        raise HTTPException(status_code=404, detail="Unknown exam set")
+    spec = exam_sets.speaking_set(set_number)
+    # The official timings travel with the paper so the runner never has to
+    # keep its own copy of them.
+    spec["timings"] = {str(n): {"prep_seconds": s["prep_seconds"],
+                                "speak_seconds": s["speak_seconds"],
+                                "name": s["name"]}
+                       for n, s in SPEAKING_TASKS.items()}
+    return spec
 
 
 # ----------------------------------------------------------------------------
