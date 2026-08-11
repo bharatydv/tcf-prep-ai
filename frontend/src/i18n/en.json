@@ -241,11 +241,14 @@
   },
   "common": {
     "back": "Back",
+    "comingSoon": "Coming soon",
     "dashboard": "Dashboard",
     "disclaimerLevels": "This is a practice tool, not the official TEF/TCF exam. Scores and levels are estimates to guide your preparation.",
     "disclaimerScores": "This is a practice tool, not the official TEF/TCF exam. Scores are estimates to guide your preparation.",
     "optional": "optional",
-    "pro": "Pro"
+    "pro": "Pro",
+    "soonReading": "Practise reading",
+    "soonWriting": "Practise writing"
   },
   "conv": {
     "agentThinking": "The agent is thinking…",
@@ -547,7 +550,9 @@
     "chooseSub": "Practice audio passages one at a time, or sit a full timed listening test.",
     "chooseTitle": "Listening — choose how you want to work",
     "practiceBody": "Listen to audio passages one at a time and check your answers instantly.",
-    "practiceBullet": "Audio + multiple-choice questions"
+    "practiceBullet": "Audio + multiple-choice questions",
+    "soonBody": "We are recording the audio and writing the question banks. Writing, Speaking and Reading are ready in the meantime.",
+    "soonTitle": "Listening is coming soon"
   },
   "mock": {
     "answersInGreen": "The correct answers are shown in green below.",
@@ -561,6 +566,8 @@
     "reading": "Reading comprehension",
     "restart": "Start over",
     "score": "Score: {{score}} / {{total}}",
+    "soonBody": "Full timed mock papers are being prepared. You can already sit complete exam sets in Writing, Speaking and Reading.",
+    "soonTitle": "Mock exams are coming soon",
     "transcriptNote": "Transcripts stand in for the audio in this practice version.",
     "unknownType": "Unknown exam type."
   },
