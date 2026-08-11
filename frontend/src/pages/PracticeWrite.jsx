@@ -10,6 +10,14 @@ import { useAuth } from '../context/AuthContext';
 import { AnalysisProgress, BackLink, CreditsBadge, WordCountBar, streamAnalysis } from '../components/shared';
 import { useT } from '../i18n';
 
+/* What the grader is told the candidate was asked to write about.
+   A tâche 3 subject is incomplete without its two documents: the exam asks the
+   candidate to compare both viewpoints, and the grader cannot judge whether
+   they did so from the consigne alone. */
+const topicText = (q) => (q.doc_1
+  ? `${q.title}\n\n${q.prompt_text}\n\nDOCUMENT 1\n${q.doc_1}\n\nDOCUMENT 2\n${q.doc_2}`
+  : q.prompt_text);
+
 export default function PracticeWrite() {
   const { user, refreshUser } = useAuth();
   const t = useT();
@@ -69,7 +77,7 @@ export default function PracticeWrite() {
         if (navState?.ownQuestion || navState?.text) return;
         setActivePrompt(null);
         setActiveTopicId(qs[0].question_id);
-        setOwnQuestion(qs[0].prompt_text);
+        setOwnQuestion(topicText(qs[0]));
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -91,7 +99,7 @@ export default function PracticeWrite() {
     if (!user) return navigate('/login');
     setActivePrompt(null);
     setActiveTopicId(q.question_id);
-    setOwnQuestion(q.prompt_text);
+    setOwnQuestion(topicText(q));
     setTimeout(() => taRef.current?.focus(), 50);
   };
 
@@ -155,6 +163,9 @@ export default function PracticeWrite() {
   // What the learner is writing about: their own topic, or the selected test's consigne.
   const question = freeMode ? ownQuestion.trim() : (activePrompt?.description || '');
   const activeTopicIndex = topics.findIndex((q) => q.question_id === activeTopicId);
+  // Tâche 3 subjects carry the exam's two documents and get their own layout.
+  const activeTopic = activeTopicIndex >= 0 ? topics[activeTopicIndex] : null;
+  const docSubject = freeMode && activeTopic?.doc_1 ? activeTopic : null;
 
   return (
     <main className="overflow-x-clip bg-white">
@@ -197,12 +208,14 @@ export default function PracticeWrite() {
                       }`}>
                         {i + 1}
                       </span>
+                      {/* A tâche 3 subject is named; showing "Sujet 7" over a
+                          clipped document would tell the learner nothing. */}
                       <span className="min-w-0">
                         <span className="block font-heading text-sm font-bold text-gray-900">
-                          {t('write.topicN', { n: i + 1 })}
+                          {q.title || t('write.topicN', { n: i + 1 })}
                         </span>
                         <span className="mt-0.5 line-clamp-2 block text-xs leading-snug text-gray-500">
-                          {q.prompt_text}
+                          {q.doc_1 || q.prompt_text}
                         </span>
                       </span>
                     </button>
@@ -254,7 +267,32 @@ export default function PracticeWrite() {
               <CreditsBadge />
             </div>
 
-            {question && (
+            {docSubject ? (
+              /* The exam paper shows the consigne, then two documents defending
+                 opposite positions. They are laid out side by side and are not
+                 counted in the 120-180 words, which the note below spells out —
+                 learners otherwise assume the counter includes them. */
+              <div className="mb-4 rounded-2xl border border-violet-100 bg-violet-50/40 p-4" data-testid="question-display">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-primary">
+                  {t('write.topicN', { n: activeTopicIndex + 1 })}
+                </p>
+                <p className="mt-1 font-heading text-base font-bold text-gray-900">{docSubject.title}</p>
+                <p className="mt-1 text-sm leading-relaxed text-gray-800">{docSubject.prompt_text}</p>
+
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {[docSubject.doc_1, docSubject.doc_2].map((doc, i) => (
+                    <div key={i} className="rounded-xl border border-violet-100 bg-white p-3" data-testid={`document-${i + 1}`}>
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-primary">
+                        {t('write.documentN', { n: i + 1 })}
+                      </p>
+                      <p className="mt-1 text-xs leading-relaxed text-gray-700">{doc}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <p className="mt-3 text-[11px] italic text-gray-500">{t('write.docsNotCounted')}</p>
+              </div>
+            ) : question && (
               <div className="mb-4 rounded-2xl border border-violet-100 bg-violet-50/40 p-4" data-testid="question-display">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-primary">
                   {!freeMode ? activePrompt.title

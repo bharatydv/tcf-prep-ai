@@ -974,6 +974,8 @@
     "recentTopics": "Recent topics",
     "seeAll": "See all",
     "taskMeta": "· {{min}}–{{max}} words · ~{{minutes}} min",
+    "docsNotCounted": "The two documents are not counted in your 120–180 words. Write one continuous response.",
+    "documentN": "Document {{n}}",
     "testN": "Test {{n}}",
     "testsList": "Writing tests",
     "topicN": "Topic {{n}}",

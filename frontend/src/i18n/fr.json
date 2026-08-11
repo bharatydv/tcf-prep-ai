@@ -974,6 +974,8 @@
     "recentTopics": "Sujets récents",
     "seeAll": "Tout voir",
     "taskMeta": "· {{min}}–{{max}} mots · ~{{minutes}} min",
+    "docsNotCounted": "Les deux documents ne sont pas comptés dans vos 120 à 180 mots. Rédigez une seule réponse continue.",
+    "documentN": "Document {{n}}",
     "testN": "Test {{n}}",
     "testsList": "Tests d'écrit",
     "topicN": "Sujet {{n}}",
