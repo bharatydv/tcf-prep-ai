@@ -751,19 +751,24 @@
     "yourSentence": "Votre phrase (avec erreur)"
   },
   "sexam": {
-    "title": "Mode examen — Expression orale",
-    "sub": "Vingt épreuves complètes. Chacune propose les trois tâches dans l'ordre de l'examen, avec les durées officielles.",
-    "badgeTimed": "Durées réelles de l'examen",
-    "badgeFree": "Gratuit — aucun crédit utilisé",
-    "testMode": "Mode examen",
-    "setN": "Sujet d'examen {{n}}",
-    "progress": "{{done}} tâche(s) sur {{total}} terminée(s)",
-    "startTask": "Commencer cette tâche",
     "again": "Recommencer",
+    "anotherSet": "Essayer un autre sujet",
+    "badgeFree": "Gratuit — aucun crédit utilisé",
+    "badgeTimed": "Durées réelles de l'examen",
+    "doneHint": "Votre score est la moyenne des trois tâches, comme l'examen réel qui donne un seul résultat d'expression orale.",
+    "doneSub": "Niveaux sur les trois tâches : {{levels}}",
+    "doneTitle": "Épreuve terminée",
+    "footnote": "Les tâches 1 et 2 sont des jeux de rôle en direct. La tâche 3 est un monologue préparé et ouvre l'enregistreur, qui gère lui-même le temps de préparation.",
+    "locked": "Terminez d'abord la tâche {{n}} — l'examen se déroule dans l'ordre.",
     "metaT1": "2 min · sans préparation",
     "metaT2": "2 min de préparation · 3 min 30 de parole",
     "metaT3": "2 min de préparation · 2 min 30 de parole",
-    "footnote": "Les tâches 1 et 2 sont des jeux de rôle en direct. La tâche 3 est un monologue préparé et ouvre l'enregistreur, qui gère lui-même le temps de préparation."
+    "progress": "{{done}} tâche(s) sur {{total}} terminée(s)",
+    "setN": "Sujet d'examen {{n}}",
+    "startTask": "Commencer cette tâche",
+    "sub": "Vingt épreuves complètes. Chacune propose les trois tâches dans l'ordre de l'examen, avec les durées officielles.",
+    "testMode": "Mode examen",
+    "title": "Mode examen — Expression orale"
   },
   "sim": {
     "allErrors": "Toutes les erreurs par catégorie",

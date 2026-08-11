@@ -117,7 +117,7 @@ export default function Combinations() {
               combo={combo}
               open={openId === combo.id}
               onToggle={() => setOpenId(openId === combo.id ? null : combo.id)}
-              onSimulate={() => navigate('/exam-simulator')}
+              onSimulate={() => navigate('/practice/simulator')}
             />
           ))}
         </div>

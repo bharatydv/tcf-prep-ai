@@ -15,7 +15,7 @@ export default function Practice() {
   const startPractice = () => navigate('/practice/tasks');
   const startTest = () => {
     if (!user) return navigate('/login');
-    navigate('/exam-simulator');
+    navigate('/practice/simulator');
   };
 
   return (

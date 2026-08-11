@@ -75,8 +75,12 @@ export default function App() {
           <Route path="/reading/practice/:testNumber" element={<ReadingTest />} />
           <Route path="/reading/test/:testNumber" element={<ReadingTest />} />
           <Route path="/listening" element={<ListeningHome />} />
+          {/* "Exam simulator" now means the SPEAKING exam. The writing
+              simulator keeps its own path so the writing Test Mode still
+              reaches a writing paper. */}
+          <Route path="/exam-simulator" element={<SpeakingExam />} />
           <Route
-            path="/exam-simulator"
+            path="/practice/simulator"
             element={<ProtectedRoute><ExamSimulator /></ProtectedRoute>}
           />
           <Route path="/tef-tcf-writing-guide" element={<TefTcfWritingGuide />} />

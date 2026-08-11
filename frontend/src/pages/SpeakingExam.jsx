@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ClockCountdown, CheckCircle, CaretRight, Microphone, Handshake,
-  Scales, ArrowClockwise,
+  Scales, ArrowClockwise, Lock,
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, errMsg } from '../lib/api';
@@ -139,6 +139,14 @@ export default function SpeakingExam() {
       theme: paper.task3.theme, meta: t('sexam.metaT3') },
   ];
   const done = stages.filter((s) => results[s.n]).length;
+  // A real sitting runs 1 → 2 → 3 with no skipping ahead, so a tâche unlocks
+  // only once the one before it has been answered.
+  const unlocked = (n) => n === 1 || Boolean(results[n - 1]);
+  const finished = done === 3;
+  const levels = stages.map((s) => results[s.n]?.tcf_level).filter(Boolean);
+  const meanScore = finished
+    ? Math.round(stages.reduce((sum, s) => sum + (results[s.n]?.overall_score || 0), 0) / 3)
+    : null;
 
   return (
     <main className="overflow-x-clip bg-white">
@@ -185,12 +193,16 @@ export default function SpeakingExam() {
                           <ArrowClockwise size={12} weight="bold" className="mr-1 inline" />{t('sexam.again')}
                         </button>
                       </div>
-                    ) : (
+                    ) : unlocked(s.n) ? (
                       <button onClick={() => startTask(s.n)}
                         data-testid={`start-task-${s.n}`}
                         className="btn-primary mt-3 !py-1.5 text-sm !bg-gradient-to-r !from-pink-600 !to-fuchsia-600">
                         <Microphone size={15} weight="fill" /> {t('sexam.startTask')}
                       </button>
+                    ) : (
+                      <p className="mt-3 flex items-center gap-1.5 text-xs text-gray-400">
+                        <Lock size={13} weight="fill" /> {t('sexam.locked', { n: s.n - 1 })}
+                      </p>
                     )}
                   </div>
                 </div>
@@ -198,6 +210,22 @@ export default function SpeakingExam() {
             );
           })}
         </div>
+
+        {finished && (
+          <div className="mt-5 overflow-hidden rounded-3xl border border-green-200 shadow-soft" data-testid="exam-summary">
+            <div className="bg-gradient-to-r from-green-600 to-emerald-600 px-6 py-5 text-white">
+              <p className="text-xs font-bold uppercase tracking-wide text-white/80">{t('sexam.doneTitle')}</p>
+              <p className="mt-1 font-heading text-3xl font-extrabold">{meanScore}<span className="text-xl text-white/70">/100</span></p>
+              <p className="mt-1 text-sm text-white/90">{t('sexam.doneSub', { levels: levels.join(' · ') })}</p>
+            </div>
+            <div className="bg-white px-6 py-4">
+              <p className="text-xs leading-relaxed text-gray-500">{t('sexam.doneHint')}</p>
+              <button onClick={() => setParams({})} className="btn-outline mt-3 text-sm">
+                <ArrowClockwise size={15} weight="bold" /> {t('sexam.anotherSet')}
+              </button>
+            </div>
+          </div>
+        )}
 
         <p className="mt-6 text-center text-xs leading-relaxed text-gray-400">{t('sexam.footnote')}</p>
       </section>

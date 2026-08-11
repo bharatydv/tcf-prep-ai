@@ -751,19 +751,24 @@
     "yourSentence": "Your sentence (with the mistake)"
   },
   "sexam": {
-    "title": "Speaking Test Mode",
-    "sub": "Twenty complete sittings. Each gives you the three tâches in exam order, with the official timings.",
-    "badgeTimed": "Real exam timings",
-    "badgeFree": "Free — no credits used",
-    "testMode": "Test Mode",
-    "setN": "Exam set {{n}}",
-    "progress": "{{done}} of {{total}} tâches completed",
-    "startTask": "Start this tâche",
     "again": "Do it again",
+    "anotherSet": "Try another exam set",
+    "badgeFree": "Free — no credits used",
+    "badgeTimed": "Real exam timings",
+    "doneHint": "Your score is the mean of the three tâches, as the real exam reports one Expression orale result.",
+    "doneSub": "Levels across the three tâches: {{levels}}",
+    "doneTitle": "Sitting complete",
+    "footnote": "Tâches 1 and 2 are live roleplays. Tâche 3 is a prepared monologue and opens the recorder, which runs its own preparation timer.",
+    "locked": "Finish tâche {{n}} first — the exam runs in order.",
     "metaT1": "2 min · no preparation",
     "metaT2": "2 min preparation · 3 min 30 speaking",
     "metaT3": "2 min preparation · 2 min 30 speaking",
-    "footnote": "Tâches 1 and 2 are live roleplays. Tâche 3 is a prepared monologue and opens the recorder, which runs its own preparation timer."
+    "progress": "{{done}} of {{total}} tâches completed",
+    "setN": "Exam set {{n}}",
+    "startTask": "Start this tâche",
+    "sub": "Twenty complete sittings. Each gives you the three tâches in exam order, with the official timings.",
+    "testMode": "Test Mode",
+    "title": "Speaking Test Mode"
   },
   "sim": {
     "allErrors": "All errors by category",
