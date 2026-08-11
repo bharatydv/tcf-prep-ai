@@ -1883,6 +1883,109 @@ SEED_EXAM_QUESTIONS = [
                     {"id": "d", "text": "De préparer un document"}],
         "correct_answer": "c",
     },
+    # --- Compréhension orale, climbing A1 → C1 -------------------------
+    # The audio is not recorded yet, so each item carries the transcript the
+    # learner reads instead; mock.transcriptNote says so on the page.
+    {
+        "exam_type": "oral-comprehension",
+        "text": "(Transcription) « Le magasin ferme dans quinze minutes. Merci de vous diriger vers les caisses. »",
+        "question": "Que doivent faire les clients ?",
+        "options": [{"id": "a", "text": "Aller payer"},
+                    {"id": "b", "text": "Revenir demain"},
+                    {"id": "c", "text": "Attendre quinze minutes"},
+                    {"id": "d", "text": "Sortir sans payer"}],
+        "correct_answer": "a",
+    },
+    {
+        "exam_type": "oral-comprehension",
+        "text": "(Transcription) « Allô, c'est le garage. Votre voiture est prête, vous pouvez venir la chercher avant 18 h. »",
+        "question": "Pourquoi le garage appelle-t-il ?",
+        "options": [{"id": "a", "text": "Pour annoncer un retard"},
+                    {"id": "b", "text": "Pour dire que la voiture est réparée"},
+                    {"id": "c", "text": "Pour demander de l'argent"},
+                    {"id": "d", "text": "Pour proposer un rendez-vous"}],
+        "correct_answer": "b",
+    },
+    {
+        "exam_type": "oral-comprehension",
+        "text": "(Transcription) « Pardon, vous savez où est la poste ? — Oui, prenez la deuxième rue à droite, c'est juste après la pharmacie. »",
+        "question": "Où se trouve la poste ?",
+        "options": [{"id": "a", "text": "Avant la pharmacie"},
+                    {"id": "b", "text": "Dans la première rue"},
+                    {"id": "c", "text": "Après la pharmacie"},
+                    {"id": "d", "text": "À gauche"}],
+        "correct_answer": "c",
+    },
+    {
+        "exam_type": "oral-comprehension",
+        "text": "(Transcription) « Je te préviens, il pleut beaucoup ce matin. Prends un parapluie si tu sors. »",
+        "question": "Que conseille cette personne ?",
+        "options": [{"id": "a", "text": "De rester à la maison"},
+                    {"id": "b", "text": "De partir plus tôt"},
+                    {"id": "c", "text": "De prendre un parapluie"},
+                    {"id": "d", "text": "De prendre le bus"}],
+        "correct_answer": "c",
+    },
+    {
+        "exam_type": "oral-comprehension",
+        "text": "(Transcription) « Votre commande sera livrée mardi entre 9 h et 13 h. Si personne n'est présent, elle sera déposée au point relais. »",
+        "question": "Que se passe-t-il si le client est absent ?",
+        "options": [{"id": "a", "text": "La commande est annulée"},
+                    {"id": "b", "text": "Elle est laissée au point relais"},
+                    {"id": "c", "text": "Elle est livrée mercredi"},
+                    {"id": "d", "text": "Il faut payer un supplément"}],
+        "correct_answer": "b",
+    },
+    {
+        "exam_type": "oral-comprehension",
+        "text": "(Transcription) « Nous recherchons un serveur pour la saison d'été. Aucune expérience n'est demandée, mais il faut être disponible le week-end. »",
+        "question": "Quelle est la condition pour ce poste ?",
+        "options": [{"id": "a", "text": "Avoir de l'expérience"},
+                    {"id": "b", "text": "Parler deux langues"},
+                    {"id": "c", "text": "Travailler le week-end"},
+                    {"id": "d", "text": "Habiter sur place"}],
+        "correct_answer": "c",
+    },
+    {
+        "exam_type": "oral-comprehension",
+        "text": "(Transcription) « En raison de travaux sur la voie, le train de 8 h 12 est supprimé. Un autocar assure la liaison, départ devant la gare. »",
+        "question": "Comment les voyageurs peuvent-ils partir ?",
+        "options": [{"id": "a", "text": "En prenant un autre train"},
+                    {"id": "b", "text": "En autocar devant la gare"},
+                    {"id": "c", "text": "Ils ne peuvent pas partir"},
+                    {"id": "d", "text": "En taxi remboursé"}],
+        "correct_answer": "b",
+    },
+    {
+        "exam_type": "oral-comprehension",
+        "text": "(Transcription) « Franchement, le film était magnifique visuellement, mais l'histoire m'a laissée complètement indifférente. Je ne le reverrais pas. »",
+        "question": "Quelle est l'opinion de cette personne ?",
+        "options": [{"id": "a", "text": "Elle a tout aimé"},
+                    {"id": "b", "text": "Elle a détesté les images"},
+                    {"id": "c", "text": "Elle a aimé l'image mais pas l'histoire"},
+                    {"id": "d", "text": "Elle veut le revoir"}],
+        "correct_answer": "c",
+    },
+    {
+        "exam_type": "oral-comprehension",
+        "text": "(Transcription) « On a testé la semaine de quatre jours pendant six mois. Les résultats sont stables, mais les journées sont devenues nettement plus denses. »",
+        "question": "Quel bilan cette personne tire-t-elle ?",
+        "options": [{"id": "a", "text": "Les résultats ont baissé"},
+                    {"id": "b", "text": "Le travail est plus intense malgré des résultats stables"},
+                    {"id": "c", "text": "L'essai a été abandonné"},
+                    {"id": "d", "text": "Les employés travaillent moins"}],
+        "correct_answer": "b",
+    },
+    {
+        "exam_type": "oral-comprehension",
+        "text": "(Transcription) « Ce que l'on reproche à ce dispositif, ce n'est pas son coût, c'est qu'il n'a jamais été évalué. On dépense sans savoir ce que l'on obtient. »",
+        "question": "Que critique cette personne ?",
+        "options": [{"id": "a", "text": "Le prix du dispositif"},
+                    {"id": "b", "text": "L'absence d'évaluation"},
+                    {"id": "c", "text": "Le nombre de bénéficiaires"},
+                    {"id": "d", "text": "La lenteur de sa mise en place"}],
+        "correct_answer": "b",
+    },
 ]
 
 
@@ -2053,12 +2156,23 @@ async def run_seeds():
         # Exam questions
         count = await db.scalar(
             select(func.count()).select_from(ExamQuestion))
-        if not count:
+        # Seed whenever the bank has grown, not only when the table is empty.
+        # Seeding on empty alone meant every question added after the first
+        # deploy stayed on disk and never reached a learner.
+        if (count or 0) < len(SEED_EXAM_QUESTIONS):
+            res = await db.execute(select(ExamQuestion.question))
+            already = {row[0] for row in res.all()}
+            added = 0
             for q in SEED_EXAM_QUESTIONS:
+                if q["question"] in already:
+                    continue
                 db.add(ExamQuestion(
                     question_id=new_id("q"), created_at=now_utc(),
                     is_active=True, **q))
+                added += 1
             await db.commit()
+            if added:
+                log.info("Seeded %d exam question(s)", added)
 
         # Writing themes + theme questions
         await seed_writing_themes(db)
@@ -2470,10 +2584,31 @@ async def get_submission(submission_id: str,
 # ----------------------------------------------------------------------------
 # Exam simulator
 # ----------------------------------------------------------------------------
+@app.get("/api/simulator/sets")
+async def simulator_sets():
+    """The numbered writing sittings, for the chooser."""
+    return {"sets": [
+        {"set_number": n,
+         "task2": exam_sets.WRITING_EXAM_SETS[n - 1][1],
+         "task3_preview": exam_sets.WRITING_EXAM_SETS[n - 1][2]["doc_1"][:160]}
+        for n in range(1, len(exam_sets.WRITING_EXAM_SETS) + 1)]}
+
+
 @app.get("/api/simulator/start")
-async def simulator_start(user: User = Depends(get_current_user),
+async def simulator_start(set_number: Optional[int] = None,
+                          user: User = Depends(get_current_user),
                           db: AsyncSession = Depends(get_db)):
-    """Return one random active prompt per task."""
+    """The three tâches of one sitting.
+
+    With ?set_number=N it returns that fixed paper, so a set means the same
+    three tâches every time and two attempts at it can be compared. Without it
+    the old behaviour stands — one random prompt per tâche — which is kept only
+    so existing links do not break.
+    """
+    if set_number is not None:
+        if not 1 <= set_number <= len(exam_sets.WRITING_EXAM_SETS):
+            raise HTTPException(status_code=404, detail="Unknown exam set")
+        return exam_sets.writing_set(set_number)
     tasks = {}
     for t in (1, 2, 3):
         res = await db.execute(

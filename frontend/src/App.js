@@ -75,6 +75,11 @@ export default function App() {
           <Route path="/reading/practice/:testNumber" element={<ReadingTest />} />
           <Route path="/reading/test/:testNumber" element={<ReadingTest />} />
           <Route path="/listening" element={<ListeningHome />} />
+          {/* ListeningHome linked to these two, but neither route existed, so
+              both buttons fell through the catch-all to the landing page. The
+              listening exam is the oral-comprehension mock. */}
+          <Route path="/listening/practice" element={<Navigate to="/exam/oral-comprehension" replace />} />
+          <Route path="/listening/test" element={<Navigate to="/exam/oral-comprehension" replace />} />
           {/* "Exam simulator" now means the SPEAKING exam. The writing
               simulator keeps its own path so the writing Test Mode still
               reaches a writing paper. */}
