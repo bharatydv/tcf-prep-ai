@@ -58,6 +58,7 @@ export default function ExamSimulator() {
       if (left <= 0) { localStorage.removeItem(DRAFT_KEY); return; }
       setTexts(saved.texts || { 1: '', 2: '', 3: '' });
       setCurrent(saved.current || 1);
+      if (saved.setNumber) setSetNumber(saved.setNumber);
       setSeconds(left);
       setPhase('exam');
       toast.info(t('sim.resumed'));
@@ -68,9 +69,9 @@ export default function ExamSimulator() {
   useEffect(() => {
     if (phase !== 'exam') return;
     localStorage.setItem(DRAFT_KEY, JSON.stringify({
-      texts, current, endsAt: Date.now() + seconds * 1000,
+      texts, current, setNumber, endsAt: Date.now() + seconds * 1000,
     }));
-  }, [phase, texts, current, seconds]);
+  }, [phase, texts, current, seconds, setNumber]);
 
   const submit = useCallback(async (timeUsed) => {
     setPhase('submitting');
@@ -127,10 +128,8 @@ export default function ExamSimulator() {
     navigate('/practice');
   };
 
-  if (!tasks) return <main className="flex min-h-[60vh] items-center justify-center"><div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" /></main>;
-
-  /* Choose the sitting first. Twenty fixed papers, so a set means the same
-     three tâches every time. */
+  /* Choose the sitting first — before the loading guard below, because the
+     tâches are only fetched once a set has been picked. */
   if (!setNumber) {
     return (
       <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
@@ -164,6 +163,8 @@ export default function ExamSimulator() {
       </main>
     );
   }
+
+  if (!tasks) return <main className="flex min-h-[60vh] items-center justify-center"><div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" /></main>;
 
   if (phase === 'intro') {
     return (
