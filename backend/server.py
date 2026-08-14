@@ -21,7 +21,7 @@ import jwt
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response, HTTPException, Depends, Query, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, EmailStr, Field
 
 from sqlalchemy import (
@@ -545,14 +545,35 @@ _rate_buckets: Dict[str, List[float]] = {}
 
 
 def _client_key(request: Request) -> str:
+    """Who to meter. An authenticated caller is metered on their own account.
+
+    Keying on the IP alone made the budget shared: testing as admin spent the
+    allowance the next account to sign in inherited, and everyone behind one
+    NAT or proxy — a school, an office, a phone network — competed for a single
+    bucket. The access token is read here rather than via get_current_user
+    because a dependency cannot depend on another one that may 401, and the
+    signature check alone is enough to trust the id for metering.
+
+    Anonymous callers still fall back to the IP; that is all they have.
+    """
+    token = request.cookies.get("access_token")
+    if not token:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth[7:]
+    if token:
+        user_id = decode_token(token, "access")
+        if user_id:
+            return f"user:{user_id}"
     fwd = request.headers.get("x-forwarded-for", "")
     if fwd:
-        return fwd.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+        return f"ip:{fwd.split(',')[0].strip()}"
+    return f"ip:{request.client.host if request.client else 'unknown'}"
 
 
 def rate_limit(bucket: str, limit: int, window_seconds: int):
-    """Dependency factory: at most `limit` calls per `window_seconds` per IP."""
+    """Dependency factory: at most `limit` calls per `window_seconds` per
+    caller — per account when signed in, per IP otherwise."""
     async def dep(request: Request):
         import time as _t
         now = _t.time()
@@ -574,9 +595,16 @@ def rate_limit(bucket: str, limit: int, window_seconds: int):
     return dep
 
 
-# Auth is brute-forceable; AI calls cost money. Both are capped per IP.
+# Auth is brute-forceable; AI calls cost money. Both are capped per caller.
 auth_rate_limit = rate_limit("auth", limit=10, window_seconds=300)
 ai_rate_limit = rate_limit("ai", limit=20, window_seconds=300)
+# A live conversation spends one request per spoken turn — two on a browser
+# without live speech recognition, which also posts the audio to be
+# transcribed. A 3½-minute tâche 2 runs 15–30 requests, so metering it on the
+# 20-per-5-minutes grading budget cut the candidate off mid-exchange. Turns get
+# their own, wider bucket; grading the finished conversation still costs a
+# credit and still goes through ai_rate_limit.
+turn_rate_limit = rate_limit("turn", limit=120, window_seconds=300)
 
 
 # ----------------------------------------------------------------------------
@@ -2290,6 +2318,32 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(Exception)
+async def unhandled_error(request: Request, exc: Exception):
+    """Log an unhandled crash with enough context to find it.
+
+    Without this, an unexpected exception left the browser holding a bare 500:
+    no route, no account, no traceback, and nothing in the reply that could be
+    matched against a log line. Diagnosing a report of "it fails for my users
+    but not for me" then had nothing to go on.
+
+    The traceback goes to the server log only. The reply carries a short id so
+    a learner can quote it and it can be grepped straight out of the log — the
+    exception text itself is never sent, since it can carry a query, a path or
+    a provider key.
+    """
+    error_id = uuid.uuid4().hex[:8]
+    user_id = "anonymous"
+    token = request.cookies.get("access_token")
+    if token:
+        user_id = decode_token(token, "access") or "invalid-token"
+    log.error("[%s] Unhandled error on %s %s (user=%s)",
+              error_id, request.method, request.url.path, user_id, exc_info=exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Erreur interne du serveur (réf. {error_id})."})
+
+
 # ----------------------------------------------------------------------------
 # Health
 # ----------------------------------------------------------------------------
@@ -3326,7 +3380,7 @@ async def speaking_analyze(question: str = Form(...),
 async def speaking_turn_transcribe(audio: UploadFile = File(...),
                                    user: User = Depends(get_current_user),
                                    db: AsyncSession = Depends(get_db),
-                                   _rl=Depends(ai_rate_limit)):
+                                   _rl=Depends(turn_rate_limit)):
     """Transcribe a single conversational turn. Used by browsers without live
     speech recognition; costs no credit because the graded unit is the whole
     conversation, not the turn."""
@@ -3343,7 +3397,7 @@ async def speaking_turn_transcribe(audio: UploadFile = File(...),
 async def speaking_converse(body: ConverseIn,
                             user: User = Depends(get_current_user),
                             db: AsyncSession = Depends(get_db),
-                            _rl=Depends(ai_rate_limit)):
+                            _rl=Depends(turn_rate_limit)):
     """One in-character reply from the roleplay partner (Tache 2)."""
     history = [t.model_dump() for t in body.history]
     reply = await interaction_reply(body.consigne, history, db=db)
