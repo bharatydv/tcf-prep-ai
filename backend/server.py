@@ -21,7 +21,7 @@ import jwt
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response, HTTPException, Depends, Query, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, EmailStr, Field
 
 from sqlalchemy import (
@@ -2316,6 +2316,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def unhandled_error(request: Request, exc: Exception):
+    """Log an unhandled crash with enough context to find it.
+
+    Without this, an unexpected exception left the browser holding a bare 500:
+    no route, no account, no traceback, and nothing in the reply that could be
+    matched against a log line. Diagnosing a report of "it fails for my users
+    but not for me" then had nothing to go on.
+
+    The traceback goes to the server log only. The reply carries a short id so
+    a learner can quote it and it can be grepped straight out of the log — the
+    exception text itself is never sent, since it can carry a query, a path or
+    a provider key.
+    """
+    error_id = uuid.uuid4().hex[:8]
+    user_id = "anonymous"
+    token = request.cookies.get("access_token")
+    if token:
+        user_id = decode_token(token, "access") or "invalid-token"
+    log.error("[%s] Unhandled error on %s %s (user=%s)",
+              error_id, request.method, request.url.path, user_id, exc_info=exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Erreur interne du serveur (réf. {error_id})."})
 
 
 # ----------------------------------------------------------------------------
