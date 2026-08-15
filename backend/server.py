@@ -7,11 +7,12 @@ Database layer: SQLAlchemy 2.0 (async) + asyncpg.
 Business logic, API routes, AI prompts and grading are unchanged from the
 original MongoDB version — only persistence was migrated.
 """ 
-import os 
+import os
+import re
 import json
 import uuid
 import asyncio
-import logging 
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone, date
 from typing import Optional, List, Dict, Any
@@ -5886,4 +5887,7 @@ async def themes_progress(user: User = Depends(get_current_user),
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+    # The reloader keeps a watcher process alive and restarts the server on any
+    # file touch under /app. In production that spends memory a small VM needs
+    # elsewhere and can drop a request mid-grade, so it stays a dev-only tool.
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=not IS_PROD)
