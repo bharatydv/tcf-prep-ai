@@ -1,0 +1,14 @@
+# The Dockerfile runs `npm install` and then `COPY . .`, so a host node_modules
+# would overwrite the freshly installed one — with packages whose native
+# binaries were built for the host OS. It is also the bulk of the build
+# context, so excluding it is most of the build-time win too.
+node_modules/
+build/
+.cache/
+
+.env
+.env.*
+
+*.log
+npm-debug.log*
+yarn-error.log*

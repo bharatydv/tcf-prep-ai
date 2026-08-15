@@ -1,0 +1,21 @@
+# The Dockerfile ends in `COPY . .`, so anything left here lands in the image.
+# A host virtualenv is built for the host OS; copied into a Linux image its
+# binaries are unusable, and stale .pyc files can shadow the sources they were
+# compiled from. Keep the build context to source only.
+venv312/
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Secrets reach the container through docker-compose `env_file`, never by being
+# baked into a layer that anyone pulling the image could read back.
+.env
+.env.*
+
+*.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
