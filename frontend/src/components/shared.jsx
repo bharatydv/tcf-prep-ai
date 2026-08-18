@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Link, NavLink, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Fire, SignOut, List, X, SquaresFour, ArrowLeft } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
-import { ACCENTS, CATEGORY_META } from '../lib/api';
+import { ACCENTS, CATEGORY_META, announcePaywall, paywallDetail } from '../lib/api';
 import { WRITING_TASKS, countWords, wordStatus } from '../lib/tcf';
 import { LANGUAGES, useI18n, useT } from '../i18n';
 
@@ -403,7 +403,14 @@ export async function streamAnalysis(backendUrl, payload, { onStage, onComplete,
   });
   if (!res.ok || !res.body) {
     let detail = t('analysis.failed');
-    try { const j = await res.json(); detail = typeof j.detail === 'string' ? j.detail : detail; } catch {}
+    try {
+      const j = await res.json();
+      // The stream never reaches the axios interceptor, so a spent trial has
+      // to be announced from here or it surfaces as a bare error string.
+      announcePaywall(paywallDetail(j.detail, res.status));
+      if (typeof j.detail === 'string') detail = j.detail;
+      else if (typeof j.detail?.msg === 'string') detail = j.detail.msg;
+    } catch {}
     onError?.(detail, res.status);
     return;
   }
@@ -425,7 +432,13 @@ export async function streamAnalysis(backendUrl, payload, { onStage, onComplete,
         const parsed = JSON.parse(data);
         if (type === 'stage') onStage?.(parsed.stage);
         else if (type === 'complete') { settled = true; onComplete?.(parsed); }
-        else if (type === 'error') { settled = true; onError?.(parsed.detail, parsed.status); }
+        else if (type === 'error') {
+          settled = true;
+          announcePaywall(paywallDetail(parsed.detail, parsed.status));
+          const msg = typeof parsed.detail === 'string'
+            ? parsed.detail : (parsed.detail?.msg || t('analysis.failed'));
+          onError?.(msg, parsed.status);
+        }
       }
     }
   } catch (e) {

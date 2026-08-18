@@ -372,7 +372,8 @@ export default function ConversationModal({
       onGraded(data);
     } catch (err) {
       if (err?.response?.status === 402) {
-        toast.error(t('conv.freeLimit'));
+        // The paywall is already up; close the roleplay behind it rather than
+        // stacking an error toast on top.
         onCancel();
         return;
       }

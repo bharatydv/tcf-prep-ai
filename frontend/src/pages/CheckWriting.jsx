@@ -31,7 +31,8 @@ export default function CheckWriting() {
       onError: (detail, status) => {
         setStage(null);
         toast.error(detail);
-        if (status === 402) navigate('/pricing');
+        // 402 is handled by the paywall, which keeps the learner on the page
+        // with their text intact instead of navigating to /pricing.
       },
     });
   };
@@ -47,7 +48,7 @@ export default function CheckWriting() {
         {t('check.subtitle')}
       </p>
       {user?.subscription_status !== 'premium' && (
-        <span className="pill mt-3 bg-violet-50 text-primary">{t('check.freeAttempts', { used: user?.free_submissions_used })}</span>
+        <span className="pill mt-3 bg-violet-50 text-primary">{t('check.freeAttempts', { used: user?.free_submissions_used ?? 0, total: user?.free_trial_total ?? 6 })}</span>
       )}
       <input className="input mt-6" placeholder={t('check.labelPlaceholder')}
         value={label} onChange={(e) => setLabel(e.target.value)} data-testid="paste-label-input" />

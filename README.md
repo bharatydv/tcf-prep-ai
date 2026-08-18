@@ -42,7 +42,7 @@ Every cap is returned in `caps_applied` and shown to the learner, so a lowered l
 - **Dashboard** — score trend, error breakdown, 365-day heatmap, weak-point tips; all bucketed in the learner's timezone
 - **Recent Topics** — curated real consignes with model answers. Free users get 3, spent only on an explicit "Afficher le corrigé" click
 - **Mock exams** — reading & listening MCQs, graded on the server and recorded in the learner's history
-- **Freemium** — 5 AI corrections/month, monthly auto-reset, HTTP 402. **No payment processing yet**: the pricing page says so plainly and its buttons are disabled
+- **Freemium** — a one-time trial of 3 AI writing corrections and 3 speaking evaluations, of which at most one may be the tâche 2 roleplay. It never refills. Running out returns HTTP 402 with the allowance that was spent, which the frontend renders as a plan chooser over the page rather than an error. **No payment processing yet**: the pricing page says so plainly and its buttons are disabled
 - **Account recovery** — password reset and email confirmation over SMTP, with single-use hashed link tokens; logging out and changing a password both revoke every existing session
 - **Admin panel** — users, submissions, analytics, AI-provider selection, and full CRUD for prompts, exam questions, recent topics, blog posts and simulator prompts
 

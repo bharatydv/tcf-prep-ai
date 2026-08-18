@@ -405,7 +405,7 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
       else toast.success(`Analyse terminée — niveau ${data.tcf_level}`);
     } catch (err) {
       const status = err?.response?.status;
-      if (status === 402) { toast.error(t('st.freeLimit')); navigate('/pricing'); }
+      if (status === 402) { /* the paywall took it */ }
       else toast.error("L'analyse a échoué. Réessayez.");
     } finally {
       setAnalyzing(false);

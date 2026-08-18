@@ -6,6 +6,7 @@ import { I18nProvider } from "./i18n";
 import { Header, ProtectedRoute, ScrollToTop, RouteFallback } from "./components/shared";
 import Footer from "./components/Footer";
 import VerifyBanner from "./components/VerifyBanner";
+import Paywall from "./components/Paywall";
 
 /* Landing, Login and Register are the entry points for a first-time visitor,
    so they stay in the main chunk — code-splitting them would only add a round
@@ -17,6 +18,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 
 const Pricing = lazy(() => import("./pages/Pricing"));
+const VerifyAccount = lazy(() => import("./pages/VerifyAccount"));
 const Practice = lazy(() => import("./pages/Practice"));
 const SelectTask = lazy(() => import("./pages/SelectTask"));
 const PracticeWrite = lazy(() => import("./pages/PracticeWrite"));
@@ -61,6 +63,9 @@ export default function App() {
         <ScrollToTop />
         <Header />
         <VerifyBanner />
+        {/* Mounted once, above the routes: a spent allowance must be able to
+            interrupt any page without that page knowing about billing. */}
+        <Paywall />
         {/* One boundary around the routes: a per-route spinner would flash the
             header's own layout twice on every navigation. */}
         <Suspense fallback={<RouteFallback />}>
@@ -147,6 +152,7 @@ export default function App() {
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/verify-email" element={<VerifyEmail />} />
+          <Route path="/account/verify" element={<VerifyAccount />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         </Suspense>

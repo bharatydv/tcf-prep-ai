@@ -134,8 +134,9 @@ export default function PracticeWrite() {
       onError: (detail, httpStatus) => {
         setStage(null);
         setSubmitting(false);
-        toast.error(detail);
-        if (httpStatus === 402) navigate('/pricing');
+        // A spent allowance is not an error: the paywall has already opened
+        // over this page, and the essay in the textarea stays where it is.
+        if (httpStatus !== 402) toast.error(detail);
       },
     });
   };

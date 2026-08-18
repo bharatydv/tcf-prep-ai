@@ -215,7 +215,7 @@ export default function SpeakingRecord() {
       else toast.success(t('speak.doneToast', { level: data.tcf_level }));
     } catch (err) {
       const status = err?.response?.status;
-      if (status === 402) { toast.error(t('speak.freeLimit')); navigate('/pricing'); }
+      if (status === 402) { /* the paywall took it */ }
       else if (status === 422) toast.error(t('speak.noSpeechRefunded'));
       else toast.error(t('speak.analyseFailed'));
       await refreshUser();

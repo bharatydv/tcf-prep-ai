@@ -30,6 +30,7 @@ api.interceptors.response.use(
     const original = error.config;
     const status = error?.response?.status;
     const isRefreshCall = original?.url?.includes('/auth/refresh');
+    if (status === 402) announcePaywall(paywallDetail(error));
     if (status !== 401 || !original || original._retried || isRefreshCall) {
       return Promise.reject(error);
     }
@@ -47,6 +48,36 @@ api.interceptors.response.use(
 
 // Exporting baseURL as BACKEND_URL for consistency
 export const BACKEND_URL = "";
+
+/* -------------------------------------------------------------- paywall ----
+   Running out of free attempts is not a failure the learner should have to
+   read as an API error. Every 402 carries which allowance ran out, so it is
+   announced once here and one host component renders it over whatever page
+   they were on — their half-written essay included, which navigating away to
+   /pricing used to throw out. */
+export const PAYWALL_EVENT = 'monfrancais:paywall';
+
+// The 402 body, or null for anything else. Also accepts a bare detail object,
+// which is what the SSE stream hands back instead of an axios error.
+export function paywallDetail(errOrDetail, status) {
+  const isErr = errOrDetail?.response !== undefined || errOrDetail?.isAxiosError;
+  const code = isErr ? errOrDetail?.response?.status : status;
+  if (code !== 402) return null;
+  const detail = isErr ? errOrDetail?.response?.data?.detail : errOrDetail;
+  if (detail && typeof detail === 'object') return detail;
+  return { code: 'trial_exhausted', kind: 'writing',
+           msg: typeof detail === 'string' ? detail : '' };
+}
+
+export function announcePaywall(detail) {
+  if (!detail) return false;
+  try {
+    window.dispatchEvent(new CustomEvent(PAYWALL_EVENT, { detail }));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // Turn FastAPI error shapes into a readable message
 export function errorMessage(err, fallback = "Something went wrong") {
@@ -114,7 +145,14 @@ export async function streamAnalyze(payload, { onStage, onComplete, onError }) {
 }
 
 export const errMsg = (err, defaultMsg) => {
-  return err.response?.data?.detail || err.message || defaultMsg;
+  // A detail is not always a sentence: the paywall sends an object, and
+  // returning it raw put "[object Object]" in a toast — or crashed the render
+  // outright where the caller puts the message straight into JSX.
+  const detail = err?.response?.data?.detail;
+  if (typeof detail === 'string' && detail) return detail;
+  if (detail && typeof detail === 'object' && typeof detail.msg === 'string') return detail.msg;
+  if (Array.isArray(detail)) return detail.map((d) => d?.msg || '').filter(Boolean).join('; ');
+  return err?.message || defaultMsg;
 };
 export const CATEGORY_META = CATEGORIES;
 export const ACCENTS = ["é", "è", "ê", "ë", "à", "â", "ç", "î", "ï", "ô", "û", "ù", "ü", "œ", "«", "»", "’"];
