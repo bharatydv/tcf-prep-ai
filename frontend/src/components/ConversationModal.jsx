@@ -35,6 +35,13 @@ const PAUSE_CLAUSE = 150;       // ms after , ; :
 const CHUNK_MIN = 18;           // a chunk shorter than this absorbs the next one
 const TAIL_MIN = 8;             // « oui. », « merci. » — too small to stand alone
 
+// A queued utterance that never fires onend leaves the caller awaiting speech
+// that already stopped — and the learner with no button to talk, because the
+// escape hatch only appears once the status falls back to idle. Chrome does
+// exactly that with a backgrounded tab, so every chunk carries a deadline:
+// roughly twice how long it could plausibly take to say at SPEECH_RATE.
+const chunkDeadline = (chunk) => 2000 + chunk.length * 140;
+
 // Voices differ wildly in quality and the first French one in the list is
 // usually the flat local fallback. Score by the names the good ones carry.
 const VOICE_HINTS = [/natural/i, /neural/i, /google/i, /online/i,
@@ -199,11 +206,16 @@ export default function ConversationModal({
         // A question lifts at the end; statements alternate by a hair so a run
         // of them does not settle into a monotone.
         u.pitch = /\?$/.test(chunk) ? 1.08 : 1 - (i % 2) * 0.04;
+        let settled = false;
         const after = () => {
+          if (settled) return undefined;          // onend and the deadline can race
+          settled = true;
+          clearTimeout(watchdog);
           if (seq !== speakSeqRef.current) return resolve();
           setTimeout(sayNext, endsSentence ? PAUSE_SENTENCE : PAUSE_CLAUSE);
           return undefined;
         };
+        const watchdog = setTimeout(after, chunkDeadline(chunk));
         u.onend = after;
         u.onerror = after;
         synth.speak(u);
