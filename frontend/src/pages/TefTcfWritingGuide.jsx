@@ -1,10 +1,11 @@
-import { useEffect } from 'react';
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   PenNib, Clock, ListChecks, Target, ArrowRight, CheckCircle, Sparkle,
 } from '@phosphor-icons/react';
 import { BackLink } from '../components/shared';
 import { useI18n } from '../i18n';
+import { Seo, SITE_URL } from '../lib/seo';
 
 /* ------------------------------------------------------------------ data ---
    Copy is held as translation keys and resolved with t() at render time, so
@@ -28,59 +29,52 @@ const MISTAKES = [1, 2, 3, 4, 5, 6].map((n) => [`guide.mistake${n}t`, `guide.mis
 const FAQ = [1, 2, 3, 4, 5, 6].map((n) => ({ q: `guide.faq${n}q`, a: `guide.faq${n}a` }));
 const TIPS = [1, 2, 3, 4, 5].map((n) => `guide.tip${n}`);
 
-/* ----------------------------------------------------------------- helpers - */
-function setMeta(name, content) {
-  let m = document.querySelector(`meta[name="${name}"]`);
-  if (!m) { m = document.createElement('meta'); m.setAttribute('name', name); document.head.appendChild(m); }
-  m.setAttribute('content', content);
-  return m;
-}
-
 /* -------------------------------------------------------------------- page - */
 export default function TefTcfWritingGuide() {
   const { t, lang } = useI18n();
 
-  useEffect(() => {
-    const title = t('guide.docTitle');
-    const desc = t('guide.docDesc');
-    document.title = title;
-    setMeta('description', desc);
-
-    // Article + FAQ JSON-LD (strong for SEO + AI citation). Re-emitted on a
-    // language switch so the structured data matches the rendered page.
-    const ld = document.createElement('script');
-    ld.type = 'application/ld+json';
-    ld.id = 'guide-jsonld';
-    ld.text = JSON.stringify([
-      {
-        '@context': 'https://schema.org',
-        '@type': 'Article',
-        headline: `${t('guide.heroA')} ${t('guide.heroB')}`,
-        description: desc,
-        inLanguage: lang,
-        author: { '@type': 'Organization', name: 'monfrançais' },
-        publisher: { '@type': 'Organization', name: 'monfrançais' },
-        datePublished: '2026-06-01',
-        dateModified: new Date().toISOString().slice(0, 10),
+  // Article + FAQ markup. It was correct before but was appended by an effect,
+  // so the crawlers it exists for — the ones that do not run JavaScript — never
+  // saw it. Routed through <Seo>, it is emitted with the canonical URL and the
+  // Open Graph pair, and `npm run build:prerender` bakes it into the HTML.
+  const schema = useMemo(() => ([
+    {
+      '@context': 'https://schema.org',
+      '@type': 'Article',
+      headline: `${t('guide.heroA')} ${t('guide.heroB')}`,
+      description: t('guide.docDesc'),
+      inLanguage: lang === 'fr' ? 'fr-CA' : 'en',
+      author: { '@type': 'Organization', name: 'monfrançais' },
+      publisher: {
+        '@type': 'Organization',
+        name: 'monfrançais',
+        logo: { '@type': 'ImageObject', url: `${SITE_URL}/icon-512.png` },
       },
-      {
-        '@context': 'https://schema.org',
-        '@type': 'FAQPage',
-        inLanguage: lang,
-        mainEntity: FAQ.map((f) => ({
-          '@type': 'Question',
-          name: t(f.q),
-          acceptedAnswer: { '@type': 'Answer', text: t(f.a) },
-        })),
-      },
-    ]);
-    document.getElementById('guide-jsonld')?.remove();
-    document.head.appendChild(ld);
-    return () => { document.getElementById('guide-jsonld')?.remove(); };
-  }, [t, lang]);
+      datePublished: '2026-06-01',
+      dateModified: '2026-08-18',
+      mainEntityOfPage: `${SITE_URL}/tef-tcf-writing-guide`,
+    },
+    {
+      '@context': 'https://schema.org',
+      '@type': 'FAQPage',
+      inLanguage: lang === 'fr' ? 'fr-CA' : 'en',
+      mainEntity: FAQ.map((f) => ({
+        '@type': 'Question',
+        name: t(f.q),
+        acceptedAnswer: { '@type': 'Answer', text: t(f.a) },
+      })),
+    },
+  ]), [t, lang]);
 
   return (
     <main className="overflow-x-clip bg-white">
+      <Seo
+        title={t('guide.docTitle')}
+        description={t('guide.docDesc')}
+        path="/tef-tcf-writing-guide"
+        type="article"
+        jsonLd={schema}
+      />
       {/* HERO */}
       <section className="relative bg-gradient-to-br from-violet-100 via-fuchsia-50 to-violet-200">
         <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">

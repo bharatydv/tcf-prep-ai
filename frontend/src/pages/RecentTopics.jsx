@@ -6,6 +6,7 @@ import { api, errMsg, BACKEND_URL } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { AccentToolbar, AnalysisProgress, BackLink, streamAnalysis } from '../components/shared';
 import { useT } from '../i18n';
+import { Seo } from '../lib/seo';
 
 const TASK_LABELS = { 1: 'topics.task1', 2: 'topics.task2', 3: 'topics.task3' };
 
@@ -25,6 +26,7 @@ export default function RecentTopics() {
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-10">
+      <Seo titleKey="seo.topics.title" descKey="seo.topics.desc" path="/recent-topics" />
       <BackLink />
       <h1 className="text-3xl font-bold">{t('topics.title')}</h1>
       <p className="mt-2 max-w-2xl text-gray-600">{t('topics.subtitle')}</p>

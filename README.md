@@ -43,6 +43,7 @@ Every cap is returned in `caps_applied` and shown to the learner, so a lowered l
 - **Recent Topics** — curated real consignes with model answers. Free users get 3, spent only on an explicit "Afficher le corrigé" click
 - **Mock exams** — reading & listening MCQs, graded on the server and recorded in the learner's history
 - **Freemium** — 5 AI corrections/month, monthly auto-reset, HTTP 402. **No payment processing yet**: the pricing page says so plainly and its buttons are disabled
+- **Account recovery** — password reset and email confirmation over SMTP, with single-use hashed link tokens; logging out and changing a password both revoke every existing session
 - **Admin panel** — users, submissions, analytics, AI-provider selection, and full CRUD for prompts, exam questions, recent topics, blog posts and simulator prompts
 
 ## Stack
@@ -75,9 +76,38 @@ Set `ENV=production`. The app then **refuses to boot** unless `JWT_SECRET` is a 
 ### Frontend (port 3000)
 ```bash
 cd frontend
-npm install
-npm start        # API calls go to /api, proxied to the backend
+npm install      # NOT --production: tailwind/postcss are devDependencies
+npm start        # /api is proxied to :8000 by the `proxy` field in package.json
 ```
+
+`npm run build` regenerates `public/sitemap.xml` first (`prebuild`). Set
+`SITEMAP_API=http://localhost:8000` to include blog slugs and topic ids.
+
+`npm run build:prerender` additionally runs react-snap over the public routes,
+writing real HTML into each one, then:
+
+- saves the pristine empty shell as `build/app-shell.html`, which nginx serves
+  as the SPA fallback — falling back to `index.html` would hand every unmatched
+  URL the prerendered *homepage* markup;
+- prunes the routes behind `ProtectedRoute`. react-snap has no exclude option
+  and follows their redirect to `/login`, which otherwise baked a login form
+  into `build/dashboard/index.html`.
+
+This is what makes the site readable to crawlers that do not execute
+JavaScript — which is all of the AI indexing crawlers (GPTBot, ClaudeBot,
+PerplexityBot, CCBot). Without it they receive an empty `<div id="root">`.
+Verify a deploy with:
+
+```bash
+curl -sA GPTBot https://your-site/tef-tcf-writing-guide | grep -c "tâche"
+```
+
+**Known limit:** the crawl runs against the static build with no API, so pages
+whose content comes from `/api` — the blog list, `/recent-topics`, and every
+`/blog/:slug` — prerender as their empty state. Static pages (the guide,
+pricing, the section landings, legal) carry their full text. Prerendering the
+API-driven ones needs the crawl to run against a stack with the backend
+reachable on the same origin.
 
 ### Default admin
 - Email: `admin@frenchcorrector.com` (or `ADMIN_EMAIL`)
@@ -86,8 +116,31 @@ npm start        # API calls go to /api, proxied to the backend
 ### Health checks
 `GET /api/` → `{"message": "monfrancais API", "status": "healthy"}` · `GET /api/health` → `{"status": "ok"}` · `GET /api/tcf-spec` → the official constraints above
 
+### Docker
+
+`docker compose up --build` serves the built frontend through nginx on port 80,
+which also proxies `/api` to the backend over the compose network. The backend
+is not published to the host: everything goes through the proxy, which is where
+the body-size limit and the forwarded-header handling live.
+
+## Deployment notes
+
+- **`TRUSTED_PROXIES`** must name the proxy in front of the API (or `*` behind a
+  managed load balancer). `X-Forwarded-For` is ignored otherwise, because
+  trusting it unconditionally lets an anonymous caller rotate the header and
+  walk past the login rate limit.
+- **`SMTP_HOST`** is needed for password reset and email verification. Without
+  it the links are written to the log; in production `/auth/forgot-password`
+  answers 503 rather than pretending a message was sent.
+- **`AI_MAX_CONCURRENCY`** (default 32) sets how many gradings can run at once.
+  It used to inherit asyncio's default pool of `min(32, cpu+4)` — six on a
+  2-vCPU box, which was the real ceiling on simultaneous users.
+- **`AI_HTTP_TIMEOUT`** (default 60s) is passed to every provider client. Left
+  unset, a stalled socket held a worker thread for the life of the process.
+
 ## Future work (out of scope by design)
 - Payment processing — the pricing page is display-only and says so
-- Email verification and password reset (needs an email provider)
 - Google OAuth sign-in
+- Locale in the URL (`/fr/...`, `/en/...`) so both languages can be indexed
+  separately; today the choice lives in localStorage and both share one URL
 - Rate limiting is per-process; move to Redis before running multiple workers

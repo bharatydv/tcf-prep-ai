@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
+import { useSeo } from '../lib/seo';
 import { BackLink } from '../components/shared';
 
 /* Module-level, so the copy is held as translation keys and resolved with t()
@@ -19,6 +20,11 @@ const TACHES = [
 ];
 
 export default function SelectTask() {
+  // A hook rather than an element, so no early return — loading, empty,
+  // or "coming soon" — can skip it and leave the page inheriting the
+  // shell's canonical, which points at the homepage.
+  useSeo({ titleKey: 'seo.tasks.title', descKey: 'seo.tasks.desc', path: '/practice/tasks' });
+
   const { user } = useAuth();
   const t = useT();
   const navigate = useNavigate();

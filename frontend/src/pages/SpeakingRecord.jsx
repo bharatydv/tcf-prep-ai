@@ -6,10 +6,12 @@ import {
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api } from '../lib/api';
+import { startRecording as startCapture, appendAudio, isRecordingSupported } from '../lib/recorder';
 import { SPEAKING_TASKS, fmtClock } from '../lib/tcf';
 import { useAuth } from '../context/AuthContext';
 import { BackLink, CreditsBadge } from '../components/shared';
 import { useT } from '../i18n';
+import { useSeo } from '../lib/seo';
 
 // Official TCF Canada timings, shared with the backend grader.
 const TACHE_INFO = {
@@ -24,6 +26,11 @@ const CAT_LABELS = {
 };
 
 export default function SpeakingRecord() {
+  // A hook rather than an element, so no early return — loading, empty,
+  // or "coming soon" — can skip it and leave the page inheriting the
+  // shell's canonical, which points at the homepage.
+  useSeo({ titleKey: 'seo.speaking.title', descKey: 'seo.speaking.desc', path: '/speaking/record', noindex: true });
+
   const { user, refreshUser } = useAuth();
   const t = useT();
   const navigate = useNavigate();
@@ -39,7 +46,9 @@ export default function SpeakingRecord() {
   const [recording, setRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState(null);
   const [audioUrl, setAudioUrl] = useState('');
-  const [audioName, setAudioName] = useState('answer.webm');
+  // The recorder reports what it actually produced; nothing here assumes a
+  // container. Safari records MP4, every other browser records WebM.
+  const [audioMeta, setAudioMeta] = useState(null);
   const [elapsed, setElapsed] = useState(0);
   const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState(null);
@@ -50,17 +59,19 @@ export default function SpeakingRecord() {
   const spec = SPEAKING_TASKS[tacheNum] || null;
   const maxSeconds = spec?.speakSeconds ?? null;
 
-  const mediaRecorderRef = useRef(null);
-  const chunksRef = useRef([]);
+  const captureRef = useRef(null);
   const timerRef = useRef(null);
+  const prepEndsRef = useRef(null);
+  // setInterval is throttled hard in a background tab and stops entirely when
+  // the screen locks, so counting ticks under-reported the elapsed time and
+  // the official cut-off fired late. The clock is derived from a timestamp.
+  const startedAtRef = useRef(0);
   const fileInputRef = useRef(null);
 
-  useEffect(() => {
-    document.title = 'Speaking practice | monfrancais';
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      if (audioUrl) URL.revokeObjectURL(audioUrl);
-    };
+  useEffect(() => () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    captureRef.current?.cancel();
   }, [audioUrl]);
 
   // Load the chosen question (passed via ?q=) or a random one from the theme.
@@ -86,7 +97,7 @@ export default function SpeakingRecord() {
     setAudioBlob(null);
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     setAudioUrl('');
-    setAudioName('answer.webm');
+    setAudioMeta(null);
     setElapsed(0);
     setResult(null);
   };
@@ -102,40 +113,41 @@ export default function SpeakingRecord() {
     }
     resetRecording();
     setAudioBlob(file);
-    setAudioName(file.name || 'upload.mp3');
+    // An uploaded file already knows its own type; carry both through so the
+    // server never has to infer the format from the extension.
+    setAudioMeta({ filename: file.name || 'upload.mp3', mimeType: file.type || '' });
     setAudioUrl(URL.createObjectURL(file));
   };
 
   const startRecording = async () => {
     if (!user) return navigate('/login');
+    if (!isRecordingSupported()) return toast.error(t('speak.noRecorder'));
     resetRecording();
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream);
-      chunksRef.current = [];
-      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      mr.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        setAudioBlob(blob);
-        setAudioName('answer.webm');
-        setAudioUrl(URL.createObjectURL(blob));
-        stream.getTracks().forEach((t) => t.stop());
-      };
-      mr.start();
-      mediaRecorderRef.current = mr;
+      captureRef.current = await startCapture({ basename: 'answer' });
       setRecording(true);
       setElapsed(0);
-      timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
+      startedAtRef.current = Date.now();
+      timerRef.current = setInterval(
+        () => setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000)), 250);
     } catch (err) {
       toast.error(t('speak.micDenied'));
     }
   };
 
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && recording) {
-      mediaRecorderRef.current.stop();
-      setRecording(false);
-      if (timerRef.current) clearInterval(timerRef.current);
+  const stopRecording = async () => {
+    const capture = captureRef.current;
+    if (!capture || !recording) return;
+    setRecording(false);
+    if (timerRef.current) clearInterval(timerRef.current);
+    captureRef.current = null;
+    try {
+      const recorded = await capture.stop();
+      setAudioBlob(recorded.blob);
+      setAudioMeta({ filename: recorded.filename, mimeType: recorded.mimeType });
+      setAudioUrl(URL.createObjectURL(recorded.blob));
+    } catch {
+      toast.error(t('speak.recordFailed'));
     }
   };
 
@@ -156,16 +168,30 @@ export default function SpeakingRecord() {
   };
 
   useEffect(() => {
-    if (prepLeft === null) return;
-    if (prepLeft <= 0) {
-      setPrepLeft(null);
-      startRecording();
-      return;
-    }
-    const id = setTimeout(() => setPrepLeft((p) => p - 1), 1000);
-    return () => clearTimeout(id);
+    if (prepLeft === null) { prepEndsRef.current = null; return undefined; }
+    if (prepEndsRef.current == null) prepEndsRef.current = Date.now() + prepLeft * 1000;
+
+    const read = () => {
+      const remaining = Math.max(0, Math.ceil((prepEndsRef.current - Date.now()) / 1000));
+      if (remaining <= 0) {
+        prepEndsRef.current = null;
+        setPrepLeft(null);
+        startRecording();
+        return;
+      }
+      setPrepLeft(remaining);
+    };
+
+    read();
+    const id = setInterval(read, 250);
+    const onVisible = () => { if (!document.hidden) read(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prepLeft]);
+  }, [prepLeft === null]);
 
   const submit = async () => {
     if (!audioBlob) return toast.error(mode === 'upload' ? t('speak.chooseFileFirst') : t('speak.recordFirst'));
@@ -174,7 +200,11 @@ export default function SpeakingRecord() {
     try {
       const form = new FormData();
       form.append('question', question);
-      form.append('audio', audioBlob, audioName);
+      appendAudio(form, {
+        blob: audioBlob,
+        filename: audioMeta?.filename || 'answer.webm',
+        mimeType: audioMeta?.mimeType || audioBlob.type,
+      });
       if (tacheNum) form.append('task_type', String(tacheNum));
       const { data } = await api.post('/api/speaking/analyze', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -186,7 +216,9 @@ export default function SpeakingRecord() {
     } catch (err) {
       const status = err?.response?.status;
       if (status === 402) { toast.error(t('speak.freeLimit')); navigate('/pricing'); }
+      else if (status === 422) toast.error(t('speak.noSpeechRefunded'));
       else toast.error(t('speak.analyseFailed'));
+      await refreshUser();
     } finally {
       setAnalyzing(false);
     }
@@ -283,7 +315,7 @@ export default function SpeakingRecord() {
           ) : (
             <>
               <p className="font-heading text-lg font-bold text-gray-900">
-                {mode === 'upload' ? t('speak.fileLabel', { name: audioName }) : t('speak.yourRecording', { clock: `${mm}:${ss}` })}
+                {mode === 'upload' ? t('speak.fileLabel', { name: audioMeta?.filename || '' }) : t('speak.yourRecording', { clock: `${mm}:${ss}` })}
               </p>
               <audio src={audioUrl} controls className="mx-auto mt-4 w-full max-w-md" />
               <div className="mt-5 flex flex-wrap items-center justify-center gap-3">

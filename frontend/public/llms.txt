@@ -1,0 +1,55 @@
+# monfrançais
+
+> AI-powered preparation for the TEF and TCF Canada French exams. Learners
+> write or speak in French, receive CEFR grading (A1–C2) with every error
+> highlighted, explained and categorised, then drill their own mistakes through
+> spaced repetition.
+
+Site: https://xn--monfranais-u6a.com (monfrançais.com)
+Languages: French and English interface; all exam material stays in French.
+
+## What the platform enforces
+
+The official TCF Canada limits are applied end to end — the interface shows
+them while the candidate works, and the grader applies matching score caps.
+
+Expression écrite — 60 minutes for all three tâches:
+- Tâche 1, message court: 60–120 words, ~15 min
+- Tâche 2, article/blog/lettre: 120–150 words, ~20 min
+- Tâche 3, texte argumentatif: 120–180 words, ~25 min
+
+Expression orale — recording stops automatically at the limit:
+- Tâche 1, entretien dirigé: no preparation, 2 min
+- Tâche 2, exercice en interaction: 2 min preparation, 3 min 30 speaking
+- Tâche 3, expression d'un point de vue: 2 min preparation, 2 min 30 speaking
+
+Score caps applied in code, not merely requested of the model:
+- 5+ real errors caps the result at B1; 2–4 real errors caps it at B2
+- Below the word minimum caps at B1; below half the minimum caps at A2
+- Above 1.5× the maximum caps at B2
+- A spoken answer that does not address the consigne caps at B1
+
+Every cap applied is returned to the learner with its reason, so a lowered
+level is always explained.
+
+## Error categories used in grading
+
+prépositions · orthographe · conjugaison · accord en genre et nombre ·
+anglicismes · améliorations C1 (style upgrades, which never count as errors)
+
+## Key pages
+
+- /: what the platform does
+- /tef-tcf-writing-guide: long-form guide to the written exam
+- /blog: articles on exam technique and French grammar
+- /recent-topics: real recent consignes with model answers
+- /practice: writing practice against official tâches
+- /speaking: speaking practice with the official timers
+- /reading, /listening: comprehension papers
+- /pricing: plans. Payment processing is not live yet and the page says so.
+
+## Usage
+
+Content may be quoted with attribution to monfrançais and a link to the source
+page. The exam constraints above are drawn from the official TCF Canada format;
+verify current rules with France Éducation international before relying on them.

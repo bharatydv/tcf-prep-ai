@@ -5,6 +5,7 @@ import {
 } from '@phosphor-icons/react';
 import { BackLink } from '../components/shared';
 import { useT } from '../i18n';
+import { Seo } from '../lib/seo';
 
 /* ------------------------------------------------------------------ data ----
    Static placeholder content. Replace `COMBINATIONS` with real data from your
@@ -92,6 +93,7 @@ export default function Combinations() {
 
   return (
     <main className="overflow-x-clip bg-white">
+      <Seo titleKey="seo.combos.title" descKey="seo.combos.desc" path="/combinations" />
       {/* HERO */}
       <section className="relative bg-gradient-to-br from-violet-100 via-fuchsia-50 to-violet-200">
         <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">

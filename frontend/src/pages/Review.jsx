@@ -5,10 +5,19 @@ import { toast } from 'sonner';
 import { api, errMsg, CATEGORY_META } from '../lib/api';
 import { BackLink } from '../components/shared';
 import { useT } from '../i18n';
+import { useSeo } from '../lib/seo';
 
 function shuffle(a) { return [...a].sort(() => Math.random() - 0.5); }
 
+/* The category sprint is two minutes, as the mode chooser says. */
+const SPRINT_SECONDS = 120;
+
 export default function Review() {
+  // A hook rather than an element, so no early return — loading, empty,
+  // or "coming soon" — can skip it and leave the page inheriting the
+  // shell's canonical, which points at the homepage.
+  useSeo({ titleKey: 'seo.review.title', path: '/review', noindex: true });
+
   const [params] = useSearchParams();
   const t = useT();
   const category = params.get('category');
@@ -19,7 +28,7 @@ export default function Review() {
   const [results, setResults] = useState([]);
   const [picked, setPicked] = useState(null);
   const [summary, setSummary] = useState(null);
-  const [sprintLeft, setSprintLeft] = useState(120);
+  const [sprintLeft, setSprintLeft] = useState(SPRINT_SECONDS);
 
   const load = () => {
     api.get('/api/review/queue', { params: category ? { category } : {} })
@@ -43,14 +52,35 @@ export default function Review() {
   const resultsRef = useRef(results);
   useEffect(() => { resultsRef.current = results; }, [results]);
   const finishRef = useRef(null);
+  // Wall-clock deadline: the sprint is a timed challenge, so pausing it by
+  // switching tabs would be a way to inflate the score.
+  const sprintEndsRef = useRef(null);
+  const sprintOverRef = useRef(false);
 
   useEffect(() => {
-    if (mode !== 'sprint' || summary) return;
-    const id = setInterval(() => setSprintLeft((s) => {
-      if (s <= 1) { clearInterval(id); finishRef.current?.(resultsRef.current); return 0; }
-      return s - 1;
-    }), 1000);
-    return () => clearInterval(id);
+    if (mode !== 'sprint' || summary) return undefined;
+    if (sprintEndsRef.current == null) {
+      sprintEndsRef.current = Date.now() + SPRINT_SECONDS * 1000;
+      sprintOverRef.current = false;
+    }
+
+    const read = () => {
+      const left = Math.max(0, Math.ceil((sprintEndsRef.current - Date.now()) / 1000));
+      setSprintLeft(left);
+      if (left <= 0 && !sprintOverRef.current) {
+        sprintOverRef.current = true;
+        finishRef.current?.(resultsRef.current);
+      }
+    };
+
+    read();
+    const id = setInterval(read, 250);
+    const onVisible = () => { if (!document.hidden) read(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [mode, summary]);
 
   const finish = async (finalResults) => {
@@ -79,7 +109,7 @@ export default function Review() {
     else setIdx(idx + 1);
   };
 
-  const start = (m) => { setMode(m); setIdx(0); setResults([]); setSummary(null); setFlipped(false); setPicked(null); setSprintLeft(120); };
+  const start = (m) => { setMode(m); setIdx(0); setResults([]); setSummary(null); setFlipped(false); setPicked(null); setSprintLeft(SPRINT_SECONDS); sprintEndsRef.current = null; sprintOverRef.current = false; };
 
   /* Leaves a session without submitting — answers so far are discarded. */
   const quitSession = () => {

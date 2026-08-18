@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import { api, errMsg, catColor } from '../lib/api';
 import { useT } from '../i18n';
+import { Seo } from '../lib/seo';
 
 /* id drives the switch below; label is a translation key. */
 const TABS = [
@@ -21,6 +22,7 @@ export default function Admin() {
   const [tab, setTab] = useState('analytics');
   return (
     <main className="mx-auto max-w-7xl px-4 py-10">
+      <Seo titleKey="seo.admin.title" path="/admin" noindex />
       <h1 className="text-3xl font-bold">{t('admin.title')}</h1>
       <div className="mt-6 flex flex-wrap gap-2">
         {TABS.map((item) => (
@@ -467,7 +469,7 @@ function Topics() {
       <section className="card space-y-4 p-6">
         <h2 className="font-heading font-semibold">{editing ? t('admin.editTopic') : t('admin.newTopic')}</h2>
         <Field label={t('admin.titleField')}><input className="input" value={form.title} onChange={set('title')} data-testid="topic-title-input" /></Field>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Field label={t('admin.task')}>
             <select className="input" value={form.task_type} onChange={set('task_type')}>
               {[1, 2, 3].map((n) => <option key={n} value={n}>Tâche {n}</option>)}

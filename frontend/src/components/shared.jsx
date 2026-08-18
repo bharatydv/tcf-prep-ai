@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Link, NavLink, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Fire, SignOut, List, X, SquaresFour, ArrowLeft } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
@@ -92,8 +92,10 @@ function LangToggle({ lang, setLang }) {
 export function Header() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const { t, lang, setLang } = useI18n();
   const [open, setOpen] = useState(false);
+  const menuButtonRef = useRef(null);
 
   const links = [
     { to: '/speaking', label: t('nav.speaking') },
@@ -103,6 +105,22 @@ export function Header() {
     { to: '/exam/reading-comprehension', label: t('nav.mockExams') },
     { to: '/resources', label: t('nav.resources') },
   ];
+  // Reachable from the footer on a desktop, but the mobile menu was the only
+  // navigation on a phone and did not list them.
+  const extraLinks = [
+    { to: '/blog', label: t('nav.blog') },
+    { to: '/pricing', label: t('nav.pricing') },
+  ];
+
+  // A menu left open across a navigation covers the page the user just asked
+  // for; Escape is the expected way out of any overlay.
+  useEffect(() => { setOpen(false); }, [pathname]);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') { setOpen(false); menuButtonRef.current?.focus(); } };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
 
   return (
     <header className="glass sticky top-0 z-50 border-b border-gray-100">
@@ -117,7 +135,7 @@ export function Header() {
           </svg>
         </Link>
 
-        <nav className="hidden shrink-0 items-center gap-4 xl:flex 2xl:gap-5">
+        <nav className="hidden shrink-0 items-center gap-4 lg:flex xl:gap-5" aria-label="Main">
           {links.map((l) => (
             <NavLink key={l.to} to={l.to}
               className={({ isActive }) => `whitespace-nowrap text-sm font-medium transition ${isActive ? 'text-primary' : 'text-gray-600 hover:text-primary'}`}>
@@ -126,7 +144,7 @@ export function Header() {
           ))}
         </nav>
 
-        <div className="hidden shrink-0 items-center gap-3 xl:flex">
+        <div className="hidden shrink-0 items-center gap-2.5 lg:flex xl:gap-3">
           <LangToggle lang={lang} setLang={setLang} />
           {user ? (
             <>
@@ -156,25 +174,43 @@ export function Header() {
           )}
         </div>
 
-        <button className="xl:hidden" onClick={() => setOpen(!open)} aria-label={t('nav.menu')}>
+        {/* -m-2 keeps the icon where it was while giving the button a 40px
+            hit area; a bare 24px icon is under every touch-target guideline. */}
+        <button
+          ref={menuButtonRef}
+          type="button"
+          className="-m-2 rounded-lg p-2 text-gray-700 transition hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary lg:hidden"
+          onClick={() => setOpen(!open)}
+          aria-label={t('nav.menu')}
+          aria-expanded={open}
+          aria-controls="mobile-menu"
+        >
           {open ? <X size={24} /> : <List size={24} />}
         </button>
       </div>
       {open && (
-        <div className="border-t border-gray-100 bg-white px-4 py-3 xl:hidden">
+        <div id="mobile-menu" className="max-h-[calc(100dvh-4rem)] overflow-y-auto border-t border-gray-100 bg-white px-4 py-3 lg:hidden">
           <div className="pb-2"><LangToggle lang={lang} setLang={setLang} /></div>
-          {links.map((l) => (
-            <Link key={l.to} to={l.to} onClick={() => setOpen(false)} className="block py-2 text-sm font-medium text-gray-700">{l.label}</Link>
+          {[...links, ...extraLinks].map((l) => (
+            <Link key={l.to} to={l.to} className="block py-2.5 text-sm font-medium text-gray-700">{l.label}</Link>
           ))}
           {user ? (
             <>
-              <Link to="/dashboard" onClick={() => setOpen(false)} className="block py-2 text-sm font-medium">{t('nav.dashboard')}</Link>
-              <button onClick={async () => { await logout(); setOpen(false); navigate('/'); }} className="py-2 text-sm font-medium text-red-600">{t('nav.logout')}</button>
+              {user.current_streak > 0 && (
+                <span className="pill my-2 bg-orange-50 text-orange-600" title={t('nav.streakTitle')}>
+                  <Fire size={14} weight="fill" /> {user.current_streak}
+                </span>
+              )}
+              <Link to="/dashboard" className="block py-2.5 text-sm font-medium">{t('nav.dashboard')}</Link>
+              {user.role === 'admin' && (
+                <Link to="/admin" className="block py-2.5 text-sm font-medium">Admin</Link>
+              )}
+              <button type="button" onClick={async () => { await logout(); setOpen(false); navigate('/'); }} className="py-2.5 text-sm font-medium text-red-600">{t('nav.logout')}</button>
             </>
           ) : (
             <>
-              <Link to="/login" onClick={() => setOpen(false)} className="block py-2 text-sm font-medium">{t('nav.login')}</Link>
-              <Link to="/register" onClick={() => setOpen(false)} className="block py-2 text-sm font-semibold text-primary">{t('nav.register')}</Link>
+              <Link to="/login" className="block py-2.5 text-sm font-medium">{t('nav.login')}</Link>
+              <Link to="/register" className="block py-2.5 text-sm font-semibold text-primary">{t('nav.register')}</Link>
             </>
           )}
         </div>
@@ -186,16 +222,45 @@ export function Header() {
 /* ----------------------------------------------------- ProtectedRoute ---- */
 export function ProtectedRoute({ children, adminOnly = false }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
   if (loading) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center">
+      <div className="flex min-h-[60vh] items-center justify-center" role="status" aria-live="polite">
         <div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" />
       </div>
     );
   }
-  if (!user) return <Navigate to="/login" replace />;
+  // Carry where they were going, so signing in from a link to a correction
+  // lands on that correction instead of dropping them on /practice.
+  if (!user) return <Navigate to="/login" replace state={{ from: location }} />;
   if (adminOnly && user.role !== 'admin') return <Navigate to="/dashboard" replace />;
   return children;
+}
+
+/* ------------------------------------------------------- RouteFallback ---- */
+/* Shown while a lazily-loaded route chunk is in flight. Sized to roughly the
+   height of a page body so the footer does not jump up and back down. */
+export function RouteFallback() {
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center" role="status" aria-live="polite">
+      <span className="sr-only">Loading…</span>
+      <div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" />
+    </div>
+  );
+}
+
+/* --------------------------------------------------------- ScrollToTop ---- */
+/* A client-side navigation keeps the previous scroll position, so following a
+   link from halfway down one page opened the next one halfway down. Restoring
+   a POP (back/forward) is the browser's job, so leave those alone. */
+export function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    // 'instant' rather than the document's smooth scrolling: a page change is
+    // not a scroll the user asked for, and animating it just delays the read.
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [pathname]);
+  return null;
 }
 
 /* ------------------------------------------------------ AccentToolbar ---- */

@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { api, errMsg, CATEGORY_META } from '../lib/api';
 import { BackLink, ErrorHighlightedText } from '../components/shared';
 import { useT } from '../i18n';
+import { Seo } from '../lib/seo';
 
 export default function Feedback() {
   const { submissionId } = useParams();
@@ -26,6 +27,7 @@ export default function Feedback() {
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-10">
+      <Seo titleKey="seo.feedback.title" noindex />
       <BackLink testid="feedback-back" />
 
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -74,20 +76,36 @@ export default function Feedback() {
           <div className="px-6 py-3 font-heading font-semibold" style={{ background: CATEGORY_META[cat]?.color }}>
             {CATEGORY_META[cat]?.label} ({errs.length})
           </div>
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
-              <tr><th className="px-6 py-2">{t('fb.colError')}</th><th className="px-6 py-2">{t('fb.colCorrection')}</th><th className="px-6 py-2">{t('fb.colExplanation')}</th></tr>
-            </thead>
-            <tbody>
-              {errs.map((e, i) => (
-                <tr key={i} className="border-t border-gray-100 align-top">
-                  <td className="px-6 py-3 text-red-600">{e.error}</td>
-                  <td className="px-6 py-3 font-medium text-green-700">{e.correction}</td>
-                  <td className="px-6 py-3 text-gray-600">{e.explanation}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {/* Phones: one stacked block per error. */}
+          <ul className="divide-y divide-gray-100 sm:hidden">
+            {errs.map((e, i) => (
+              <li key={i} className="px-4 py-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t('fb.colError')}</p>
+                <p className="mt-0.5 text-sm text-red-600">{e.error}</p>
+                <p className="mt-2.5 text-xs font-semibold uppercase tracking-wide text-gray-400">{t('fb.colCorrection')}</p>
+                <p className="mt-0.5 text-sm font-medium text-green-700">{e.correction}</p>
+                <p className="mt-2.5 text-xs font-semibold uppercase tracking-wide text-gray-400">{t('fb.colExplanation')}</p>
+                <p className="mt-0.5 text-sm leading-relaxed text-gray-600">{e.explanation}</p>
+              </li>
+            ))}
+          </ul>
+          {/* sm and up: the table, in a container that scrolls rather than clips. */}
+          <div className="hidden overflow-x-auto sm:block">
+            <table className="w-full min-w-[36rem] text-sm">
+              <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
+                <tr><th className="px-6 py-2">{t('fb.colError')}</th><th className="px-6 py-2">{t('fb.colCorrection')}</th><th className="px-6 py-2">{t('fb.colExplanation')}</th></tr>
+              </thead>
+              <tbody>
+                {errs.map((e, i) => (
+                  <tr key={i} className="border-t border-gray-100 align-top">
+                    <td className="px-6 py-3 text-red-600">{e.error}</td>
+                    <td className="px-6 py-3 font-medium text-green-700">{e.correction}</td>
+                    <td className="px-6 py-3 text-gray-600">{e.explanation}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       ))}
 

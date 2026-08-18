@@ -68,6 +68,25 @@ h1, h2, h3, h4 { @apply font-heading; }
   @apply visible opacity-100;
 }
 
+/* Screen-reader-only text that still reaches the accessibility tree. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Keyboard focus was invisible on several controls. One visible ring for
+   everything that does not already define its own. */
+:focus-visible {
+  outline: 2px solid #7C3AED;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 /* ============================== landing page ============================== */
 @keyframes fade-up {
   from { opacity: 0; transform: translateY(28px); }
@@ -100,3 +119,33 @@ h1, h2, h3, h4 { @apply font-heading; }
 
 .tilt-card { transition: transform 0.35s cubic-bezier(0.22,1,0.36,1), box-shadow 0.35s; }
 .tilt-card:hover { transform: translateY(-8px); box-shadow: 0 24px 48px -16px rgba(124, 58, 237, 0.35); }
+
+
+/* -------------------------------------------------------- reduced motion --- */
+/* Everything above animates for effect, not to convey information, so when the
+   viewer has asked for less motion the page simply arrives in its end state.
+   The scroll-reveal elements must be forced visible: they start at opacity 0
+   and rely on a transition to appear, so merely disabling the transition would
+   leave the page blank. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .hero-rise,
+  .reveal {
+    opacity: 1 !important;
+    transform: none !important;
+    animation: none !important;
+  }
+  .blob,
+  .eq-bar,
+  .ping-soft,
+  .recording {
+    animation: none !important;
+  }
+}

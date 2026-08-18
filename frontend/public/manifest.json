@@ -1,0 +1,17 @@
+{
+  "name": "monfrançais — TEF/TCF Canada",
+  "short_name": "monfrançais",
+  "description": "AI correction for the TEF/TCF Canada written and spoken exams, with CEFR grading and mistake review.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#ffffff",
+  "theme_color": "#7C3AED",
+  "lang": "fr-CA",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

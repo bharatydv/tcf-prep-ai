@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { api, errMsg } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
+import { Seo } from '../lib/seo';
 import { ComingSoon } from '../components/shared';
 
 // Mock exams are not open yet. Module scope, so the fetch effect below does
@@ -56,6 +57,7 @@ export default function MockExam() {
   if (!meta) {
     return (
       <main className="px-4 py-20 text-center">
+        <Seo titleKey="seo.mock.title" noindex />
         <p className="text-gray-600">{t('mock.unknownType')}</p>
         <div className="mt-5 flex flex-wrap justify-center gap-3">
           {typeTabs.map(({ key, icon: Icon, label }) => (

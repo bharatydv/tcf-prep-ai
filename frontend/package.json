@@ -19,12 +19,16 @@
   "devDependencies": {
     "tailwindcss": "^3.4.14",
     "autoprefixer": "^10.4.20",
-    "postcss": "^8.4.47"
+    "postcss": "^8.4.47",
+    "react-snap": "^1.23.0"
   },
   "scripts": {
     "start": "craco start",
     "build": "craco build",
-    "test": "craco test"
+    "test": "craco test",
+    "build:prerender": "craco build && node scripts/prerender-shell.js save && react-snap && node scripts/prerender-shell.js prune",
+    "prebuild": "node scripts/generate-sitemap.js",
+    "sitemap": "node scripts/generate-sitemap.js"
   },
   "browserslist": {
     "production": [
@@ -42,5 +46,34 @@
     "extends": [
       "react-app"
     ]
+  },
+  "proxy": "http://localhost:8000",
+  "reactSnap": {
+    "source": "build",
+    "include": [
+      "/",
+      "/pricing",
+      "/practice",
+      "/speaking",
+      "/reading",
+      "/listening",
+      "/resources",
+      "/blog",
+      "/recent-topics",
+      "/tef-tcf-writing-guide",
+      "/combinations",
+      "/login",
+      "/register",
+      "/privacy",
+      "/terms",
+      "/contact"
+    ],
+    "inlineCss": false,
+    "puppeteerArgs": [
+      "--no-sandbox",
+      "--disable-setuid-sandbox"
+    ],
+    "crawl": true,
+    "skipThirdPartyRequests": true
   }
 }

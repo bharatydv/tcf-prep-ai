@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { CheckCircle } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
+import { Seo } from '../lib/seo';
 
 const PLANS = [
   { name: 'Bronze', price: '$14.99', durationKey: 'pricing.duration5d', bonus: 3, grad: 'from-amber-700 to-amber-500', popular: false },
@@ -24,6 +25,7 @@ export default function Pricing() {
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-12">
+      <Seo titleKey="seo.pricing.title" descKey="seo.pricing.desc" path="/pricing" />
       <h1 className="text-center text-4xl font-bold">{t('pricing.title')}</h1>
       <p className="mx-auto mt-3 max-w-xl text-center text-gray-600">
         {t('pricing.subtitle')}

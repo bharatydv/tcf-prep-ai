@@ -3,12 +3,13 @@ import {
   Sparkle, BookOpen, Question, ArrowRight, GraduationCap, Lightbulb, Compass,
 } from '@phosphor-icons/react';
 import { useT } from '../i18n';
+import { Seo } from '../lib/seo';
 
 /* Copy lives as translation keys and is resolved with t() at render time. */
 const RESOURCE_CARDS = [
   { to: '/blog', title: 'res.blogTitle', desc: 'res.blogDesc', icon: BookOpen, cta: 'res.blogCta' },
   { to: '/tef-tcf-writing-guide', title: 'res.guideTitle', desc: 'res.guideDesc', icon: GraduationCap, cta: 'res.guideCta' },
-  { to: '/faq', title: 'res.faqTitle', desc: 'res.faqDesc', icon: Question, cta: 'res.faqCta' },
+  { to: '/tef-tcf-writing-guide#faq', title: 'res.faqTitle', desc: 'res.faqDesc', icon: Question, cta: 'res.faqCta' },
 ];
 
 const TIPS = ['res.tip1', 'res.tip2', 'res.tip3', 'res.tip4'];
@@ -18,6 +19,7 @@ export default function Resources() {
 
   return (
     <main className="overflow-x-clip bg-white">
+      <Seo titleKey="seo.resources.title" descKey="seo.resources.desc" path="/resources" />
       {/* HERO */}
       <section className="relative bg-gradient-to-br from-violet-100 via-fuchsia-50 to-violet-200">
         <div className="relative mx-auto max-w-3xl px-4 pb-10 pt-12 text-center sm:px-6">
