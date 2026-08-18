@@ -5,6 +5,7 @@ import {
 } from '@phosphor-icons/react';
 import { api } from '../lib/api';
 import { formatDate, useI18n } from '../i18n';
+import { useSeo } from '../lib/seo';
 
 /* Sentinel for "no category filter". Kept separate from its label so the
    filter keeps working when the label is translated. */
@@ -33,6 +34,11 @@ function ParisSkyline() {
 }
 
 export default function Blog() {
+  // A hook rather than an element, so no early return — loading, empty,
+  // or "coming soon" — can skip it and leave the page inheriting the
+  // shell's canonical, which points at the homepage.
+  useSeo({ titleKey: 'seo.blog.title', descKey: 'seo.blog.desc', path: '/blog' });
+
   const { t, lang } = useI18n();
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -153,6 +159,7 @@ export default function Blog() {
                   <div className="relative min-h-[220px] overflow-hidden bg-gradient-to-br from-violet-200 to-fuchsia-200">
                     {featured.cover_image ? (
                       <img src={featured.cover_image} alt={featured.title}
+                        width="800" height="450" loading="lazy" decoding="async"
                         className="h-full w-full object-cover transition group-hover:scale-105" />
                     ) : (
                       <div className="flex h-full items-center justify-center text-violet-400">
@@ -196,6 +203,7 @@ export default function Blog() {
                       {p.cover_image ? (
                         <div className="h-44 w-full overflow-hidden">
                           <img src={p.cover_image} alt={p.title}
+                            width="640" height="360" loading="lazy" decoding="async"
                             className="h-full w-full object-cover transition group-hover:scale-105" />
                         </div>
                       ) : (

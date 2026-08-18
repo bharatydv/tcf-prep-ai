@@ -1,0 +1,35 @@
+# monfrançais — https://xn--monfranais-u6a.com  (monfrançais.com)
+
+User-agent: *
+Allow: /
+
+# Signed-in surfaces: nothing to index, and crawling them only burns budget.
+Disallow: /admin
+Disallow: /admin/
+Disallow: /dashboard
+Disallow: /review
+Disallow: /feedback/
+Disallow: /check-writing
+Disallow: /practice/simulator
+Disallow: /api/
+
+# Answer engines. Allowed on purpose: the guides, blog and exam topics are
+# written to be quoted, and the pages are prerendered so they can read them.
+User-agent: GPTBot
+Allow: /
+User-agent: OAI-SearchBot
+Allow: /
+User-agent: ClaudeBot
+Allow: /
+User-agent: Claude-Web
+Allow: /
+User-agent: PerplexityBot
+Allow: /
+User-agent: Google-Extended
+Allow: /
+User-agent: Applebot-Extended
+Allow: /
+User-agent: CCBot
+Allow: /
+
+Sitemap: https://xn--monfranais-u6a.com/sitemap.xml

@@ -8,6 +8,7 @@ import {
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api } from '../lib/api';
+import { startRecording as startCapture, appendAudio, isRecordingSupported } from '../lib/recorder';
 import { useAuth } from '../context/AuthContext';
 import { BackLink } from '../components/shared';
 import ConversationModal from '../components/ConversationModal';
@@ -71,29 +72,28 @@ function RecorderModal({ question, tacheNum, tacheTitle, onCancel, onComplete })
   const [left, setLeft] = useState(speakSeconds);
   const [checking, setChecking] = useState(false);
 
-  const mrRef = useRef(null);
-  const chunksRef = useRef([]);
-  const streamRef = useRef(null);
+  // The capture handle from lib/recorder.js, which owns the MediaRecorder and
+  // the microphone track and reports the container it actually produced.
+  const captureRef = useRef(null);
   const canceledRef = useRef(false);
   const leftRef = useRef(speakSeconds);
 
   useEffect(() => { leftRef.current = left; }, [left]);
 
   const releaseStream = () => {
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
+    captureRef.current?.cancel();
+    captureRef.current = null;
   };
 
   const cancel = () => {
     canceledRef.current = true;
-    try { if (mrRef.current?.state === 'recording') mrRef.current.stop(); } catch (e) {}
+    try { captureRef.current?.cancel(); } catch (e) {}
     releaseStream();
     onCancel();
   };
 
-  const finish = () => {
-    try { if (mrRef.current?.state === 'recording') mrRef.current.stop(); } catch (e) {}
-  };
+  // The countdown and the stop button both land here.
+  const finish = () => { finishRecording(); };
 
   // Lock page scroll while open; Escape abandons the attempt.
   useEffect(() => {
@@ -125,20 +125,9 @@ function RecorderModal({ question, tacheNum, tacheTitle, onCancel, onComplete })
   };
 
   const beginRecording = async () => {
+    if (!isRecordingSupported()) { toast.error(t('st.micDenied')); return cancel(); }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      const mr = new MediaRecorder(stream);
-      chunksRef.current = [];
-      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      mr.onstop = () => {
-        releaseStream();
-        if (canceledRef.current) return;
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        onComplete(blob, speakSeconds - leftRef.current);
-      };
-      mr.start();
-      mrRef.current = mr;
+      captureRef.current = await startCapture({ basename: 'answer' });
       setPhase('recording');
     } catch (err) {
       toast.error(t('st.micDenied'));
@@ -146,12 +135,46 @@ function RecorderModal({ question, tacheNum, tacheTitle, onCancel, onComplete })
     }
   };
 
+  // Called when the official limit is reached or the candidate stops early.
+  const finishRecording = async () => {
+    const capture = captureRef.current;
+    if (!capture) return;
+    captureRef.current = null;
+    let recorded;
+    try {
+      recorded = await capture.stop();
+    } catch {
+      return cancel();
+    }
+    if (canceledRef.current) return;
+    onComplete(recorded, speakSeconds - leftRef.current);
+  };
+
+  // Anchored to a wall-clock deadline rather than a chain of one-second
+  // timeouts, so a backgrounded tab cannot extend the official preparation.
+  const prepEndsRef = useRef(null);
+  const speakEndsRef = useRef(null);
+
   useEffect(() => {
-    if (phase !== 'prep') return;
-    if (prepLeft <= 0) { setPhase('countdown'); return; }
-    const id = setTimeout(() => setPrepLeft((s) => s - 1), 1000);
-    return () => clearTimeout(id);
-  }, [phase, prepLeft]);
+    if (phase !== 'prep') { prepEndsRef.current = null; return undefined; }
+    if (prepEndsRef.current == null) prepEndsRef.current = Date.now() + prepLeft * 1000;
+
+    const read = () => {
+      const left = Math.max(0, Math.ceil((prepEndsRef.current - Date.now()) / 1000));
+      setPrepLeft(left);
+      if (left <= 0) setPhase('countdown');
+    };
+
+    read();
+    const id = setInterval(read, 250);
+    const onVisible = () => { if (!document.hidden) read(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
   useEffect(() => {
     if (phase !== 'countdown') return;
@@ -162,12 +185,25 @@ function RecorderModal({ question, tacheNum, tacheTitle, onCancel, onComplete })
   }, [phase, tick]);
 
   useEffect(() => {
-    if (phase !== 'recording') return;
-    if (left <= 0) { finish(); return; }
-    const id = setTimeout(() => setLeft((s) => s - 1), 1000);
-    return () => clearTimeout(id);
+    if (phase !== 'recording') { speakEndsRef.current = null; return undefined; }
+    if (speakEndsRef.current == null) speakEndsRef.current = Date.now() + left * 1000;
+
+    const read = () => {
+      const remaining = Math.max(0, Math.ceil((speakEndsRef.current - Date.now()) / 1000));
+      setLeft(remaining);
+      if (remaining <= 0) finish();
+    };
+
+    read();
+    const id = setInterval(read, 250);
+    const onVisible = () => { if (!document.hidden) read(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, left]);
+  }, [phase]);
 
   const spoken = speakSeconds - left;
   const progress = Math.min(100, (spoken / speakSeconds) * 100);
@@ -277,7 +313,7 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
   const [chatOpen, setChatOpen] = useState(false);
   const [audioBlob, setAudioBlob] = useState(null);
   const [audioUrl, setAudioUrl] = useState('');
-  const [audioName, setAudioName] = useState('answer.webm');
+  const [audioMeta, setAudioMeta] = useState(null);
   const [elapsed, setElapsed] = useState(0);
   const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState(null);
@@ -297,7 +333,7 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
     setAudioBlob(null);
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     setAudioUrl('');
-    setAudioName('answer.webm');
+    setAudioMeta(null);
     setElapsed(0);
     setResult(null);
   };
@@ -319,11 +355,11 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
   };
 
   // Handed the finished take by the modal; the analysis path below is unchanged.
-  const handleRecorded = (blob, seconds) => {
+  const handleRecorded = (recorded, seconds) => {
     setModalOpen(false);
-    setAudioBlob(blob);
-    setAudioName('answer.webm');
-    setAudioUrl(URL.createObjectURL(blob));
+    setAudioBlob(recorded.blob);
+    setAudioMeta({ filename: recorded.filename, mimeType: recorded.mimeType, recorded: true });
+    setAudioUrl(URL.createObjectURL(recorded.blob));
     setElapsed(seconds);
   };
 
@@ -344,7 +380,7 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
     }
     reset();
     setAudioBlob(file);
-    setAudioName(file.name || 'upload.mp3');
+    setAudioMeta({ filename: file.name || 'upload.mp3', mimeType: file.type || '', recorded: false });
     setAudioUrl(URL.createObjectURL(file));
   };
 
@@ -355,7 +391,11 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
     try {
       const form = new FormData();
       form.append('question', q.prompt_text);
-      form.append('audio', audioBlob, audioName);
+      appendAudio(form, {
+        blob: audioBlob,
+        filename: audioMeta?.filename || 'answer.webm',
+        mimeType: audioMeta?.mimeType || audioBlob.type,
+      });
       const { data } = await api.post('/api/speaking/analyze', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -428,7 +468,7 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
           {audioBlob ? (
             <>
               <p className="font-heading text-sm font-bold text-gray-900">
-                {audioName === 'answer.webm' ? `Votre enregistrement (${mm}:${ss})` : `Fichier : ${audioName}`}
+                {audioMeta?.recorded ? `Votre enregistrement (${mm}:${ss})` : `Fichier : ${audioMeta?.filename || ''}`}
               </p>
               <audio src={audioUrl} controls className="mx-auto mt-3 w-full max-w-sm" />
               <div className="mt-4 flex flex-wrap items-center justify-center gap-2">

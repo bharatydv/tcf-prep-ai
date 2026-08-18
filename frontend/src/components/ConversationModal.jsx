@@ -5,6 +5,7 @@ import {
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, errMsg } from '../lib/api';
+import { startRecording as startCapture, appendAudio, isRecordingSupported } from '../lib/recorder';
 import { useT } from '../i18n';
 
 /* Tache 2 is a live roleplay: the candidate asks, an examiner answers. This
@@ -21,6 +22,58 @@ const TIMINGS = {
 };
 
 const fmt = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+
+/* ---------------- how the examiner sounds ----------------
+   A single long utterance comes out flat and hurried, which is the main reason
+   the partner sounded like a screen reader. Each clause is spoken as its own
+   utterance instead: the browser restarts its intonation contour on every one,
+   and the gap we leave between them is a real breath rather than a comma the
+   engine races past. */
+const SPEECH_RATE = 0.9;        // just under conversational pace, still not sluggish
+const PAUSE_SENTENCE = 340;     // ms of silence after . ! ?
+const PAUSE_CLAUSE = 150;       // ms after , ; :
+const CHUNK_MIN = 18;           // a chunk shorter than this absorbs the next one
+const TAIL_MIN = 8;             // « oui. », « merci. » — too small to stand alone
+
+// Voices differ wildly in quality and the first French one in the list is
+// usually the flat local fallback. Score by the names the good ones carry.
+const VOICE_HINTS = [/natural/i, /neural/i, /google/i, /online/i,
+  /denise|d[ée]nise|am[ée]lie|audrey|julie|thomas|paul|c[ée]line/i];
+
+const pickFrenchVoice = () => {
+  let voices = [];
+  try { voices = window.speechSynthesis?.getVoices?.() || []; } catch (e) { return null; }
+  const fr = voices.filter((v) => (v.lang || '').toLowerCase().startsWith('fr'));
+  if (!fr.length) return null;
+  const score = (v) => {
+    let s = 0;
+    VOICE_HINTS.forEach((re, i) => { if (re.test(v.name || '')) s += (VOICE_HINTS.length - i) * 2; });
+    if ((v.lang || '').toLowerCase().replace('_', '-') === 'fr-fr') s += 3;  // the exam plays metropolitan French
+    if (v.localService) s -= 1;
+    return s;
+  };
+  return fr.slice().sort((a, b) => score(b) - score(a))[0] || null;
+};
+
+const splitForSpeech = (text) => {
+  const pieces = text.match(/[^.!?…,;:]+[.!?…,;:]*/g) || [text];
+  const out = [];
+  pieces.forEach((raw) => {
+    const piece = raw.trim();
+    if (!piece) return;
+    const prev = out[out.length - 1];
+    // « Alors, » on its own sounds clipped, so glue tiny fragments to their
+    // neighbour — but never across a full stop, where the pause belongs, and
+    // never once the running chunk is long enough to carry the pause itself.
+    if (prev && !/[.!?…]$/.test(prev)
+        && (prev.length < CHUNK_MIN || piece.length < TAIL_MIN)) {
+      out[out.length - 1] = `${prev} ${piece}`;
+    } else {
+      out.push(piece);
+    }
+  });
+  return out;
+};
 
 // Chrome and Edge expose live recognition; elsewhere we record each turn and
 // send it to the backend to be transcribed instead.
@@ -54,40 +107,55 @@ export default function ConversationModal({
   const mutedRef = useRef(false);
   const doneRef = useRef(false);
   const recRef = useRef(null);
-  const mrRef = useRef(null);
-  const chunksRef = useRef([]);
-  const streamRef = useRef(null);
+  // The push-to-talk capture handle from lib/recorder.js, which owns the
+  // MediaRecorder and the microphone track it opened.
+  const captureRef = useRef(null);
   const scrollRef = useRef(null);
   // Broken out into refs because the recognition callbacks below reference each
   // other, and a plain const would capture a stale version.
   const sendTurnRef = useRef(null);
   const listenRef = useRef(null);
   const goLiveRef = useRef(null);
+  // Bumped whenever speech is superseded (new reply, mute, teardown) so the
+  // chunk queue of an older utterance stops instead of talking over the mic.
+  const speakSeqRef = useRef(0);
+  const voiceRef = useRef(null);
 
   useEffect(() => { turnsRef.current = turns; }, [turns]);
   useEffect(() => { mutedRef.current = muted; }, [muted]);
 
-  // Voice list loads asynchronously in Chrome; touching it early warms it up.
+  // The voice list loads asynchronously in Chrome, and picking before it
+  // arrives lands on the default robotic voice — so choose again when it fires.
   useEffect(() => {
-    try { window.speechSynthesis?.getVoices(); } catch (e) {}
+    const choose = () => { voiceRef.current = pickFrenchVoice() || voiceRef.current; };
+    choose();
+    const synth = window.speechSynthesis;
+    if (!synth) return undefined;
+    synth.addEventListener?.('voiceschanged', choose);
+    return () => synth.removeEventListener?.('voiceschanged', choose);
   }, []);
+
+  // Muting mid-reply must silence the reply in progress, not just the next one.
+  useEffect(() => {
+    if (!muted) return;
+    speakSeqRef.current += 1;
+    try { window.speechSynthesis?.cancel(); } catch (e) {}
+  }, [muted]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [turns, interim, status]);
 
-  const releaseStream = () => {
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-  };
-
   const teardown = useCallback(() => {
     doneRef.current = true;
+    speakSeqRef.current += 1;
     try { recRef.current?.abort?.(); } catch (e) {}
     try { recRef.current?.stop?.(); } catch (e) {}
     try { window.speechSynthesis?.cancel(); } catch (e) {}
-    try { if (mrRef.current?.state === 'recording') mrRef.current.stop(); } catch (e) {}
-    releaseStream();
+    // cancel() stops the recorder and releases the microphone track, so
+    // closing the modal mid-turn never leaves the mic indicator lit.
+    try { captureRef.current?.cancel(); } catch (e) {}
+    captureRef.current = null;
   }, []);
 
   const cancel = () => { teardown(); onCancel(); };
@@ -108,21 +176,44 @@ export default function ConversationModal({
 
   /* ---------------- speech out ---------------- */
   const speak = useCallback((text) => new Promise((resolve) => {
-    if (mutedRef.current || !window.speechSynthesis || !text) return resolve();
-    try {
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'fr-FR';
-      const voices = window.speechSynthesis.getVoices() || [];
-      const fr = voices.find((v) => (v.lang || '').toLowerCase().startsWith('fr'));
-      if (fr) u.voice = fr;
-      u.rate = 0.98;
-      u.onend = () => resolve();
-      u.onerror = () => resolve();
-      window.speechSynthesis.speak(u);
-    } catch (e) {
-      resolve();
-    }
+    const synth = window.speechSynthesis;
+    if (mutedRef.current || !synth || !text) return resolve();
+    const seq = (speakSeqRef.current += 1);
+    try { synth.cancel(); } catch (e) {}
+    if (!voiceRef.current) voiceRef.current = pickFrenchVoice();
+    const chunks = splitForSpeech(text);
+
+    let i = 0;
+    const sayNext = () => {
+      // Superseded, muted or closed: stop here and let the caller move on.
+      if (seq !== speakSeqRef.current || doneRef.current || mutedRef.current
+          || i >= chunks.length) return resolve();
+      const chunk = chunks[i];
+      i += 1;
+      const endsSentence = /[.!?…]$/.test(chunk);
+      try {
+        const u = new SpeechSynthesisUtterance(chunk);
+        u.lang = 'fr-FR';
+        if (voiceRef.current) u.voice = voiceRef.current;
+        u.rate = SPEECH_RATE;
+        // A question lifts at the end; statements alternate by a hair so a run
+        // of them does not settle into a monotone.
+        u.pitch = /\?$/.test(chunk) ? 1.08 : 1 - (i % 2) * 0.04;
+        const after = () => {
+          if (seq !== speakSeqRef.current) return resolve();
+          setTimeout(sayNext, endsSentence ? PAUSE_SENTENCE : PAUSE_CLAUSE);
+          return undefined;
+        };
+        u.onend = after;
+        u.onerror = after;
+        synth.speak(u);
+      } catch (e) {
+        resolve();
+      }
+      return undefined;
+    };
+
+    sayNext();
   }), []);
 
   /* ---------------- speech in ---------------- */
@@ -173,7 +264,7 @@ export default function ConversationModal({
     setStatus('thinking');
     setError('');
     try {
-      const { data } = await api.post('/api/speaking/converse', { consigne, history });
+      const { data } = await api.post('/api/speaking/converse', { consigne, history, mode });
       const reply = (data?.reply || '').trim();
       if (!reply) throw new Error('empty reply');
       const after = [...history, { role: 'agent', text: reply }];
@@ -186,7 +277,7 @@ export default function ConversationModal({
       setStatus('idle');
       setError(errMsg(err, t('conv.errNoReply')));
     }
-  }, [consigne, speak, t]);
+  }, [consigne, mode, speak, t]);
 
   const sendTurn = useCallback((text) => {
     const next = [...turnsRef.current, { role: 'candidate', text }];
@@ -197,33 +288,12 @@ export default function ConversationModal({
 
   /* ---------------- push-to-talk fallback ---------------- */
   const startPushToTalk = async () => {
+    if (!isRecordingSupported()) return toast.error(t('conv.micDenied'));
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      const mr = new MediaRecorder(stream);
-      chunksRef.current = [];
-      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      mr.onstop = async () => {
-        releaseStream();
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        if (!blob.size || doneRef.current) return;
-        setStatus('thinking');
-        try {
-          const form = new FormData();
-          form.append('audio', blob, 'turn.webm');
-          const { data } = await api.post('/api/speaking/turn/transcribe', form, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-          });
-          const text = (data?.text || '').trim();
-          if (text) sendTurnRef.current?.(text);
-          else { setStatus('idle'); toast.error(t('conv.noSpeech')); }
-        } catch (err) {
-          setStatus('idle');
-          setError(errMsg(err, t('conv.errTranscription')));
-        }
-      };
-      mr.start();
-      mrRef.current = mr;
+      // The container is negotiated rather than assumed: Safari records MP4,
+      // and labelling that as audio/webm made every iOS turn fail to
+      // transcribe. See lib/recorder.js.
+      captureRef.current = await startCapture({ basename: 'turn' });
       setRecording(true);
       setStatus('listening');
     } catch (err) {
@@ -231,9 +301,31 @@ export default function ConversationModal({
     }
   };
 
-  const stopPushToTalk = () => {
-    try { if (mrRef.current?.state === 'recording') mrRef.current.stop(); } catch (e) {}
+  const stopPushToTalk = async () => {
+    const capture = captureRef.current;
+    if (!capture) return;
+    captureRef.current = null;
     setRecording(false);
+    let recorded;
+    try {
+      recorded = await capture.stop();
+    } catch {
+      setStatus('idle');
+      return;
+    }
+    if (!recorded.blob.size || doneRef.current) { setStatus('idle'); return; }
+    setStatus('thinking');
+    try {
+      const { data } = await api.post('/api/speaking/turn/transcribe',
+        appendAudio(new FormData(), recorded),
+        { headers: { 'Content-Type': 'multipart/form-data' } });
+      const text = (data?.text || '').trim();
+      if (text) sendTurnRef.current?.(text);
+      else { setStatus('idle'); toast.error(t('conv.noSpeech')); }
+    } catch (err) {
+      setStatus('idle');
+      setError(errMsg(err, t('conv.errTranscription')));
+    }
   };
 
   /* ---------------- lifecycle ---------------- */
@@ -279,19 +371,52 @@ export default function ConversationModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [consigne, onGraded, onCancel, phase, teardown]);
 
-  useEffect(() => {
-    if (phase !== 'prep') return;
-    if (prepLeft <= 0) { goLive(); return; }
-    const id = setTimeout(() => setPrepLeft((s) => s - 1), 1000);
-    return () => clearTimeout(id);
-  }, [phase, prepLeft, goLive]);
+  // Wall-clock deadlines: the official 2 minutes of preparation and 3 min 30
+  // of interaction must not stretch because the tab lost focus.
+  const prepEndsRef = useRef(null);
+  const liveEndsRef = useRef(null);
 
   useEffect(() => {
-    if (phase !== 'live') return;
-    if (left <= 0) { finish(); return; }
-    const id = setTimeout(() => setLeft((s) => s - 1), 1000);
-    return () => clearTimeout(id);
-  }, [phase, left, finish]);
+    if (phase !== 'prep') { prepEndsRef.current = null; return undefined; }
+    if (prepEndsRef.current == null) prepEndsRef.current = Date.now() + prepLeft * 1000;
+
+    const read = () => {
+      const remaining = Math.max(0, Math.ceil((prepEndsRef.current - Date.now()) / 1000));
+      setPrepLeft(remaining);
+      if (remaining <= 0) goLive();
+    };
+
+    read();
+    const id = setInterval(read, 250);
+    const onVisible = () => { if (!document.hidden) read(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, goLive]);
+
+  useEffect(() => {
+    if (phase !== 'live') { liveEndsRef.current = null; return undefined; }
+    if (liveEndsRef.current == null) liveEndsRef.current = Date.now() + left * 1000;
+
+    const read = () => {
+      const remaining = Math.max(0, Math.ceil((liveEndsRef.current - Date.now()) / 1000));
+      setLeft(remaining);
+      if (remaining <= 0) finish();
+    };
+
+    read();
+    const id = setInterval(read, 250);
+    const onVisible = () => { if (!document.hidden) read(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, finish]);
 
   const spokenTurns = turns.filter((t) => t.role === 'candidate').length;
   const statusLabel = {

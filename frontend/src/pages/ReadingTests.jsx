@@ -6,6 +6,7 @@ import {
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
+import { Seo } from '../lib/seo';
 import { BackLink } from '../components/shared';
 
 /* The ten papers, in either mode. Practice marks each question as it is
@@ -45,6 +46,7 @@ export default function ReadingTests() {
 
   return (
     <main className="overflow-x-clip bg-white">
+      <Seo titleKey="seo.reading.title" descKey="seo.reading.desc" path="/reading/practice" />
       <section className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
         <BackLink to="/reading" className="!mb-6" testid="back-to-reading" />
 

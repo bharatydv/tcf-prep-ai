@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { EnvelopeSimple, Lock, User } from '@phosphor-icons/react';
+import { EnvelopeSimple, Lock, User, Eye, EyeSlash } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
+import { Seo } from '../lib/seo';
 
 export default function Register() {
   const { register } = useAuth();
@@ -12,6 +13,7 @@ export default function Register() {
   const [form, setForm] = useState({ name: '', email: '', password: '', confirm: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
   const submit = async (e) => {
@@ -29,7 +31,8 @@ export default function Register() {
   };
 
   return (
-    <main className="flex min-h-[calc(100vh-65px)] items-center justify-center bg-gradient-to-br from-violet-50 via-white to-violet-100 px-4 py-12">
+    <main className="flex min-h-[calc(100dvh-4rem)] items-center justify-center bg-gradient-to-br from-violet-50 via-white to-violet-100 px-4 py-12">
+      <Seo titleKey="seo.register.title" descKey="seo.register.desc" path="/register" />
       <div className="card w-full max-w-md p-8">
         <span className="pill mb-4 bg-green-50 text-green-700" data-testid="free-attempts-badge">{t('auth.freeBadge')}</span>
         <h1 className="text-2xl font-bold">{t('auth.createAccount')}</h1>
@@ -37,19 +40,32 @@ export default function Register() {
         <form onSubmit={submit} className="mt-6 space-y-4">
           <div className="relative">
             <User size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input className="input !pl-11" required placeholder={t('auth.fullName')} value={form.name} onChange={set('name')} data-testid="name-input" />
+            <input className="input !pl-11" name="name" autoComplete="name" required
+              placeholder={t('auth.fullName')} value={form.name} onChange={set('name')} data-testid="name-input" />
           </div>
           <div className="relative">
             <EnvelopeSimple size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input className="input !pl-11" type="email" required placeholder={t('auth.email')} value={form.email} onChange={set('email')} data-testid="email-input" />
+            <input className="input !pl-11" type="email" name="email" autoComplete="email"
+              autoCapitalize="none" autoCorrect="off" spellCheck="false" required
+              placeholder={t('auth.email')} value={form.email} onChange={set('email')} data-testid="email-input" />
           </div>
           <div className="relative">
             <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input className="input !pl-11" type="password" required placeholder={t('auth.passwordHint')} value={form.password} onChange={set('password')} data-testid="password-input" />
+            <input className="input !pl-11 !pr-12" type={showPassword ? 'text' : 'password'}
+              name="new-password" autoComplete="new-password" required minLength={8}
+              placeholder={t('auth.passwordHint')} value={form.password} onChange={set('password')} data-testid="password-input" />
+            <button type="button" onClick={() => setShowPassword((v) => !v)}
+              aria-label={showPassword ? t('auth.hidePassword') : t('auth.showPassword')}
+              aria-pressed={showPassword}
+              className="absolute right-1 top-1/2 -translate-y-1/2 rounded-lg p-2.5 text-gray-400 transition hover:text-primary">
+              {showPassword ? <EyeSlash size={18} /> : <Eye size={18} />}
+            </button>
           </div>
           <div className="relative">
             <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input className="input !pl-11" type="password" required placeholder={t('auth.confirmPassword')} value={form.confirm} onChange={set('confirm')} data-testid="confirm-password-input" />
+            <input className="input !pl-11" type={showPassword ? 'text' : 'password'}
+              name="confirm-password" autoComplete="new-password" required
+              placeholder={t('auth.confirmPassword')} value={form.confirm} onChange={set('confirm')} data-testid="confirm-password-input" />
           </div>
           <button className="btn-primary w-full" disabled={busy} data-testid="register-button">
             {busy && <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />}

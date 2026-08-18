@@ -8,6 +8,7 @@ import {
 import { api, errMsg, CATEGORY_META } from '../lib/api';
 import { Heatmap } from '../components/shared';
 import { useT } from '../i18n';
+import { Seo } from '../lib/seo';
 
 export default function Dashboard() {
   const t = useT();
@@ -36,6 +37,7 @@ export default function Dashboard() {
   if (error && !stats) {
     return (
       <main className="mx-auto max-w-md px-4 py-20 text-center">
+        <Seo titleKey="seo.dashboard.title" path="/dashboard" noindex />
         <p className="text-gray-700">{error}</p>
         <button className="btn-primary mt-5" onClick={load}>{t('dash.retry')}</button>
       </main>
@@ -195,23 +197,25 @@ export default function Dashboard() {
       {/* history */}
       <section className="card mt-6 overflow-hidden">
         <h2 className="px-6 pt-6 font-heading font-semibold">{t('dash.history')}</h2>
-        <table className="mt-4 w-full text-sm">
-          <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
-            <tr><th className="px-6 py-2">{t('dash.colDate')}</th><th className="px-6 py-2">{t('dash.colLevel')}</th><th className="px-6 py-2">{t('dash.colScore')}</th><th className="px-6 py-2">{t('dash.colErrors')}</th><th className="px-6 py-2"></th></tr>
-          </thead>
-          <tbody>
-            {subs.map((s) => (
-              <tr key={s.submission_id} className="border-t border-gray-100">
-                <td className="px-6 py-3">{s.created_at?.slice(0, 10)}</td>
-                <td className="px-6 py-3 font-semibold">{s.tcf_level}</td>
-                <td className="px-6 py-3">{s.overall_score}</td>
-                <td className="px-6 py-3">{s.errors?.length ?? 0}</td>
-                <td className="px-6 py-3"><Link to={`/feedback/${s.submission_id}`} className="font-semibold text-primary">{t('dash.view')}</Link></td>
-              </tr>
-            ))}
-            {!subs.length && <tr><td colSpan="5" className="px-6 py-6 text-center text-gray-400">{t('dash.noSubmissions')}</td></tr>}
-          </tbody>
-        </table>
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[34rem] text-sm">
+            <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
+              <tr><th className="px-4 py-2 sm:px-6">{t('dash.colDate')}</th><th className="px-4 py-2 sm:px-6">{t('dash.colLevel')}</th><th className="px-4 py-2 sm:px-6">{t('dash.colScore')}</th><th className="px-4 py-2 sm:px-6">{t('dash.colErrors')}</th><th className="px-4 py-2 sm:px-6"><span className="sr-only">{t('dash.view')}</span></th></tr>
+            </thead>
+            <tbody>
+              {subs.map((s) => (
+                <tr key={s.submission_id} className="border-t border-gray-100">
+                  <td className="whitespace-nowrap px-4 py-3 tabular-nums sm:px-6">{s.created_at?.slice(0, 10)}</td>
+                  <td className="px-4 py-3 font-semibold sm:px-6">{s.tcf_level}</td>
+                  <td className="px-4 py-3 tabular-nums sm:px-6">{s.overall_score}</td>
+                  <td className="px-4 py-3 tabular-nums sm:px-6">{s.error_count ?? s.errors?.length ?? 0}</td>
+                  <td className="px-4 py-3 sm:px-6"><Link to={`/feedback/${s.submission_id}`} className="font-semibold text-primary">{t('dash.view')}</Link></td>
+                </tr>
+              ))}
+              {!subs.length && <tr><td colSpan="5" className="px-4 py-6 text-center text-gray-400 sm:px-6">{t('dash.noSubmissions')}</td></tr>}
+            </tbody>
+          </table>
+        </div>
       </section>
     </main>
   );

@@ -6,11 +6,17 @@ import { toast } from 'sonner';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
+import { useSeo } from '../lib/seo';
 
 /* These used to be the *writing* tâche labels, copy-pasted from SelectTheme. */
 const TACHE_LABEL = { 1: 'speakThemes.tache1', 2: 'speakThemes.tache2', 3: 'speakThemes.tache3' };
 
 export default function SpeakingThemes() {
+  // A hook rather than an element, so no early return — loading, empty,
+  // or "coming soon" — can skip it and leave the page inheriting the
+  // shell's canonical, which points at the homepage.
+  useSeo({ titleKey: 'seo.speakThemes.title', descKey: 'seo.speakThemes.desc', path: '/speaking/themes' });
+
   const { user } = useAuth();
   const t = useT();
   const navigate = useNavigate();

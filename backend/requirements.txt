@@ -7,6 +7,10 @@ pyjwt==2.10.1
 bcrypt==4.2.1
 python-dotenv==1.0.1
 anthropic==0.107.1
-openai
-python-multipart
-google-genai
+openai==2.41.0
+python-multipart==0.0.32
+google-genai==2.8.0
+# Used directly by the AssemblyAI transcription path. It resolved only as a
+# transitive dependency before, so a change upstream would have broken
+# transcription with an ImportError swallowed by a blanket except.
+requests==2.34.2

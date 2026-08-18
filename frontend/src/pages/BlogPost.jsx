@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, CalendarBlank, User } from '@phosphor-icons/react';
 import { api } from '../lib/api';
 import { BackLink } from '../components/shared';
 import { formatDate, useI18n } from '../i18n';
+import { Seo, SITE_URL } from '../lib/seo';
 
 /* Very small, safe markdown -> HTML for headings, bold, links, lists, paragraphs.
    If you write posts in HTML already, it passes through fine. */
@@ -50,38 +51,25 @@ export default function BlogPost() {
       .finally(() => setLoading(false));
   }, [slug]);
 
-  useEffect(() => {
-    if (!post) return;
-    document.title = `${post.title} | monfrancais Blog`;
-
-    // Meta description (SEO/AEO)
-    let meta = document.querySelector('meta[name="description"]');
-    if (!meta) { meta = document.createElement('meta'); meta.setAttribute('name', 'description'); document.head.appendChild(meta); }
-    const prevDesc = meta.getAttribute('content');
-    meta.setAttribute('content', post.meta_description || post.excerpt || '');
-
-    // Article JSON-LD (strong for SEO + AI citation)
-    const ld = document.createElement('script');
-    ld.type = 'application/ld+json';
-    ld.id = 'blog-jsonld';
-    ld.text = JSON.stringify({
-      '@context': 'https://schema.org',
-      '@type': 'Article',
-      headline: post.title,
-      description: post.meta_description || post.excerpt || '',
-      author: { '@type': 'Organization', name: post.author || 'monfrancais' },
-      datePublished: post.created_at,
-      dateModified: post.updated_at || post.created_at,
-      image: post.cover_image || undefined,
-    });
-    document.getElementById('blog-jsonld')?.remove();
-    document.head.appendChild(ld);
-
-    return () => {
-      document.getElementById('blog-jsonld')?.remove();
-      if (prevDesc != null) meta.setAttribute('content', prevDesc);
-    };
-  }, [post]);
+  // Metadata and Article markup for one post. The <Seo> component owns the
+  // tags it sets, emits a canonical URL and Open Graph pair that this page
+  // never had, and restores the shell's defaults when it unmounts.
+  const articleSchema = useMemo(() => (post ? {
+    '@context': 'https://schema.org',
+    '@type': 'Article',
+    headline: post.title,
+    description: post.meta_description || post.excerpt || '',
+    author: { '@type': 'Organization', name: post.author || 'monfrançais' },
+    publisher: {
+      '@type': 'Organization',
+      name: 'monfrançais',
+      logo: { '@type': 'ImageObject', url: `${SITE_URL}/icon-512.png` },
+    },
+    datePublished: post.created_at,
+    dateModified: post.updated_at || post.created_at,
+    image: post.cover_image || `${SITE_URL}/og-image.png`,
+    mainEntityOfPage: `${SITE_URL}/blog/${slug}`,
+  } : null), [post, slug]);
 
   if (loading) {
     return (
@@ -105,6 +93,14 @@ export default function BlogPost() {
 
   return (
     <main className="overflow-x-clip bg-white">
+      <Seo
+        title={post.title}
+        description={post.meta_description || post.excerpt || ''}
+        path={`/blog/${slug}`}
+        type="article"
+        image={post.cover_image}
+        jsonLd={articleSchema}
+      />
       {/* HERO */}
       <section className="relative bg-gradient-to-br from-violet-100 via-fuchsia-50 to-violet-200">
         <div className="relative mx-auto max-w-3xl px-4 pb-10 pt-10 sm:px-6">
@@ -125,7 +121,11 @@ export default function BlogPost() {
       {/* COVER */}
       {post.cover_image && (
         <div className="mx-auto max-w-3xl px-4 sm:px-6">
+          {/* The hero image of the article: eager, high priority, and given a
+              ratio so nothing below it shifts when it lands. */}
           <img src={post.cover_image} alt={post.title}
+            width="1200" height="630" decoding="async" fetchpriority="high"
+            style={{ aspectRatio: '1200 / 630' }}
             className="mt-8 w-full rounded-3xl object-cover shadow-xl shadow-violet-200/40" />
         </div>
       )}

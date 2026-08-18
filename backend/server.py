@@ -13,11 +13,15 @@ import json
 import uuid
 import asyncio
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone, date
 from typing import Optional, List, Dict, Any
 
 import bcrypt
+import hashlib
+import secrets
 import jwt
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response, HTTPException, Depends, Query, UploadFile, File, Form
@@ -63,6 +67,35 @@ REFRESH_TTL_DAYS = 7
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@frenchcorrector.com").lower()
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", _DEFAULT_ADMIN_PASSWORD)
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+# The origin used to build links inside emails. The first entry of FRONTEND_URL
+# is the canonical site when several origins are allowed.
+PUBLIC_URL = os.environ.get(
+    "PUBLIC_URL", FRONTEND_URL.split(",")[0].strip()).rstrip("/")
+
+# Account recovery. Reset links are deliberately short-lived; verification
+# links can be longer because they grant nothing on their own.
+RESET_TTL_MINUTES = int(os.environ.get("RESET_TTL_MINUTES", "60"))
+VERIFY_TTL_HOURS = int(os.environ.get("VERIFY_TTL_HOURS", "48"))
+
+# SMTP. With no host configured the link is written to the log instead of
+# being sent, which keeps local development working without a mail provider.
+# In production that would mean reset links nobody receives, so the boot check
+# below warns loudly and /auth/forgot-password answers 503 rather than
+# pretending a message went out.
+SMTP_HOST = os.environ.get("SMTP_HOST", "")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+SMTP_FROM = os.environ.get("SMTP_FROM", "monfrançais <bonjour@monfrancais.com>")
+SMTP_STARTTLS = os.environ.get("SMTP_STARTTLS", "true").lower() != "false"
+
+# Only trust X-Forwarded-For when the request actually arrives through a proxy
+# we run. Reading it unconditionally let an anonymous caller rotate the header
+# and land in a fresh rate-limit bucket on every attempt, which defeated the
+# login limiter entirely. Set to a comma-separated list of proxy addresses, or
+# "*" when the platform guarantees the header (a managed load balancer).
+TRUSTED_PROXIES = {p.strip() for p in
+                   os.environ.get("TRUSTED_PROXIES", "").split(",") if p.strip()}
 
 # A forgeable JWT secret or a published admin password in production is a full
 # account takeover, so fail at boot rather than serve traffic with either.
@@ -109,6 +142,18 @@ DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.co
 # AssemblyAI: file transcription (upload -> submit -> poll)
 ASSEMBLYAI_BASE_URL = os.environ.get("ASSEMBLYAI_BASE_URL", "https://api.assemblyai.com")
 ASSEMBLYAI_LANGUAGE = os.environ.get("ASSEMBLYAI_LANGUAGE", "fr")
+# Every provider SDK defaults to waiting forever on a stalled socket. That is
+# the difference between one slow grade and a worker thread lost for the life
+# of the process: the stream handler's 180s guard cancels the coroutine that is
+# awaiting the executor, and cannot interrupt the thread already blocked inside
+# it. Enough of those and AI grading stops for every user at once.
+AI_HTTP_TIMEOUT = float(os.environ.get("AI_HTTP_TIMEOUT", "60"))
+# Grading and transcription block on network I/O, not on CPU, so the pool can
+# safely far exceed the core count. asyncio's default executor is
+# min(32, cpu_count + 4) — six threads on a 2-vCPU box, which capped the whole
+# product at six people being graded at once.
+AI_MAX_CONCURRENCY = int(os.environ.get("AI_MAX_CONCURRENCY", "32"))
+
 FREE_MONTHLY_LIMIT = 5
 FREE_MODEL_ANSWER_LIMIT = 3
 # Cost controls. The longest TCF tâche is 180 words, so 6000 characters is far
@@ -137,17 +182,27 @@ async def get_provider(db: AsyncSession, key: str) -> str:
 
     Cached briefly so we don't hit the DB on every grade call, but still pick
     up Admin-panel changes within ~10 seconds.
+
+    The refresh runs on its own short-lived session and commits immediately.
+    Reading through the caller's session left a transaction open — SELECT
+    starts one and nothing here ended it — so on a cache miss the request held
+    a connection *idle in transaction* for the whole 5-30 second AI call, and
+    enough concurrent misses exhausted the pool for the entire application.
     """
     global _provider_cache, _provider_cache_ts
     import time as _t
     now = _t.time()
     if now - _provider_cache_ts > _PROVIDER_CACHE_TTL:
+        # Claim the refresh before awaiting, so a burst of concurrent misses
+        # issues one query rather than one each.
+        _provider_cache_ts = now
         try:
-            res = await db.execute(select(AppSetting))
-            _provider_cache = {r.key: r.value for r in res.scalars().all()}
+            async with SessionLocal() as session:
+                res = await session.execute(select(AppSetting))
+                _provider_cache = {r.key: r.value for r in res.scalars().all()}
+                await session.commit()
         except Exception:  # noqa: BLE001
             _provider_cache = {}
-        _provider_cache_ts = now
     val = _provider_cache.get(key)
     if val:
         return val.lower()
@@ -158,13 +213,114 @@ def _invalidate_provider_cache():
     global _provider_cache_ts
     _provider_cache_ts = 0.0
 
+# f-strings cannot contain a backslash escape, and the email bodies below are
+# built with them.
+NEWLINE = chr(10)
+
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("tcf-prep-ai")
+
+if IS_PROD and not SMTP_HOST:
+    # Not fatal — everything except account recovery works without it — but it
+    # must not pass unnoticed, because the symptom is silent: people ask for a
+    # reset link and simply never get one.
+    log.error("SMTP_HOST is not set. Password reset and email verification "
+              "cannot deliver anything; /api/auth/forgot-password will answer "
+              "503 until it is configured.")
+
+# ----------------------------------------------------------------------------
+# AI worker pool
+# ----------------------------------------------------------------------------
+# An explicit pool, rather than asyncio's default one. See AI_MAX_CONCURRENCY.
+_ai_executor = ThreadPoolExecutor(max_workers=AI_MAX_CONCURRENCY,
+                                  thread_name_prefix="ai")
+
+
+async def run_ai(fn, *args):
+    """Run a blocking provider call on the AI pool."""
+    return await asyncio.get_running_loop().run_in_executor(_ai_executor, fn, *args)
+
+
+# ----------------------------------------------------------------------------
+# Provider clients
+# ----------------------------------------------------------------------------
+# Each call used to construct its own client, so no HTTPS connection was ever
+# reused: a DNS lookup, TCP handshake and TLS negotiation on every grade,
+# transcription and roleplay turn, and the clients were never closed. They are
+# built once and shared; the SDK clients are thread-safe.
+_clients: Dict[str, Any] = {}
+_clients_lock = threading.Lock()
+
+
+def _client(key: str, factory):
+    """Cached client for `key`, built by `factory` on first use."""
+    got = _clients.get(key)
+    if got is not None:
+        return got
+    with _clients_lock:
+        got = _clients.get(key)
+        if got is None:
+            got = factory()
+            _clients[key] = got
+        return got
+
+
+def _anthropic_client():
+    from anthropic import Anthropic
+    return _client("anthropic",
+                   lambda: Anthropic(api_key=ANTHROPIC_API_KEY,
+                                     timeout=AI_HTTP_TIMEOUT, max_retries=0))
+
+
+def _openai_client(name: str, api_key: str, base_url: Optional[str] = None):
+    from openai import OpenAI
+    def build():
+        kwargs = {"api_key": api_key, "timeout": AI_HTTP_TIMEOUT, "max_retries": 0}
+        if base_url:
+            kwargs["base_url"] = base_url
+        return OpenAI(**kwargs)
+    return _client(name, build)
+
+
+def _gemini_client():
+    from google import genai
+    from google.genai import types as genai_types
+    return _client(
+        "gemini",
+        lambda: genai.Client(
+            api_key=GEMINI_API_KEY,
+            http_options=genai_types.HttpOptions(
+                timeout=int(AI_HTTP_TIMEOUT * 1000))))  # milliseconds
+
+
+def _requests_session():
+    import requests
+    def build():
+        sess = requests.Session()
+        sess.headers.update({"authorization": ASSEMBLYAI_API_KEY})
+        return sess
+    return _client("assemblyai", build)
 
 # ----------------------------------------------------------------------------
 # Database engine / session
 # ----------------------------------------------------------------------------
-engine = create_async_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
+# Sized explicitly rather than inheriting SQLAlchemy's 5 + 10. AI requests
+# hold a session across a call that can run for half a minute, so the default
+# left very little headroom before unrelated requests — /auth/me included —
+# started queueing on pool_timeout.
+DB_POOL_SIZE = int(os.environ.get("DB_POOL_SIZE", "20"))
+DB_MAX_OVERFLOW = int(os.environ.get("DB_MAX_OVERFLOW", "20"))
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,
+    pool_pre_ping=True,
+    pool_size=DB_POOL_SIZE,
+    max_overflow=DB_MAX_OVERFLOW,
+    pool_timeout=int(os.environ.get("DB_POOL_TIMEOUT", "30")),
+    # Recycle before any proxy or Postgres idle timeout can close a pooled
+    # connection underneath us.
+    pool_recycle=int(os.environ.get("DB_POOL_RECYCLE", "1800")),
+)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False,
                                   class_=AsyncSession)
 
@@ -209,6 +365,48 @@ class User(Base):
     # One-off XP rewards already granted, so they are never paid twice.
     awarded_bonuses: Mapped[List[str]] = mapped_column(
         ARRAY(String), default=list)
+    # Bumped on logout and on a password change. Refresh tokens carry the value
+    # they were minted with, so raising it invalidates every one already out
+    # there. Without this, logging out cleared the cookies and left the refresh
+    # token valid for its full seven days with no way to revoke it.
+    token_version: Mapped[int] = mapped_column(Integer, default=0)
+    # Proves the address belongs to whoever typed it.
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    email_verified_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
+
+class AuthToken(Base):
+    """A single-use link token for password reset or email verification.
+
+    Only the SHA-256 of the token is stored, so a leaked database backup does
+    not hand over working reset links. Rows are consumed by setting used_at,
+    never by trusting the client to stop presenting them.
+    """
+    __tablename__ = "auth_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.user_id"), index=True)
+    purpose: Mapped[str] = mapped_column(String(20), index=True)  # reset | verify
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True)
+    used_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
+
+class Subscriber(Base):
+    """Newsletter sign-up. The footer form used to show a success toast and
+    throw the address away, which told people they had subscribed when nothing
+    had happened."""
+    __tablename__ = "subscribers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    source: Mapped[str] = mapped_column(String(40), default="footer")
 
 
 class Prompt(Base):
@@ -456,6 +654,7 @@ def public_user(u: User) -> dict:
         "badges": u.badges or [],
         "model_answers_read": u.model_answers_read or 0,
         "timezone": u.timezone or "America/Toronto",
+        "email_verified": bool(u.email_verified),
         # Shown before the editor, so nobody writes 150 words only to be told
         # afterwards that they had no credits left.
         "credits_remaining": (
@@ -480,6 +679,12 @@ def hash_password(pw: str) -> str:
     return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
 
 
+# Compared against when no account matches, so a login attempt for an unknown
+# address costs the same ~100ms of bcrypt as a real one.
+_DUMMY_PASSWORD_HASH = bcrypt.hashpw(b"monfrancais-timing-equaliser",
+                                     bcrypt.gensalt()).decode()
+
+
 def verify_password(pw: str, hashed: str) -> bool:
     try:
         return bcrypt.checkpw(pw.encode(), hashed.encode())
@@ -487,42 +692,186 @@ def verify_password(pw: str, hashed: str) -> bool:
         return False
 
 
-def make_token(user_id: str, kind: str, minutes: int = 0, days: int = 0) -> str:
+def make_token(user_id: str, kind: str, minutes: int = 0, days: int = 0,
+               token_version: int = 0) -> str:
     exp = now_utc() + timedelta(minutes=minutes, days=days)
     return jwt.encode(
-        {"sub": user_id, "type": kind, "exp": exp, "iat": now_utc()},
+        {"sub": user_id, "type": kind, "exp": exp, "iat": now_utc(),
+         "tv": token_version},
         JWT_SECRET, algorithm=JWT_ALG)
 
 
 def decode_token(token: str, expected: str) -> Optional[str]:
+    """The subject of a valid token of the expected kind, or None.
+
+    Signature and expiry only. Callers that need revocation to apply must also
+    compare the token's `tv` claim with the account's current token_version —
+    see decode_token_claims and get_current_user.
+    """
+    claims = decode_token_claims(token, expected)
+    return claims.get("sub") if claims else None
+
+
+def decode_token_claims(token: str, expected: str) -> Optional[dict]:
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
         if payload.get("type") != expected:
             return None
-        return payload.get("sub")
+        return payload
     except jwt.PyJWTError:
         return None
 
 
-def _set_access_cookie(resp: Response, user_id: str):
+def token_is_current(claims: dict, user: "User") -> bool:
+    """False once the account's token_version has moved past the token's.
+
+    Tokens minted before the column existed carry no `tv`; they are treated as
+    version 0, which is what every existing account starts at, so a deploy does
+    not sign everybody out.
+    """
+    return int(claims.get("tv", 0) or 0) >= int(user.token_version or 0)
+
+
+# ---------------------------------------------------------- link tokens -----
+def _hash_link_token(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+async def issue_link_token(db: AsyncSession, user_id: str, purpose: str,
+                           ttl: timedelta) -> str:
+    """Mint a single-use link token and store only its hash.
+
+    Any unused token of the same purpose is retired first, so asking for a
+    second reset link immediately invalidates the first.
+    """
+    await db.execute(
+        sa_update(AuthToken)
+        .where(AuthToken.user_id == user_id, AuthToken.purpose == purpose,
+               AuthToken.used_at.is_(None))
+        .values(used_at=now_utc()))
+    raw = secrets.token_urlsafe(32)
+    db.add(AuthToken(
+        token_hash=_hash_link_token(raw), user_id=user_id, purpose=purpose,
+        created_at=now_utc(), expires_at=now_utc() + ttl, used_at=None))
+    await db.commit()
+    return raw
+
+
+async def consume_link_token(db: AsyncSession, raw: str,
+                             purpose: str) -> Optional[str]:
+    """Spend a link token, returning the user it belongs to, or None.
+
+    The row is marked used inside the same UPDATE that checks it is unused, so
+    two simultaneous clicks cannot both succeed.
+    """
+    if not raw:
+        return None
+    res = await db.execute(
+        sa_update(AuthToken)
+        .where(AuthToken.token_hash == _hash_link_token(raw),
+               AuthToken.purpose == purpose,
+               AuthToken.used_at.is_(None),
+               AuthToken.expires_at > now_utc())
+        .values(used_at=now_utc())
+        .returning(AuthToken.user_id))
+    user_id = res.scalar_one_or_none()
+    await db.commit()
+    return user_id
+
+
+# Readable by JavaScript on purpose, and carrying nothing but the fact that a
+# session exists. The app used to probe /auth/me on every page load, including
+# for anonymous visitors on the landing page, and pay for a 401 plus a failed
+# refresh before the marketing copy settled.
+SESSION_HINT_COOKIE = "mf_session"
+
+
+def _set_access_cookie(resp: Response, user_id: str, token_version: int = 0):
     """Secure in production so the cookie is never sent over plain HTTP."""
-    resp.set_cookie("access_token", make_token(user_id, "access",
-                                               minutes=ACCESS_TTL_MIN),
+    resp.set_cookie("access_token",
+                    make_token(user_id, "access", minutes=ACCESS_TTL_MIN,
+                               token_version=token_version),
                     httponly=True, samesite="lax", secure=IS_PROD,
                     path="/", max_age=ACCESS_TTL_MIN * 60)
 
 
-def set_auth_cookies(resp: Response, user_id: str):
-    _set_access_cookie(resp, user_id)
+def set_auth_cookies(resp: Response, user_id: str, token_version: int = 0):
+    _set_access_cookie(resp, user_id, token_version)
     resp.set_cookie("refresh_token",
-                    make_token(user_id, "refresh", days=REFRESH_TTL_DAYS),
+                    make_token(user_id, "refresh", days=REFRESH_TTL_DAYS,
+                               token_version=token_version),
                     httponly=True, samesite="lax", secure=IS_PROD,
+                    path="/", max_age=REFRESH_TTL_DAYS * 86400)
+    resp.set_cookie(SESSION_HINT_COOKIE, "1",
+                    httponly=False, samesite="lax", secure=IS_PROD,
                     path="/", max_age=REFRESH_TTL_DAYS * 86400)
 
 
 def clear_auth_cookies(resp: Response):
     resp.delete_cookie("access_token", path="/")
     resp.delete_cookie("refresh_token", path="/")
+    resp.delete_cookie(SESSION_HINT_COOKIE, path="/")
+
+
+# ----------------------------------------------------------------------------
+# Email
+# ----------------------------------------------------------------------------
+def _send_email_sync(to: str, subject: str, body: str):
+    """Send one plain-text message over SMTP, or log it when unconfigured."""
+    if not SMTP_HOST:
+        # Development convenience. In production the boot check below refuses
+        # to start without SMTP, so this branch cannot silently swallow a
+        # password reset in front of real users.
+        log.warning("SMTP not configured - %s link for %s:%s%s",
+                    subject, to, NEWLINE, body)
+        return
+
+    import smtplib
+    from email.message import EmailMessage
+
+    msg = EmailMessage()
+    msg["From"] = SMTP_FROM
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.set_content(body)
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as smtp:
+        if SMTP_STARTTLS:
+            smtp.starttls()
+        if SMTP_USER:
+            smtp.login(SMTP_USER, SMTP_PASSWORD)
+        smtp.send_message(msg)
+
+
+async def send_email(to: str, subject: str, body: str) -> bool:
+    """Send off the event loop. A failure is logged, never raised: the caller
+    must answer identically whether or not delivery worked, or the endpoint
+    becomes a way to test which addresses are registered."""
+    try:
+        await run_ai(_send_email_sync, to, subject, body)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.error("Email send failed (%s): %s", subject, exc)
+        return False
+
+
+def reset_email_body(name: str, link: str) -> str:
+    return (f"Bonjour {name},{NEWLINE}{NEWLINE}"
+            f"Vous avez demandé à réinitialiser votre mot de passe monfrançais."
+            f"{NEWLINE}Ouvrez ce lien pour en choisir un nouveau :{NEWLINE}{NEWLINE}"
+            f"{link}{NEWLINE}{NEWLINE}"
+            f"Le lien est valable {RESET_TTL_MINUTES} minutes et ne fonctionne "
+            f"qu'une fois.{NEWLINE}{NEWLINE}"
+            f"Si vous n'êtes pas à l'origine de cette demande, ignorez ce "
+            f"message : votre mot de passe reste inchangé.{NEWLINE}{NEWLINE}"
+            f"— monfrançais")
+
+
+def verify_email_body(name: str, link: str) -> str:
+    return (f"Bonjour {name},{NEWLINE}{NEWLINE}"
+            f"Confirmez votre adresse e-mail pour sécuriser votre compte "
+            f"monfrançais :{NEWLINE}{NEWLINE}{link}{NEWLINE}{NEWLINE}"
+            f"Le lien est valable {VERIFY_TTL_HOURS} heures.{NEWLINE}{NEWLINE}"
+            f"— monfrançais")
 
 
 # small DB convenience helpers --------------------------------------------------
@@ -566,10 +915,22 @@ def _client_key(request: Request) -> str:
         user_id = decode_token(token, "access")
         if user_id:
             return f"user:{user_id}"
-    fwd = request.headers.get("x-forwarded-for", "")
-    if fwd:
-        return f"ip:{fwd.split(',')[0].strip()}"
-    return f"ip:{request.client.host if request.client else 'unknown'}"
+    return f"ip:{client_ip(request)}"
+
+
+def client_ip(request: Request) -> str:
+    """The caller's address, trusting X-Forwarded-For only behind our proxy.
+
+    Reading the header unconditionally made the limiter useless against the
+    attack it exists to stop: an unauthenticated caller could send a different
+    value on every request and never fill a bucket.
+    """
+    peer = request.client.host if request.client else "unknown"
+    if TRUSTED_PROXIES and ("*" in TRUSTED_PROXIES or peer in TRUSTED_PROXIES):
+        fwd = request.headers.get("x-forwarded-for", "")
+        if fwd:
+            return fwd.split(",")[0].strip()
+    return peer
 
 
 def rate_limit(bucket: str, limit: int, window_seconds: int):
@@ -620,12 +981,16 @@ async def get_current_user(request: Request,
             token = auth[7:]
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    user_id = decode_token(token, "access")
-    if not user_id:
+    claims = decode_token_claims(token, "access")
+    if not claims:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = await get_user_by_id(db, user_id)
+    user = await get_user_by_id(db, claims.get("sub"))
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    # A token minted before a logout or a password change is no longer valid,
+    # even though its signature and expiry still check out.
+    if not token_is_current(claims, user):
+        raise HTTPException(status_code=401, detail="Session ended")
     return user
 
 
@@ -965,6 +1330,11 @@ AI_UNAVAILABLE_DETAIL = ("Correction indisponible : le correcteur IA a refusé l
                          "Réessayez dans un instant.")
 AI_TIMEOUT_DETAIL = ("Correction indisponible : l'analyse a dépassé le délai "
                      "maximum. Réessayez dans un instant.")
+# Returned with 422 when a recording produced no transcript. The credit is
+# refunded first, so the message can promise that plainly.
+NO_SPEECH_DETAIL = ("Aucune parole n'a été détectée dans cet enregistrement. "
+                    "Votre crédit vous a été rendu — vérifiez votre micro et "
+                    "réessayez.")
 
 FALLBACK_ANALYSIS = {
     "errors": [],
@@ -1029,9 +1399,7 @@ def _extract_json(raw: str) -> dict:
 # returns the raw text response. The grader dispatcher picks one by provider.
 # ----------------------------------------------------------------------------
 def _call_anthropic(model: str, system_prompt: str, user_text: str) -> str:
-    from anthropic import Anthropic
-    aclient = Anthropic(api_key=ANTHROPIC_API_KEY)
-    resp = aclient.messages.create(
+    resp = _anthropic_client().messages.create(
         model=model,
         max_tokens=GRADER_MAX_TOKENS,
         system=system_prompt,
@@ -1042,9 +1410,7 @@ def _call_anthropic(model: str, system_prompt: str, user_text: str) -> str:
 
 
 def _call_openai(model: str, system_prompt: str, user_text: str) -> str:
-    from openai import OpenAI
-    client = OpenAI(api_key=OPENAI_API_KEY)
-    resp = client.chat.completions.create(
+    resp = _openai_client("openai", OPENAI_API_KEY).chat.completions.create(
         model=model,
         max_tokens=GRADER_MAX_TOKENS,
         messages=[
@@ -1056,10 +1422,8 @@ def _call_openai(model: str, system_prompt: str, user_text: str) -> str:
 
 
 def _call_gemini(model: str, system_prompt: str, user_text: str) -> str:
-    from google import genai
     from google.genai import types
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    resp = client.models.generate_content(
+    resp = _gemini_client().models.generate_content(
         model=model,
         contents=user_text,
         config=types.GenerateContentConfig(
@@ -1082,8 +1446,7 @@ def _call_openai_compatible(base_url: str, api_key: str, model: str,
     string silently — raise with the reason so it reaches the log and the
     Admin panel.
     """
-    from openai import OpenAI
-    client = OpenAI(api_key=api_key, base_url=base_url)
+    client = _openai_client(f"compat:{base_url}", api_key, base_url)
     resp = client.chat.completions.create(
         model=model,
         max_tokens=GRADER_MAX_TOKENS,
@@ -1180,11 +1543,10 @@ async def _grade_with_provider(provider: str, system_prompt: str,
         log.warning("Missing or placeholder API key for grading provider '%s' "
                     "- set a real key in .env", provider)
         return None
-    loop = asyncio.get_event_loop()
     last_exc = None
     for attempt in range(2):
         try:
-            out = await loop.run_in_executor(None, fn, model, system_prompt, user_text)
+            out = await run_ai(fn, model, system_prompt, user_text)
             _PROVIDER_LAST_ERROR.pop(provider, None)
             return out
         except Exception as exc:  # noqa: BLE001
@@ -1318,30 +1680,40 @@ async def record_mistakes(db: AsyncSession, user_id: str, source: str,
     past proxy timeouts on submissions with several errors. They are generated
     on demand the first time a mistake reaches the MCQ review instead.
     """
+    fresh = []
     for err in analysis.get("errors", []):
         if err["category"] == "improvement":
             continue  # improvements are not mistakes
-        norm = normalize_error_text(err["error"])
-        res = await db.execute(
-            select(Mistake).where(
-                Mistake.user_id == user_id,
-                Mistake.category == err["category"],
-                Mistake.normalized_error == norm))
-        existing = res.scalar_one_or_none()
+        fresh.append((normalize_error_text(err["error"]), err))
+    if not fresh:
+        return
+
+    # One query for every error in the submission, instead of one SELECT and
+    # one COMMIT each: a 15-error essay cost about thirty sequential round
+    # trips and fifteen transactions, all inside the request the learner was
+    # waiting on.
+    res = await db.execute(
+        select(Mistake).where(
+            Mistake.user_id == user_id,
+            Mistake.normalized_error.in_([norm for norm, _ in fresh])))
+    by_key = {(m.category, m.normalized_error): m for m in res.scalars().all()}
+
+    seen = now_utc()
+    for norm, err in fresh:
+        existing = by_key.get((err["category"], norm))
         if existing:
-            new_status = ("new" if existing.status == "mastered"
-                          else (existing.status or "new"))
+            # Meeting a mastered mistake again puts it back into rotation.
+            existing.status = ("new" if existing.status == "mastered"
+                               else (existing.status or "new"))
             existing.times_repeated = (existing.times_repeated or 0) + 1
-            existing.last_seen_at = now_utc()
-            existing.status = new_status
-            await db.commit()
+            existing.last_seen_at = seen
             continue
         distractor = STATIC_DISTRACTORS.get(err["category"],
                                             "réponse incorrecte")
         if generate_distractors:
             distractor = await generate_distractor(
                 err["error"], err["correction"], err["category"], db=db)
-        db.add(Mistake(
+        new_row = Mistake(
             mistake_id=new_id("mst"),
             user_id=user_id,
             source=source,
@@ -1352,15 +1724,21 @@ async def record_mistakes(db: AsyncSession, user_id: str, source: str,
             correction=err["correction"],
             explanation=err["explanation"],
             distractor=distractor,
-            created_at=now_utc(),
-            last_seen_at=now_utc(),
+            created_at=seen,
+            last_seen_at=seen,
             status="new",
             times_repeated=1,
             srs_interval_index=0,
-            srs_due_at=now_utc(),
+            srs_due_at=seen,
             srs_consecutive_got_it=0,
-        ))
-        await db.commit()
+        )
+        db.add(new_row)
+        # The same error can appear twice in one submission; keep the row that
+        # was just added so the second occurrence increments it.
+        by_key[(err["category"], norm)] = new_row
+
+    # A single transaction for the whole submission.
+    await db.commit()
 
 
 async def persist_submission(db: AsyncSession, user: User, text: str,
@@ -1437,7 +1815,22 @@ RÈGLES ABSOLUES :
 - Si le candidat te salue, réponds à la salutation puis invite-le à poser sa question.
 - Si le candidat se tait, dit quelque chose d'incompréhensible ou s'écarte du sujet, relance-le gentiment DANS le personnage (« Pardon, je n'ai pas bien entendu, vous pouvez répéter ? », « Vous avez d'autres questions ? »).
 - Ne pose pas toi-même une longue série de questions : c'est le candidat qui mène l'échange.
-- N'utilise jamais l'anglais."""
+- N'utilise jamais l'anglais.
+- Écris comme on PARLE, pas comme on écrit : phrases courtes, ponctuation généreuse (virgules, points) — ta réplique est lue à voix haute par une synthèse vocale, et la ponctuation EST le rythme et les pauses.
+- Tu peux ouvrir par un petit mot naturel quand c'est justifié (« Alors, », « Eh bien, », « Bien sûr, », « Ah, »), mais pas à chaque réplique. Jamais d'hésitations écrites (« euh », « hmm »), jamais de didascalies (*sourire*), jamais d'émojis."""
+
+# Tâche 2 only. The agent's job there is to be a wall the candidate has to
+# question, so a helpful reply is a broken one: listing what else it could tell
+# them hands over the very questions the exam asks the candidate to find. Tâche
+# 1 and free practice keep the base persona, where the agent does lead.
+INTERACTION_AGENT_TACHE2_EXTRA = """
+
+TÂCHE 2 — RÈGLES SUPPLÉMENTAIRES (c'est le candidat qui mène, pas toi) :
+- Ultra bref : 1 à 2 phrases courtes, 25 mots maximum. UNE seule information par réplique.
+- Réponds SEULEMENT à ce qui vient d'être demandé. N'ajoute aucun détail que le candidat n'a pas réclamé, même s'il te semble utile.
+- Ne souffle JAMAIS la suite : pas de « Voulez-vous aussi savoir… », pas de « Il y a aussi… », pas de « N'hésitez pas à demander… », pas de liste d'options, pas d'annonce de ce que tu peux fournir. Trouver les bonnes questions fait partie de l'épreuve.
+- Ne termine pas par une question, SAUF si le candidat s'est tu, est incompréhensible ou part hors sujet : dans ce cas, une seule relance neutre (« Pardon, vous pouvez répéter ? »).
+- Ta toute première réplique est une ouverture de service minimale, sans aucun détail : par exemple « Bonjour, je vous écoute. »"""
 
 INTERACTION_GRADER_SYSTEM = """You are a certified TCF Canada examiner grading Tâche 2 (Exercice en Interaction) - a two-way roleplay in which the CANDIDATE had to ask questions to obtain information from an agent.
 
@@ -1497,12 +1890,19 @@ def _render_dialogue(history: list, consigne: str) -> str:
     return "\n".join(lines)
 
 
-async def interaction_reply(consigne: str, history: list, db=None) -> str:
-    """Next in-character line from the agent. Empty string on provider failure."""
+async def interaction_reply(consigne: str, history: list, db=None,
+                            mode: str = "tache2") -> str:
+    """Next in-character line from the agent. Empty string on provider failure.
+
+    `mode` picks the persona's brief: tâche 2 answers narrowly and never
+    signposts what could be asked next, because finding the questions is the
+    thing being examined. Tâche 1 and free practice keep the base persona.
+    """
     prompt = (_render_dialogue(history, consigne) +
               "\n\nDonne maintenant la prochaine réplique de l'Agent, et rien d'autre.")
     provider = (await get_provider(db, "speaking_grader_provider")) if db is not None else SPEAKING_GRADER_PROVIDER
-    raw = await _grade_with_provider(provider, INTERACTION_AGENT_SYSTEM, prompt)
+    system = INTERACTION_AGENT_SYSTEM + (INTERACTION_AGENT_TACHE2_EXTRA if mode == "tache2" else "")
+    raw = await _grade_with_provider(provider, system, prompt)
     if not raw:
         return ""
     reply = _strip_fences(raw).strip()
@@ -1567,10 +1967,35 @@ async def grade_interaction(consigne: str, history: list, db=None,
                 "relevance_comment": "", "suggestions": []}
 
 
-def _transcribe_openai(audio_bytes: bytes, filename: str) -> str:
+# Extension -> MIME, used only when the client did not send the real type.
+# Safari records MP4 and every other browser records WebM, so guessing from a
+# hardcoded ".webm" name is exactly how iOS recordings used to fail.
+_AUDIO_MIME_BY_EXT = {
+    "webm": "audio/webm", "m4a": "audio/mp4", "mp4": "audio/mp4",
+    "mp3": "audio/mpeg", "mpga": "audio/mpeg", "wav": "audio/wav",
+    "ogg": "audio/ogg", "oga": "audio/ogg", "aac": "audio/aac",
+    "flac": "audio/flac", "caf": "audio/x-caf",
+}
+_ALLOWED_AUDIO_MIME = set(_AUDIO_MIME_BY_EXT.values())
+
+
+def resolve_audio_mime(filename: str, declared: Optional[str]) -> str:
+    """The recording's real container.
+
+    The browser now sends what MediaRecorder actually produced; fall back to
+    the extension only when it did not, and to WebM when neither is usable.
+    """
+    got = (declared or "").split(";")[0].strip().lower()
+    if got in _ALLOWED_AUDIO_MIME:
+        return got
+    ext = (filename or "").rsplit(".", 1)[-1].lower()
+    return _AUDIO_MIME_BY_EXT.get(ext, "audio/webm")
+
+
+def _transcribe_openai(audio_bytes: bytes, filename: str, mime: str = "") -> str:
     import io
-    from openai import OpenAI
-    client = OpenAI(api_key=OPENAI_API_KEY)
+    del mime  # the OpenAI SDK infers the format from buf.name
+    client = _openai_client("openai", OPENAI_API_KEY)
     buf = io.BytesIO(audio_bytes)
     buf.name = filename or "audio.webm"
     resp = client.audio.transcriptions.create(
@@ -1578,18 +2003,10 @@ def _transcribe_openai(audio_bytes: bytes, filename: str) -> str:
     return (resp.text or "").strip()
 
 
-def _transcribe_gemini(audio_bytes: bytes, filename: str) -> str:
-    from google import genai
+def _transcribe_gemini(audio_bytes: bytes, filename: str, mime: str = "") -> str:
     from google.genai import types
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    mime = "audio/webm"
-    fn = (filename or "").lower()
-    if fn.endswith(".mp3"):
-        mime = "audio/mp3"
-    elif fn.endswith(".wav"):
-        mime = "audio/wav"
-    elif fn.endswith(".m4a"):
-        mime = "audio/mp4"
+    client = _gemini_client()
+    mime = mime or resolve_audio_mime(filename, None)
     resp = client.models.generate_content(
         model=GEMINI_TRANSCRIBE_MODEL,
         contents=[
@@ -1600,11 +2017,11 @@ def _transcribe_gemini(audio_bytes: bytes, filename: str) -> str:
     return (resp.text or "").strip()
 
 
-def _transcribe_groq(audio_bytes: bytes, filename: str) -> str:
+def _transcribe_groq(audio_bytes: bytes, filename: str, mime: str = "") -> str:
     """Transcribe with Groq Whisper (OpenAI-compatible audio endpoint)."""
     import io
-    from openai import OpenAI
-    client = OpenAI(api_key=GROQ_API_KEY, base_url=GROQ_BASE_URL)
+    del mime  # same as OpenAI: the filename carries the format
+    client = _openai_client(f"compat:{GROQ_BASE_URL}", GROQ_API_KEY, GROQ_BASE_URL)
     buf = io.BytesIO(audio_bytes)
     buf.name = filename or "audio.webm"
     resp = client.audio.transcriptions.create(
@@ -1612,57 +2029,79 @@ def _transcribe_groq(audio_bytes: bytes, filename: str) -> str:
     return (resp.text or "").strip()
 
 
-def _transcribe_assemblyai(audio_bytes: bytes, filename: str) -> str:
-    """Transcribe with AssemblyAI: upload bytes, submit job, poll for result."""
-    import time
-    import requests
-    headers = {"authorization": ASSEMBLYAI_API_KEY}
-    # 1. Upload the raw audio bytes
-    up = requests.post(f"{ASSEMBLYAI_BASE_URL}/v2/upload",
-                       headers=headers, data=audio_bytes, timeout=60)
-    up.raise_for_status()
-    audio_url = up.json()["upload_url"]
-    # 2. Submit the transcription job (French)
-    body = {"audio_url": audio_url, "language_code": ASSEMBLYAI_LANGUAGE}
-    sub = requests.post(f"{ASSEMBLYAI_BASE_URL}/v2/transcript",
-                        json=body, headers=headers, timeout=30)
-    sub.raise_for_status()
-    tid = sub.json()["id"]
-    # 3. Poll until complete (max ~60s)
+async def _transcribe_assemblyai_async(audio_bytes: bytes, filename: str,
+                                       mime: str = "") -> str:
+    """Transcribe with AssemblyAI: upload bytes, submit job, poll for result.
+
+    Async because the poll loop waits up to a minute. Done with time.sleep on a
+    worker thread, choosing AssemblyAI in the Admin panel silently cut the
+    server's concurrent-grading capacity: each transcription held one of the
+    pool's threads for the whole wait while doing nothing. asyncio.sleep costs
+    no thread at all.
+    """
+    del mime  # AssemblyAI sniffs the container from the uploaded bytes
+    session = _requests_session()
+
+    def post_upload():
+        r = session.post(f"{ASSEMBLYAI_BASE_URL}/v2/upload",
+                         data=audio_bytes, timeout=AI_HTTP_TIMEOUT)
+        r.raise_for_status()
+        return r.json()["upload_url"]
+
+    def post_job(audio_url):
+        r = session.post(f"{ASSEMBLYAI_BASE_URL}/v2/transcript",
+                         json={"audio_url": audio_url,
+                               "language_code": ASSEMBLYAI_LANGUAGE},
+                         timeout=AI_HTTP_TIMEOUT)
+        r.raise_for_status()
+        return r.json()["id"]
+
+    def poll(url):
+        r = session.get(url, timeout=AI_HTTP_TIMEOUT)
+        r.raise_for_status()
+        return r.json()
+
+    audio_url = await run_ai(post_upload)
+    tid = await run_ai(post_job, audio_url)
     poll_url = f"{ASSEMBLYAI_BASE_URL}/v2/transcript/{tid}"
     for _ in range(40):
-        pr = requests.get(poll_url, headers=headers, timeout=30)
-        pr.raise_for_status()
-        data = pr.json()
+        data = await run_ai(poll, poll_url)
         status = data.get("status")
         if status == "completed":
             return (data.get("text") or "").strip()
         if status == "error":
             raise RuntimeError(data.get("error", "AssemblyAI transcription error"))
-        time.sleep(1.5)
+        await asyncio.sleep(1.5)
     raise RuntimeError("AssemblyAI transcription timed out")
 
 
-async def transcribe_audio(audio_bytes: bytes, filename: str, db=None) -> str:
-    """Transcribe using the active provider (Admin panel overrides .env)."""
+async def transcribe_audio(audio_bytes: bytes, filename: str, db=None,
+                           mime: str = "") -> str:
+    """Transcribe using the active provider (Admin panel overrides .env).
+
+    Returns "" when transcription fails or produces nothing. Callers that spend
+    a credit MUST treat an empty transcript as a failure and refund it: an
+    empty string was previously graded as if it were an answer.
+    """
     provider = (await get_provider(db, "transcribe_provider")) if db is not None else TRANSCRIBE_PROVIDER
     if provider == "gemini":
         fn, key = _transcribe_gemini, GEMINI_API_KEY
     elif provider == "groq":
         fn, key = _transcribe_groq, GROQ_API_KEY
     elif provider == "assemblyai":
-        fn, key = _transcribe_assemblyai, ASSEMBLYAI_API_KEY
+        fn, key = None, ASSEMBLYAI_API_KEY   # async, dispatched below
     else:
         fn, key = _transcribe_openai, OPENAI_API_KEY
         provider = "openai"
-    if not key:
-        log.warning("No API key set for transcription provider '%s'", provider)
+    if not _key_is_usable(key):
+        log.warning("No usable API key for transcription provider '%s'", provider)
         return ""
-    loop = asyncio.get_event_loop()
     try:
-        return await loop.run_in_executor(None, fn, audio_bytes, filename)
+        if provider == "assemblyai":
+            return await _transcribe_assemblyai_async(audio_bytes, filename, mime)
+        return await run_ai(fn, audio_bytes, filename, mime)
     except Exception as exc:  # noqa: BLE001
-        log.warning("Transcription failed (%s): %s", provider, exc)
+        log.warning("Transcription failed (%s): %s", provider, _scrub_secrets(exc))
         return ""
 
 
@@ -1737,7 +2176,26 @@ class RegisterIn(BaseModel):
 
 class LoginIn(BaseModel):
     email: EmailStr
-    password: str
+    # Capped like RegisterIn: bcrypt only reads the first 72 bytes, and an
+    # uncapped field let an arbitrarily large body through validation.
+    password: str = Field(max_length=72)
+
+
+class ForgotPasswordIn(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordIn(BaseModel):
+    token: str = Field(min_length=16, max_length=256)
+    password: str = Field(min_length=8, max_length=72)
+
+
+class VerifyEmailIn(BaseModel):
+    token: str = Field(min_length=16, max_length=256)
+
+
+class SubscribeIn(BaseModel):
+    email: EmailStr
 
 
 class DialogueTurn(BaseModel):
@@ -1748,6 +2206,9 @@ class DialogueTurn(BaseModel):
 class ConverseIn(BaseModel):
     consigne: str = Field(min_length=1, max_length=4000)
     history: List[DialogueTurn] = Field(default_factory=list, max_length=MAX_DIALOGUE_TURNS)
+    # Same vocabulary as ConverseGradeIn: here it picks which persona brief the
+    # roleplay partner speaks under.
+    mode: str = Field(default="tache2", pattern="^(tache1|tache2|free)$")
 
 
 class ConverseGradeIn(BaseModel):
@@ -2286,6 +2747,14 @@ MIGRATIONS = [
     "ALTER TABLE theme_questions ADD COLUMN IF NOT EXISTS title VARCHAR(160)",
     "ALTER TABLE theme_questions ADD COLUMN IF NOT EXISTS doc_1 TEXT",
     "ALTER TABLE theme_questions ADD COLUMN IF NOT EXISTS doc_2 TEXT",
+    # Refresh-token revocation. Existing sessions start at 0 and stay valid.
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER DEFAULT 0",
+    # Email confirmation. Accounts that predate it are treated as unverified,
+    # which only shows a banner — it never blocks anyone from working.
+    "ALTER TABLE users "
+    "ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE users "
+    "ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ",
 ]
 
 
@@ -2309,10 +2778,12 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
 
 
+ALLOWED_ORIGINS = [o.strip() for o in FRONTEND_URL.split(",") if o.strip()]
+
 app = FastAPI(title="monfrançais API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in FRONTEND_URL.split(",") if o.strip()],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -2340,8 +2811,19 @@ async def unhandled_error(request: Request, exc: Exception):
         user_id = decode_token(token, "access") or "invalid-token"
     log.error("[%s] Unhandled error on %s %s (user=%s)",
               error_id, request.method, request.url.path, user_id, exc_info=exc)
+    # This handler runs inside Starlette's error middleware, which sits outside
+    # CORSMiddleware — so on a split-origin deployment the browser blocked the
+    # body and the learner saw an opaque network error instead of the reference
+    # code that was carefully generated for them. Add the headers here.
+    headers = {}
+    origin = request.headers.get("origin")
+    if origin and origin in ALLOWED_ORIGINS:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+        headers["Vary"] = "Origin"
     return JSONResponse(
         status_code=500,
+        headers=headers,
         content={"detail": f"Erreur interne du serveur (réf. {error_id})."})
 
 
@@ -2444,12 +2926,24 @@ async def register(body: RegisterIn, response: Response,
         current_streak=0, longest_streak=0,
         last_activity_date=None, xp=0, badges=[],
         model_answers_read=0, model_answer_topic_ids=[],
+        token_version=0, email_verified=False,
     )
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    set_auth_cookies(response, user.user_id)
+    set_auth_cookies(response, user.user_id, user.token_version or 0)
+    # Confirmation is offered, never enforced: blocking practice behind a link
+    # that may land in spam would cost more accounts than it protects.
+    await _send_verification_email(db, user)
     return {"user": public_user(user)}
+
+
+async def _send_verification_email(db: AsyncSession, user: User) -> bool:
+    raw = await issue_link_token(db, user.user_id, "verify",
+                                 timedelta(hours=VERIFY_TTL_HOURS))
+    link = f"{PUBLIC_URL}/verify-email?token={raw}"
+    return await send_email(user.email, "Confirmez votre adresse monfrançais",
+                            verify_email_body(user.name or "", link))
 
 
 @app.post("/api/auth/login")
@@ -2457,37 +2951,180 @@ async def login(body: LoginIn, response: Response,
                 db: AsyncSession = Depends(get_db),
                 _rl=Depends(auth_rate_limit)):
     user = await get_user_by_email(db, body.email.lower())
-    if not user or not verify_password(body.password, user.password_hash):
+    # bcrypt runs either way. Short-circuiting on a missing account answered in
+    # about a millisecond instead of the ~100ms a real comparison costs, which
+    # made membership readable from the response time alone.
+    ok = await run_ai(verify_password, body.password,
+                      user.password_hash if user else _DUMMY_PASSWORD_HASH)
+    if not user or not ok:
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    set_auth_cookies(response, user.user_id)
+    set_auth_cookies(response, user.user_id, user.token_version or 0)
     return {"user": public_user(user)}
 
 
 @app.post("/api/auth/refresh")
 async def refresh(request: Request, response: Response,
-                  db: AsyncSession = Depends(get_db)):
+                  db: AsyncSession = Depends(get_db),
+                  _rl=Depends(auth_rate_limit)):
     token = request.cookies.get("refresh_token")
-    user_id = decode_token(token, "refresh") if token else None
-    if not user_id:
+    claims = decode_token_claims(token, "refresh") if token else None
+    if not claims:
+        clear_auth_cookies(response)
         raise HTTPException(status_code=401, detail="Invalid refresh token")
-    user = await get_user_by_id(db, user_id)
+    user = await get_user_by_id(db, claims.get("sub"))
     if not user:
+        clear_auth_cookies(response)
         raise HTTPException(status_code=401, detail="User not found")
-    _set_access_cookie(response, user_id)
+    if not token_is_current(claims, user):
+        clear_auth_cookies(response)
+        raise HTTPException(status_code=401, detail="Session ended")
+    _set_access_cookie(response, user.user_id, user.token_version or 0)
+    response.set_cookie(SESSION_HINT_COOKIE, "1",
+                        httponly=False, samesite="lax", secure=IS_PROD,
+                        path="/", max_age=REFRESH_TTL_DAYS * 86400)
     return {"user": public_user(user)}
 
 
 @app.get("/api/auth/me")
-async def me(user: User = Depends(get_current_user),
+async def me(response: Response,
+             user: User = Depends(get_current_user),
              db: AsyncSession = Depends(get_db)):
     user = await check_and_reset_monthly(db, user)
+    # Refresh the readable session hint on the way out, so a session that
+    # predates the cookie stops probing after one successful load.
+    response.set_cookie(SESSION_HINT_COOKIE, "1",
+                        httponly=False, samesite="lax", secure=IS_PROD,
+                        path="/", max_age=REFRESH_TTL_DAYS * 86400)
     return {"user": public_user(user)}
 
 
 @app.post("/api/auth/logout")
-async def logout(response: Response):
+async def logout(request: Request, response: Response,
+                 db: AsyncSession = Depends(get_db)):
+    """Clear the cookies and revoke the tokens they carried.
+
+    Clearing cookies alone left the refresh token valid for its full seven
+    days: anyone holding a copy — from a shared computer, a captured log, an
+    old backup — kept access, and there was no way to cut it off. Raising
+    token_version ends every session for the account, which is the honest
+    behaviour when there is no per-device session record to end instead.
+    """
+    token = request.cookies.get("access_token") or request.cookies.get("refresh_token")
+    for kind in ("access", "refresh"):
+        claims = decode_token_claims(token, kind) if token else None
+        if claims and claims.get("sub"):
+            await db.execute(
+                sa_update(User).where(User.user_id == claims["sub"])
+                .values(token_version=User.token_version + 1))
+            await db.commit()
+            break
     clear_auth_cookies(response)
     return {"detail": "Logged out"}
+
+
+# ----------------------------------------------------------------------------
+# Account recovery
+# ----------------------------------------------------------------------------
+@app.post("/api/auth/forgot-password")
+async def forgot_password(body: ForgotPasswordIn,
+                          db: AsyncSession = Depends(get_db),
+                          _rl=Depends(auth_rate_limit)):
+    """Send a reset link, if the address has an account.
+
+    The reply is identical either way. Reporting "no such account" would turn
+    this into a membership oracle for anyone holding a list of addresses — and
+    for an immigration-related service that list is sensitive on its own.
+    """
+    if IS_PROD and not SMTP_HOST:
+        raise HTTPException(
+            status_code=503,
+            detail=("La réinitialisation par e-mail n'est pas encore "
+                    "disponible. Écrivez-nous et nous rétablirons votre accès."))
+    user = await get_user_by_email(db, body.email.lower())
+    if user:
+        raw = await issue_link_token(db, user.user_id, "reset",
+                                     timedelta(minutes=RESET_TTL_MINUTES))
+        link = f"{PUBLIC_URL}/reset-password?token={raw}"
+        await send_email(user.email,
+                         "Réinitialisez votre mot de passe monfrançais",
+                         reset_email_body(user.name or "", link))
+    return {"detail": "If that address has an account, a reset link is on its way."}
+
+
+@app.post("/api/auth/reset-password")
+async def reset_password(body: ResetPasswordIn, response: Response,
+                         db: AsyncSession = Depends(get_db),
+                         _rl=Depends(auth_rate_limit)):
+    """Set a new password from a single-use link, and sign the user in."""
+    user_id = await consume_link_token(db, body.token, "reset")
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Ce lien a expiré ou a déjà été utilisé. Demandez-en un nouveau.")
+    user = await get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=400, detail="Compte introuvable.")
+
+    new_hash = await run_ai(hash_password, body.password)
+    # Every session minted before the change is revoked: whoever prompted the
+    # reset must not still be holding a working token.
+    await db.execute(
+        sa_update(User).where(User.user_id == user_id)
+        .values(password_hash=new_hash,
+                token_version=User.token_version + 1,
+                # Following a link sent to the address proves it works.
+                email_verified=True,
+                email_verified_at=now_utc()))
+    await db.commit()
+    await db.refresh(user)
+    set_auth_cookies(response, user.user_id, user.token_version or 0)
+    return {"user": public_user(user)}
+
+
+@app.post("/api/auth/verify-email")
+async def verify_email(body: VerifyEmailIn,
+                       db: AsyncSession = Depends(get_db),
+                       _rl=Depends(auth_rate_limit)):
+    user_id = await consume_link_token(db, body.token, "verify")
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Ce lien de confirmation a expiré. Demandez-en un nouveau.")
+    await db.execute(
+        sa_update(User).where(User.user_id == user_id)
+        .values(email_verified=True, email_verified_at=now_utc()))
+    await db.commit()
+    return {"detail": "Email confirmed"}
+
+
+@app.post("/api/auth/resend-verification")
+async def resend_verification(user: User = Depends(get_current_user),
+                              db: AsyncSession = Depends(get_db),
+                              _rl=Depends(auth_rate_limit)):
+    if user.email_verified:
+        return {"detail": "Already verified"}
+    await _send_verification_email(db, user)
+    return {"detail": "Confirmation link sent"}
+
+
+# ----------------------------------------------------------------------------
+# Newsletter
+# ----------------------------------------------------------------------------
+@app.post("/api/newsletter")
+async def subscribe(body: SubscribeIn, db: AsyncSession = Depends(get_db),
+                    _rl=Depends(auth_rate_limit)):
+    """Record a footer newsletter sign-up.
+
+    Signing up twice is not an error worth showing anyone, so a repeat is
+    accepted silently.
+    """
+    email = body.email.lower().strip()
+    existing = await db.scalar(
+        select(Subscriber.id).where(Subscriber.email == email))
+    if existing is None:
+        db.add(Subscriber(email=email, created_at=now_utc(), source="footer"))
+        await db.commit()
+    return {"detail": "Subscribed"}
 
 
 # ----------------------------------------------------------------------------
@@ -2616,10 +3253,24 @@ async def create_submission(body: AnalyzeIn,
 @app.get("/api/submissions")
 async def list_submissions(user: User = Depends(get_current_user),
                            db: AsyncSession = Depends(get_db)):
-    res = await db.execute(
-        select(Submission).where(Submission.user_id == user.user_id)
-        .order_by(Submission.created_at.desc()).limit(100))
-    return {"submissions": [_row_to_dict(s) for s in res.scalars().all()]}
+    """The history list: one row per attempt, without the essay itself.
+
+    This used to return 100 complete rows — every essay and every error array —
+    to fill a table showing four columns. The detail page already fetches the
+    full row from /api/submissions/{id} when it is actually needed.
+    """
+    rows = (await db.execute(
+        select(Submission.submission_id, Submission.created_at,
+               Submission.tcf_level, Submission.overall_score,
+               Submission.word_count, Submission.source,
+               func.coalesce(func.jsonb_array_length(Submission.errors), 0))
+        .where(Submission.user_id == user.user_id)
+        .order_by(Submission.created_at.desc()).limit(100))).all()
+    return {"submissions": [
+        {"submission_id": sid, "created_at": created, "tcf_level": level,
+         "overall_score": score, "word_count": words, "source": source,
+         "error_count": int(n or 0)}
+        for sid, created, level, score, words, source, n in rows]}
 
 
 @app.get("/api/submissions/{submission_id}")
@@ -2771,20 +3422,39 @@ async def simulator_attempt(attempt_id: str,
 @app.get("/api/dashboard/stats")
 async def dashboard_stats(user: User = Depends(get_current_user),
                           db: AsyncSession = Depends(get_db)):
-    res = await db.execute(
-        select(Submission).where(Submission.user_id == user.user_id)
-        .order_by(Submission.created_at.asc()))
-    subs = res.scalars().all()
-    total = len(subs)
-    avg = round(sum(s.overall_score for s in subs) / total, 1) if total else 0.0
+    """Totals, error breakdown and the last ten scores.
+
+    Every figure is computed in Postgres. Loading every submission the learner
+    had ever made — full essay text and all — to produce an average and ten
+    dates meant the most engaged users got the slowest dashboard, which is
+    exactly backwards.
+    """
+    from sqlalchemy import text as sa_text
+
+    total, avg_raw = (await db.execute(
+        select(func.count(), func.avg(Submission.overall_score))
+        .where(Submission.user_id == user.user_id))).one()
+    total = int(total or 0)
+    avg = round(float(avg_raw), 1) if avg_raw is not None else 0.0
+
     breakdown = {c: 0 for c in VALID_CATEGORIES}
-    for s in subs:
-        for e in (s.errors or []):
-            cat = e.get("category", "spelling")
-            breakdown[cat] = breakdown.get(cat, 0) + 1
-    trend = [{"date": s.created_at.strftime("%Y-%m-%d")
-              if isinstance(s.created_at, datetime) else str(s.created_at)[:10],
-              "score": s.overall_score} for s in subs[-10:]]
+    rows = await db.execute(sa_text(
+        "SELECT e.val->>'category' AS category, COUNT(*) AS n "
+        "FROM submissions s, "
+        "     LATERAL jsonb_array_elements(coalesce(s.errors, '[]'::jsonb)) AS e(val) "
+        "WHERE s.user_id = :uid GROUP BY 1"), {"uid": user.user_id})
+    for category, n in rows.all():
+        breakdown[category or "spelling"] = (
+            breakdown.get(category or "spelling", 0) + int(n))
+
+    # Ten newest, then reversed: the chart reads left to right in time order.
+    recent = (await db.execute(
+        select(Submission.created_at, Submission.overall_score)
+        .where(Submission.user_id == user.user_id)
+        .order_by(Submission.created_at.desc()).limit(10))).all()
+    trend = [{"date": created.strftime("%Y-%m-%d")
+              if isinstance(created, datetime) else str(created)[:10],
+              "score": score} for created, score in reversed(recent)]
     freq = sorted(((c, n) for c, n in breakdown.items() if n > 0),
                   key=lambda x: -x[1])
     return {
@@ -2824,16 +3494,14 @@ async def dashboard_heatmap(user: User = Depends(get_current_user),
             key = str(d)[:10]
         out[key] = out.get(key, 0) + 1
 
-    res = await db.execute(
-        select(Submission).where(Submission.user_id == user.user_id,
-                                 Submission.created_at >= since))
-    for s in res.scalars().all():
-        bump(s.created_at)
-    res = await db.execute(
-        select(ReviewSession).where(ReviewSession.user_id == user.user_id,
-                                    ReviewSession.created_at >= since))
-    for r in res.scalars().all():
-        bump(r.created_at)
+    # Only the timestamp column is read. Selecting whole entities pulled a
+    # year of essay text across the wire to count squares on a grid.
+    for table in (Submission, ReviewSession):
+        rows = await db.execute(
+            select(table.created_at).where(table.user_id == user.user_id,
+                                           table.created_at >= since))
+        for (created,) in rows.all():
+            bump(created)
     return {"heatmap": out, "timezone": user.timezone or "America/Toronto"}
 
 
@@ -2857,45 +3525,81 @@ CATEGORY_LABELS_FR = {
 @app.get("/api/mistakes/summary")
 async def mistakes_summary(user: User = Depends(get_current_user),
                            db: AsyncSession = Depends(get_db)):
-    res = await db.execute(
-        select(Mistake).where(Mistake.user_id == user.user_id))
-    mistakes = res.scalars().all()
+    """Per-category totals, monthly error rate, and the worst repeat offenders.
+
+    Every aggregate is computed in Postgres. This used to load the learner's
+    entire mistakes table and their entire submissions table — full essay text
+    included — into Python, and then loop over both. The learners with the most
+    practice had the slowest dashboard.
+    """
+    from sqlalchemy import text as sa_text
+
+    uid = {"uid": user.user_id}
+
+    # per_category counts repeats, not rows: a mistake made five times weighs
+    # five. status_counts counts rows.
     per_cat = {c: 0 for c in VALID_CATEGORIES if c != "improvement"}
+    rows = await db.execute(
+        select(Mistake.category,
+               func.sum(func.coalesce(Mistake.times_repeated, 1)),
+               func.count())
+        .where(Mistake.user_id == user.user_id)
+        .group_by(Mistake.category))
+    for category, repeats, _rows in rows.all():
+        per_cat[category] = per_cat.get(category, 0) + int(repeats or 0)
+
     status_counts = {"new": 0, "reviewing": 0, "mastered": 0}
-    for m in mistakes:
-        per_cat[m.category] = (per_cat.get(m.category, 0)
-                               + (m.times_repeated or 1))
-        st = m.status or "new"
-        status_counts[st] = status_counts.get(st, 0) + 1
-    monthly: Dict[str, Dict[str, int]] = {}
-    res = await db.execute(
-        select(Submission).where(Submission.user_id == user.user_id))
-    subs_all = res.scalars().all()
-    for s in subs_all:
-        d = s.created_at
-        key = d.strftime("%Y-%m") if isinstance(d, datetime) else str(d)[:7]
-        bucket = monthly.setdefault(key, {"errors": 0, "words": 0})
-        bucket["errors"] += len([e for e in (s.errors or [])
-                                 if e.get("category") != "improvement"])
-        bucket["words"] += s.word_count or len(s.original_text.split())
-    trend = [{"month": k,
-              "errors_per_100_words": round(v["errors"] / v["words"] * 100, 2)
-              if v["words"] else 0}
-             for k, v in sorted(monthly.items())]
-    repeat_leaders = sorted(mistakes,
-                            key=lambda m: -(m.times_repeated or 1))[:5]
+    rows = await db.execute(
+        select(func.coalesce(Mistake.status, "new"), func.count())
+        .where(Mistake.user_id == user.user_id)
+        .group_by(func.coalesce(Mistake.status, "new")))
+    for status, n in rows.all():
+        status_counts[status] = status_counts.get(status, 0) + int(n)
+
+    # Monthly error rate. The per-submission error count is a scalar subquery
+    # rather than a lateral join, because joining one row per error would
+    # multiply that submission's word count by its number of errors and quietly
+    # inflate the denominator.
+    monthly_sql = sa_text(
+        "SELECT month, SUM(errs) AS errors, SUM(words) AS words FROM ("
+        "  SELECT to_char(s.created_at, 'YYYY-MM') AS month,"
+        "         (SELECT COUNT(*)"
+        "            FROM jsonb_array_elements(coalesce(s.errors, '[]'::jsonb)) AS e(val)"
+        "           WHERE e.val->>'category' IS DISTINCT FROM 'improvement') AS errs,"
+        "         COALESCE(NULLIF(s.word_count, 0),"
+        "                  COALESCE(array_length("
+        r"                      regexp_split_to_array(NULLIF(btrim(s.original_text), ''), '\s+'), 1), 0)"
+        "         ) AS words"
+        "  FROM submissions s WHERE s.user_id = :uid"
+        ") t GROUP BY month ORDER BY month")
+    trend = []
+    for month, errors, words in (await db.execute(monthly_sql, uid)).all():
+        errors, words = int(errors or 0), int(words or 0)
+        trend.append({
+            "month": month,
+            "errors_per_100_words": round(errors / words * 100, 2) if words else 0,
+        })
+
+    repeat_leaders = (await db.execute(
+        select(Mistake).where(Mistake.user_id == user.user_id)
+        .order_by(func.coalesce(Mistake.times_repeated, 1).desc()).limit(5)
+    )).scalars().all()
+
     weak = sorted(((c, n) for c, n in per_cat.items() if n > 0),
                   key=lambda x: -x[1])[:3]
+
+    # "Category X down N% over your last 5 submissions" — needs the ten newest
+    # attempts, and only their error arrays and word counts.
     narrative = None
-    res = await db.execute(
-        select(Submission).where(Submission.user_id == user.user_id)
-        .order_by(Submission.created_at.desc()).limit(10))
-    subs = res.scalars().all()
+    subs = (await db.execute(
+        select(Submission.errors, Submission.word_count)
+        .where(Submission.user_id == user.user_id)
+        .order_by(Submission.created_at.desc()).limit(10))).all()
     if len(subs) >= 6:
         def rate(group, cat):
-            errs = sum(len([e for e in (s.errors or [])
-                            if e.get("category") == cat]) for s in group)
-            words = sum(s.word_count or 1 for s in group) or 1
+            errs = sum(len([e for e in (errors or [])
+                            if e.get("category") == cat]) for errors, _ in group)
+            words = sum(wc or 1 for _, wc in group) or 1
             return errs / words
         recent, older = subs[:5], subs[5:]
         best_cat, best_drop = None, 0
@@ -2909,6 +3613,7 @@ async def mistakes_summary(user: User = Depends(get_current_user),
             narrative = (f"{CATEGORY_LABELS_FR[best_cat]} errors down "
                          f"{round(best_drop * 100)}% over your last 5 "
                          f"submissions. Keep going!")
+
     return {
         "per_category": per_cat,
         "status_counts": status_counts,
@@ -3343,34 +4048,85 @@ async def reading_attempts(user: User = Depends(get_current_user),
 # ----------------------------------------------------------------------------
 # Speaking (stub)
 # ----------------------------------------------------------------------------
+async def read_audio_upload(audio: UploadFile) -> bytes:
+    """Read an upload, refusing anything over the ceiling before buffering it.
+
+    `await audio.read()` pulled the whole body into memory and only then
+    checked the size, so the 25 MB limit was enforced after 25 MB had already
+    been allocated — ten simultaneous uploads was 250 MB of transient memory in
+    a single-process server. Reading in chunks stops at the first byte over.
+    """
+    chunks: List[bytes] = []
+    total = 0
+    while True:
+        chunk = await audio.read(256 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_AUDIO_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(f"Enregistrement trop volumineux "
+                        f"(max {MAX_AUDIO_BYTES // (1024 * 1024)} Mo)."))
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+# Grading a spoken answer is transcription plus a model call, either of which
+# can stall. Without a ceiling the request outlived any proxy read timeout and
+# left the client on a spinner with no error.
+SPEAKING_MAX_WAIT_SECONDS = float(os.environ.get("SPEAKING_MAX_WAIT_SECONDS", "180"))
+
+
 @app.post("/api/speaking/analyze")
 async def speaking_analyze(question: str = Form(...),
                            audio: UploadFile = File(...),
                            task_type: Optional[int] = Form(None),
+                           mime_type: Optional[str] = Form(None),
                            user: User = Depends(get_current_user),
                            db: AsyncSession = Depends(get_db),
                            _rl=Depends(ai_rate_limit)):
-    user = await reserve_credit(db, user)
-    audio_bytes = await audio.read()
+    # The size guard runs before the credit is claimed, so an oversized upload
+    # is refused without touching the allowance.
+    audio_bytes = await read_audio_upload(audio)
     if not audio_bytes:
-        await refund_credit(db, user)
         raise HTTPException(status_code=400, detail="Empty audio upload")
-    if len(audio_bytes) > MAX_AUDIO_BYTES:
-        await refund_credit(db, user)
-        raise HTTPException(
-            status_code=413,
-            detail=f"Enregistrement trop volumineux (max {MAX_AUDIO_BYTES // (1024 * 1024)} Mo).")
     if task_type not in (1, 2, 3):
         task_type = None
-    transcript = await transcribe_audio(audio_bytes, audio.filename or "audio.webm", db=db)
-    analysis = await analyze_speaking_with_ai(transcript, question, db=db,
-                                              task_type=task_type)
+    filename = audio.filename or "audio.webm"
+    mime = resolve_audio_mime(filename, mime_type or audio.content_type)
+
+    user = await reserve_credit(db, user)
+    try:
+        transcript = await asyncio.wait_for(
+            transcribe_audio(audio_bytes, filename, db=db, mime=mime),
+            timeout=SPEAKING_MAX_WAIT_SECONDS)
+    except asyncio.TimeoutError:
+        await refund_credit(db, user)
+        raise HTTPException(status_code=504, detail=AI_TIMEOUT_DETAIL)
+
+    # Nothing was said, or the recording could not be read. Either way there is
+    # nothing to grade, so return the credit instead of persisting an empty
+    # attempt and charging for it — which is what every iOS recording used to
+    # do, because its MP4 audio was uploaded labelled as WebM.
+    if not (transcript or "").strip():
+        await refund_credit(db, user)
+        raise HTTPException(status_code=422, detail=NO_SPEECH_DETAIL)
+
+    try:
+        analysis = await asyncio.wait_for(
+            analyze_speaking_with_ai(transcript, question, db=db,
+                                     task_type=task_type),
+            timeout=SPEAKING_MAX_WAIT_SECONDS)
+    except asyncio.TimeoutError:
+        await refund_credit(db, user)
+        raise HTTPException(status_code=504, detail=AI_TIMEOUT_DETAIL)
     if analysis.get("ai_unavailable"):
         await refund_credit(db, user)
         raise HTTPException(status_code=503, detail=AI_UNAVAILABLE_DETAIL)
     analysis["transcript"] = transcript
     sub = await persist_submission(
-        db, user, transcript or "(no speech detected)", None, analysis,
+        db, user, transcript, None, analysis,
         source="speaking", consume=False)
     analysis["submission_id"] = sub.get("submission_id")
     analysis["streak"] = sub.get("streak")
@@ -3379,18 +4135,24 @@ async def speaking_analyze(question: str = Form(...),
 
 @app.post("/api/speaking/turn/transcribe")
 async def speaking_turn_transcribe(audio: UploadFile = File(...),
+                                   mime_type: Optional[str] = Form(None),
                                    user: User = Depends(get_current_user),
                                    db: AsyncSession = Depends(get_db),
                                    _rl=Depends(turn_rate_limit)):
     """Transcribe a single conversational turn. Used by browsers without live
     speech recognition; costs no credit because the graded unit is the whole
     conversation, not the turn."""
-    audio_bytes = await audio.read()
+    audio_bytes = await read_audio_upload(audio)
     if not audio_bytes:
         raise HTTPException(status_code=400, detail="Empty audio upload")
-    if len(audio_bytes) > MAX_AUDIO_BYTES:
-        raise HTTPException(status_code=413, detail="Enregistrement trop volumineux.")
-    text = await transcribe_audio(audio_bytes, audio.filename or "turn.webm", db=db)
+    filename = audio.filename or "turn.webm"
+    mime = resolve_audio_mime(filename, mime_type or audio.content_type)
+    try:
+        text = await asyncio.wait_for(
+            transcribe_audio(audio_bytes, filename, db=db, mime=mime),
+            timeout=SPEAKING_MAX_WAIT_SECONDS)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail=AI_TIMEOUT_DETAIL)
     return {"text": text}
 
 
@@ -3399,9 +4161,9 @@ async def speaking_converse(body: ConverseIn,
                             user: User = Depends(get_current_user),
                             db: AsyncSession = Depends(get_db),
                             _rl=Depends(turn_rate_limit)):
-    """One in-character reply from the roleplay partner (Tache 2)."""
+    """One in-character reply from the roleplay partner."""
     history = [t.model_dump() for t in body.history]
-    reply = await interaction_reply(body.consigne, history, db=db)
+    reply = await interaction_reply(body.consigne, history, db=db, mode=body.mode)
     if not reply:
         raise HTTPException(status_code=503,
                             detail="L'interlocuteur IA est momentanément indisponible.")
@@ -3647,9 +4409,17 @@ async def admin_test_ai_providers(admin: User = Depends(get_admin_user)):
 
 @app.get("/api/admin/users")
 async def admin_users(admin: User = Depends(get_admin_user),
+                      limit: int = Query(200, ge=1, le=1000),
+                      offset: int = Query(0, ge=0),
                       db: AsyncSession = Depends(get_db)):
-    res = await db.execute(select(User).order_by(User.created_at.desc()))
-    return {"users": [strip_user(u) for u in res.scalars().all()]}
+    """Newest accounts first. Paged, so the response cannot grow without bound
+    as the user base does."""
+    total = await db.scalar(select(func.count()).select_from(User))
+    res = await db.execute(
+        select(User).order_by(User.created_at.desc())
+        .limit(limit).offset(offset))
+    return {"users": [strip_user(u) for u in res.scalars().all()],
+            "total": total or 0, "limit": limit, "offset": offset}
 
 
 @app.get("/api/admin/submissions")
@@ -3663,24 +4433,42 @@ async def admin_submissions(admin: User = Depends(get_admin_user),
 @app.get("/api/admin/analytics")
 async def admin_analytics(admin: User = Depends(get_admin_user),
                           db: AsyncSession = Depends(get_db)):
+    """Platform totals and the most repeated errors.
+
+    Counted in Postgres. This used to run a bare `select(Submission)` — the
+    whole table, full essay text and JSONB error arrays, materialised into a
+    single-process server and looped over in Python. It is the Admin panel's
+    default tab, so it fired on every visit, and at scale it would take the
+    site down with it.
+    """
+    from sqlalchemy import text as sa_text
+
     total_users = await db.scalar(select(func.count()).select_from(User))
     total_submissions = await db.scalar(
         select(func.count()).select_from(Submission))
+
     breakdown = {c: 0 for c in VALID_CATEGORIES}
-    err_counts: Dict[str, int] = {}
-    res = await db.execute(select(Submission))
-    for s in res.scalars().all():
-        for e in (s.errors or []):
-            cat = e.get("category", "spelling")
-            breakdown[cat] = breakdown.get(cat, 0) + 1
-            key = e.get("error", "").strip()
-            if key:
-                err_counts[key] = err_counts.get(key, 0) + 1
-    top = sorted(err_counts.items(), key=lambda x: -x[1])[:10]
+    rows = await db.execute(sa_text(
+        "SELECT e.val->>'category' AS category, COUNT(*) AS n "
+        "FROM submissions s, "
+        "     LATERAL jsonb_array_elements(coalesce(s.errors, '[]'::jsonb)) AS e(val) "
+        "GROUP BY 1"))
+    for category, n in rows.all():
+        breakdown[category or "spelling"] = (
+            breakdown.get(category or "spelling", 0) + int(n))
+
+    rows = await db.execute(sa_text(
+        "SELECT btrim(e.val->>'error') AS err, COUNT(*) AS n "
+        "FROM submissions s, "
+        "     LATERAL jsonb_array_elements(coalesce(s.errors, '[]'::jsonb)) AS e(val) "
+        "WHERE btrim(coalesce(e.val->>'error', '')) <> '' "
+        "GROUP BY 1 ORDER BY n DESC LIMIT 10"))
+    top = [{"error": err, "count": int(n)} for err, n in rows.all()]
+
     return {"total_users": total_users or 0,
             "total_submissions": total_submissions or 0,
             "error_breakdown": breakdown,
-            "top_errors": [{"error": e, "count": n} for e, n in top]}
+            "top_errors": top}
 
 
 @app.post("/api/admin/prompts")

@@ -4,6 +4,7 @@ import {
 } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
+import { Seo } from '../lib/seo';
 
 const FREE_LIMIT = 5;
 
@@ -20,10 +21,11 @@ export default function SpeakingHome() {
 
   return (
     <main className="overflow-x-clip bg-white">
+      <Seo titleKey="seo.speaking.title" descKey="seo.speaking.desc" path="/speaking" />
       {/* SLIM ACTION BAR */}
       <section className="border-b border-violet-100 bg-gradient-to-r from-violet-50 to-fuchsia-50">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-2.5 px-4 py-3 sm:px-6">
-          <Link to="/methodology"
+          <Link to="/tef-tcf-writing-guide"
             className="btn-primary !py-1.5 text-sm !bg-gradient-to-r !from-primary !to-fuchsia-600">
             <Compass size={16} weight="fill" /> {t('practice.methodologyDup')}
           </Link>

@@ -1,17 +1,129 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#2563EB" />
-    <meta name="description" content="monfrançais — AI-powered TEF/TCF Canada preparation: writing and speaking correction, mock exams, and personalised mistake review." />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#7C3AED" />
+
+    <title>monfrançais — Réussissez votre TEF/TCF Canada</title>
+    <meta name="description" content="Préparation IA au TEF et au TCF Canada : correction de l'expression écrite et orale, niveau CEFR expliqué, examens blancs et révision de vos propres erreurs. 5 corrections gratuites." />
+    <link rel="canonical" href="https://xn--monfranais-u6a.com/" />
+
+    <!-- Both languages exist at the same address until locale routing lands;
+         x-default points at the entry page either way. -->
+    <link rel="alternate" hreflang="fr-CA" href="https://xn--monfranais-u6a.com/" />
+    <link rel="alternate" hreflang="en" href="https://xn--monfranais-u6a.com/" />
+    <link rel="alternate" hreflang="x-default" href="https://xn--monfranais-u6a.com/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="monfrançais" />
+    <meta property="og:locale" content="fr_CA" />
+    <meta property="og:locale:alternate" content="en_CA" />
+    <meta property="og:title" content="monfrançais — Réussissez votre TEF/TCF Canada" />
+    <meta property="og:description" content="Correction IA de l'expression écrite et orale, niveau CEFR expliqué, et révision de vos propres erreurs." />
+    <meta property="og:url" content="https://xn--monfranais-u6a.com/" />
+    <meta property="og:image" content="https://xn--monfranais-u6a.com/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="monfrançais — préparation au TEF/TCF Canada" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="monfrançais — Réussissez votre TEF/TCF Canada" />
+    <meta name="twitter:description" content="Correction IA de l'expression écrite et orale, niveau CEFR expliqué, et révision de vos propres erreurs." />
+    <meta name="twitter:image" content="https://xn--monfranais-u6a.com/og-image.png" />
+
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="64x64" href="/favicon-64.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Fonts load without blocking the first paint: the stylesheet is fetched
+         as print media, then promoted to all once it arrives. display=swap
+         keeps text visible with the fallback stack in the meantime. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@500;600;700;800&display=swap" rel="stylesheet" />
-    <title>monfrançais — Réussissez votre TEF/TCF Canada</title>
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700;800&display=swap"
+      media="print"
+      onload="this.media='all'"
+    />
+    <noscript>
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700;800&display=swap" />
+    </noscript>
+
+    <!-- Identity and product facts, in the served HTML so crawlers that do not
+         execute JavaScript can still read them. Per-page Article/FAQ markup is
+         emitted by the Seo component on the routes that have it. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://xn--monfranais-u6a.com/#organization",
+            "name": "monfrançais",
+            "url": "https://xn--monfranais-u6a.com/",
+            "logo": "https://xn--monfranais-u6a.com/icon-512.png",
+            "description": "Préparation en ligne au TEF et au TCF Canada, avec correction par IA de l'expression écrite et orale.",
+            "areaServed": "CA",
+            "knowsLanguage": ["fr-CA", "en-CA"]
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://xn--monfranais-u6a.com/#website",
+            "url": "https://xn--monfranais-u6a.com/",
+            "name": "monfrançais",
+            "inLanguage": "fr-CA",
+            "publisher": { "@id": "https://xn--monfranais-u6a.com/#organization" }
+          },
+          {
+            "@type": "SoftwareApplication",
+            "name": "monfrançais",
+            "applicationCategory": "EducationalApplication",
+            "operatingSystem": "Web",
+            "url": "https://xn--monfranais-u6a.com/",
+            "publisher": { "@id": "https://xn--monfranais-u6a.com/#organization" },
+            "inLanguage": "fr-CA",
+            "featureList": [
+              "Correction de l'expression écrite (tâches 1, 2 et 3 du TCF Canada)",
+              "Correction de l'expression orale avec les minuteurs officiels",
+              "Niveau CEFR de A1 à C2, avec chaque plafond de note expliqué",
+              "Suivi personnalisé des erreurs et révision espacée",
+              "Examens blancs de compréhension écrite et orale"
+            ],
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "CAD",
+              "description": "5 corrections IA gratuites par mois."
+            }
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
-    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <noscript>
+      <h1>monfrançais — préparation au TEF/TCF Canada</h1>
+      <p>
+        monfrançais corrige votre expression écrite et orale en français, attribue
+        un niveau CEFR de A1 à C2 et explique chaque erreur, puis vous fait
+        réviser vos propres fautes.
+      </p>
+      <p>
+        <strong>Expression écrite</strong> — 60 minutes pour trois tâches :
+        message court (60–120 mots), article ou lettre (120–150 mots), texte
+        argumentatif (120–180 mots).
+        <strong>Expression orale</strong> — entretien dirigé (2 min), exercice en
+        interaction (3 min 30, après 2 min de préparation), expression d'un point
+        de vue (2 min 30, après 2 min de préparation).
+      </p>
+      <p>
+        Ce site a besoin de JavaScript pour la partie interactive.
+        <a href="/tef-tcf-writing-guide">Lisez le guide de l'expression écrite</a>
+        ou <a href="/blog">consultez le blog</a>.
+      </p>
+    </noscript>
     <div id="root"></div>
   </body>
 </html>

@@ -5,11 +5,17 @@ import { toast } from 'sonner';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
+import { useSeo } from '../lib/seo';
 import { BackLink } from '../components/shared';
 
 const TACHE_LABEL = { 1: 'themes.tache1', 2: 'themes.tache2', 3: 'themes.tache3' };
 
 export default function SelectTheme() {
+  // A hook rather than an element, so no early return — loading, empty,
+  // or "coming soon" — can skip it and leave the page inheriting the
+  // shell's canonical, which points at the homepage.
+  useSeo({ titleKey: 'seo.themes.title', descKey: 'seo.themes.desc', path: '/practice/themes' });
+
   const { user } = useAuth();
   const t = useT();
   const navigate = useNavigate();

@@ -3,5 +3,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
-EXPOSE 5000
+# server.py binds 0.0.0.0:8000; EXPOSE said 5000 and only worked because
+# compose mapped the port explicitly.
+EXPOSE 8000
 CMD ["python", "server.py"]

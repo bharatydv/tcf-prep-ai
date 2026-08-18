@@ -42,6 +42,8 @@ export default function ReadingTest() {
   const [submitting, setSubmitting] = useState(false);
   const [left, setLeft] = useState(TEST_SECONDS);
   const submittedRef = useRef(false);
+  // Wall-clock deadline, so backgrounding the tab cannot buy extra time.
+  const deadlineRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,13 +91,23 @@ export default function ReadingTest() {
   // score rather than losing the whole attempt.
   useEffect(() => {
     if (!isTest || result || loading) return undefined;
-    const id = setInterval(() => {
-      setLeft((s) => {
-        if (s <= 1) { clearInterval(id); submit(); return 0; }
-        return s - 1;
-      });
-    }, 1000);
-    return () => clearInterval(id);
+    if (deadlineRef.current == null) deadlineRef.current = Date.now() + TEST_SECONDS * 1000;
+
+    const read = () => {
+      const remaining = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
+      setLeft(remaining);
+      // submittedRef already guards the endpoint against a double hand-in.
+      if (remaining <= 0 && !submittedRef.current) submit();
+    };
+
+    read();
+    const id = setInterval(read, 250);
+    const onVisible = () => { if (!document.hidden) read(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [isTest, result, loading, submit]);
 
   const q = questions[index];
@@ -223,13 +235,13 @@ export default function ReadingTest() {
                   style={{ width: `${(answeredCount / questions.length) * 100}%` }} />
               </div>
 
-              <div className="mt-4 grid grid-cols-8 gap-1.5 lg:grid-cols-6">
+              <div className="mt-4 grid grid-cols-5 gap-2 sm:grid-cols-8 lg:grid-cols-6">
                 {questions.map((item, i) => (
                   <button
                     key={item.reading_question_id}
                     onClick={() => setIndex(i)}
                     data-testid={`nav-q-${i + 1}`}
-                    className={`flex h-8 items-center justify-center rounded-lg text-[11px] font-bold transition ${swatch(item)} ${
+                    className={`flex h-11 items-center justify-center rounded-lg text-xs font-bold transition sm:h-9 ${swatch(item)} ${
                       i === index ? 'ring-2 ring-primary ring-offset-1' : ''
                     }`}
                   >

@@ -1,46 +1,69 @@
+import { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider } from "./context/AuthContext";
 import { I18nProvider } from "./i18n";
-import { Header, ProtectedRoute } from "./components/shared";
-import TefTcfWritingGuide from './pages/TefTcfWritingGuide';
-import SpeakingHome from './pages/SpeakingHome';
-import SpeakingTasks from './pages/SpeakingTasks';
-import SpeakingThemes from './pages/SpeakingThemes';
-import SpeakingRecord from './pages/SpeakingRecord';
-import SpeakingExam from './pages/SpeakingExam';
+import { Header, ProtectedRoute, ScrollToTop, RouteFallback } from "./components/shared";
+import Footer from "./components/Footer";
+import VerifyBanner from "./components/VerifyBanner";
+
+/* Landing, Login and Register are the entry points for a first-time visitor,
+   so they stay in the main chunk — code-splitting them would only add a round
+   trip to the pages people arrive on. Everything else is loaded on demand.
+   Before this, one 1.3 MB bundle shipped the admin panel, recharts and every
+   exam screen to someone who had only opened the marketing page. */
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
-import Pricing from "./pages/Pricing";
-import Practice from "./pages/Practice";
-import SelectTask from "./pages/SelectTask";
-import PracticeWrite from "./pages/PracticeWrite";
-import SelectTheme from "./pages/SelectTheme";
-import CheckWriting from "./pages/CheckWriting";
-import ExamSimulator from "./pages/ExamSimulator";
-import Feedback from "./pages/Feedback";
-import Dashboard from "./pages/Dashboard";
-import Review from "./pages/Review";
-import RecentTopics, { RecentTopicDetail } from "./pages/RecentTopics";
-import MockExam from "./pages/MockExam";
-import Admin from "./pages/Admin";
-import Combinations from './pages/Combinations';
-import ReadingHome from './pages/ReadingHome';
-import ReadingTests from './pages/ReadingTests';
-import ReadingTest from './pages/ReadingTest';
-import ListeningHome from './pages/ListeningHome';
-import Blog from './pages/Blog';
-import BlogPost from './pages/BlogPost';
-import BlogAdmin from './pages/BlogAdmin';
-import Resources from './pages/Resources';
+
+const Pricing = lazy(() => import("./pages/Pricing"));
+const Practice = lazy(() => import("./pages/Practice"));
+const SelectTask = lazy(() => import("./pages/SelectTask"));
+const PracticeWrite = lazy(() => import("./pages/PracticeWrite"));
+const SelectTheme = lazy(() => import("./pages/SelectTheme"));
+const CheckWriting = lazy(() => import("./pages/CheckWriting"));
+const ExamSimulator = lazy(() => import("./pages/ExamSimulator"));
+const Feedback = lazy(() => import("./pages/Feedback"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Review = lazy(() => import("./pages/Review"));
+const RecentTopics = lazy(() => import("./pages/RecentTopics"));
+const RecentTopicDetail = lazy(() =>
+  import("./pages/RecentTopics").then((m) => ({ default: m.RecentTopicDetail })));
+const MockExam = lazy(() => import("./pages/MockExam"));
+const Admin = lazy(() => import("./pages/Admin"));
+const Combinations = lazy(() => import("./pages/Combinations"));
+const ReadingHome = lazy(() => import("./pages/ReadingHome"));
+const ReadingTests = lazy(() => import("./pages/ReadingTests"));
+const ReadingTest = lazy(() => import("./pages/ReadingTest"));
+const ListeningHome = lazy(() => import("./pages/ListeningHome"));
+const Blog = lazy(() => import("./pages/Blog"));
+const BlogPost = lazy(() => import("./pages/BlogPost"));
+const BlogAdmin = lazy(() => import("./pages/BlogAdmin"));
+const Resources = lazy(() => import("./pages/Resources"));
+const TefTcfWritingGuide = lazy(() => import("./pages/TefTcfWritingGuide"));
+const SpeakingHome = lazy(() => import("./pages/SpeakingHome"));
+const SpeakingTasks = lazy(() => import("./pages/SpeakingTasks"));
+const SpeakingThemes = lazy(() => import("./pages/SpeakingThemes"));
+const SpeakingRecord = lazy(() => import("./pages/SpeakingRecord"));
+const SpeakingExam = lazy(() => import("./pages/SpeakingExam"));
+const Privacy = lazy(() => import("./pages/Legal").then((m) => ({ default: m.Privacy })));
+const Terms = lazy(() => import("./pages/Legal").then((m) => ({ default: m.Terms })));
+const Contact = lazy(() => import("./pages/Legal").then((m) => ({ default: m.Contact })));
+const ForgotPassword = lazy(() => import("./pages/PasswordReset").then((m) => ({ default: m.ForgotPassword })));
+const ResetPassword = lazy(() => import("./pages/PasswordReset").then((m) => ({ default: m.ResetPassword })));
+const VerifyEmail = lazy(() => import("./pages/VerifyEmail")); 
 
 export default function App() {
   return (
     <BrowserRouter>
       <I18nProvider>
       <AuthProvider>
+        <ScrollToTop />
         <Header />
+        <VerifyBanner />
+        {/* One boundary around the routes: a per-route spinner would flash the
+            header's own layout twice on every navigation. */}
+        <Suspense fallback={<RouteFallback />}>
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
@@ -89,6 +112,11 @@ export default function App() {
             element={<ProtectedRoute><ExamSimulator /></ProtectedRoute>}
           />
           <Route path="/tef-tcf-writing-guide" element={<TefTcfWritingGuide />} />
+          {/* Five "Methodology" buttons and the Resources FAQ card linked to
+              these, but neither route existed, so all six fell through the
+              catch-all to the landing page. The guide is that content. */}
+          <Route path="/methodology" element={<Navigate to="/tef-tcf-writing-guide" replace />} />
+          <Route path="/faq" element={<Navigate to="/tef-tcf-writing-guide#faq" replace />} />
           <Route
             path="/dashboard"
             element={<ProtectedRoute><Dashboard /></ProtectedRoute>}
@@ -109,8 +137,22 @@ export default function App() {
           <Route path="/blog" element={<Blog />} />
           <Route path="/blog/:slug" element={<BlogPost />} />
           <Route path="/admin/blog" element={<ProtectedRoute adminOnly><BlogAdmin /></ProtectedRoute>} />
+          {/* Required before a payment processor will onboard the product, and
+              linked from every page by the shared footer. */}
+          <Route path="/privacy" element={<Privacy />} />
+          <Route path="/terms" element={<Terms />} />
+          <Route path="/contact" element={<Contact />} />
+          {/* Account recovery. Without these a forgotten password meant a dead
+              account holding all of the learner's practice history. */}
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/verify-email" element={<VerifyEmail />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </Suspense>
+        {/* Was defined inside Landing, so 31 of 32 routes ended with no
+            navigation and no legal links at all. */}
+        <Footer />
         <Toaster position="top-right" richColors closeButton />
       </AuthProvider>
       </I18nProvider>

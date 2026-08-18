@@ -6,6 +6,7 @@ import { api, errMsg, CATEGORY_META } from '../lib/api';
 import { WRITING_TASKS, WRITING_TOTAL_SECONDS } from '../lib/tcf';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
+import { Seo } from '../lib/seo';
 import { AccentToolbar, BackLink, ErrorHighlightedText, WordCountBar } from '../components/shared';
 
 const GUIDE = {
@@ -30,8 +31,14 @@ export default function ExamSimulator() {
   const [seconds, setSeconds] = useState(TOTAL);
   const [attempt, setAttempt] = useState(null);
   const taRef = useRef(null);
-  const warned = useRef({ 10: false, 2: false });
+  const warned = useRef({ 10: false, 2: false, expired: false });
   const restoredRef = useRef(false);
+  // Wall-clock deadline for the sitting, so a throttled or suspended tab loses
+  // resolution but never loses time. See lib/clock.js for the reasoning.
+  const deadlineRef = useRef(null);
+  // Read inside the timer effect without making `seconds` one of its
+  // dependencies, which would restart the interval on every tick.
+  const secondsRef = useRef(TOTAL);
 
   // A numbered set is a fixed paper: the same three tâches every time, so two
   // attempts at set 7 can be compared. Without one the endpoint still draws at
@@ -92,18 +99,39 @@ export default function ExamSimulator() {
     }
   }, [tasks, texts, refreshUser]);
 
+  useEffect(() => { secondsRef.current = seconds; }, [seconds]);
+
   useEffect(() => {
-    if (phase !== 'exam') return;
-    const id = setInterval(() => {
-      setSeconds((s) => {
-        const next = s - 1;
-        if (next === 600 && !warned.current[10]) { warned.current[10] = true; toast.warning(t('sim.warn10')); }
-        if (next === 120 && !warned.current[2]) { warned.current[2] = true; toast.warning(t('sim.warn2')); }
-        if (next <= 0) { clearInterval(id); toast.info(t('sim.timeUp')); submit(TOTAL); return 0; }
-        return next;
-      });
-    }, 1000);
-    return () => clearInterval(id);
+    if (phase !== 'exam') return undefined;
+    // Anchored once when the exam phase begins, from whatever is left — the
+    // full hour on a fresh start, the restored remainder after a reload.
+    if (deadlineRef.current == null) deadlineRef.current = Date.now() + secondsRef.current * 1000;
+
+    const read = () => {
+      const left = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
+      setSeconds(left);
+      // Threshold crossings rather than equality: a backgrounded tab can jump
+      // straight past a given second. The `warned` ref already makes each
+      // warning fire at most once.
+      if (left <= 600 && !warned.current[10]) { warned.current[10] = true; toast.warning(t('sim.warn10')); }
+      if (left <= 120 && !warned.current[2]) { warned.current[2] = true; toast.warning(t('sim.warn2')); }
+      if (left <= 0 && !warned.current.expired) {
+        warned.current.expired = true;
+        toast.info(t('sim.timeUp'));
+        submit(TOTAL);
+      }
+    };
+
+    read();
+    const id = setInterval(read, 250);
+    // Returning to a suspended tab corrects the clock at once, not on the
+    // next tick.
+    const onVisible = () => { if (!document.hidden) read(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, submit]);
 
@@ -121,6 +149,9 @@ export default function ExamSimulator() {
     if (!window.confirm(t('sim.quitConfirm'))) return;
     setPhase('intro');
     setSeconds(TOTAL);
+    secondsRef.current = TOTAL;
+    deadlineRef.current = null;
+    warned.current = { 10: false, 2: false, expired: false };
     setTexts({ 1: '', 2: '', 3: '' });
     setCurrent(1);
     warned.current = { 10: false, 2: false };
@@ -133,6 +164,7 @@ export default function ExamSimulator() {
   if (!setNumber) {
     return (
       <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
+        <Seo titleKey="seo.sim.title" path="/practice/simulator" noindex />
         <div className="mb-3 text-center">
           <h1 className="font-heading text-3xl font-extrabold text-gray-900">{t('sim.setsTitle')}</h1>
           <p className="mx-auto mt-2 max-w-xl text-sm text-gray-600">{t('sim.setsSub')}</p>
@@ -229,17 +261,28 @@ export default function ExamSimulator() {
             return (
               <div key={key} className="mt-5">
                 <span className="pill" style={{ background: meta.color }}>{meta.label} · {errs.length}</span>
-                <table className="mt-2 w-full text-sm">
-                  <tbody>
-                    {errs.map((e, j) => (
-                      <tr key={j} className="border-b border-gray-100 align-top">
-                        <td className="py-2 pr-3 text-red-600">{e.error}</td>
-                        <td className="py-2 pr-3 font-medium text-green-700">{e.correction}</td>
-                        <td className="py-2 text-gray-600">{e.explanation}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <ul className="mt-2 divide-y divide-gray-100 sm:hidden">
+                  {errs.map((e, j) => (
+                    <li key={j} className="py-3">
+                      <p className="text-sm text-red-600">{e.error}</p>
+                      <p className="mt-1 text-sm font-medium text-green-700">{e.correction}</p>
+                      <p className="mt-1 text-sm leading-relaxed text-gray-600">{e.explanation}</p>
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-2 hidden overflow-x-auto sm:block">
+                  <table className="w-full min-w-[34rem] text-sm">
+                    <tbody>
+                      {errs.map((e, j) => (
+                        <tr key={j} className="border-b border-gray-100 align-top">
+                          <td className="py-2 pr-3 text-red-600">{e.error}</td>
+                          <td className="py-2 pr-3 font-medium text-green-700">{e.correction}</td>
+                          <td className="py-2 text-gray-600">{e.explanation}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             );
           })}

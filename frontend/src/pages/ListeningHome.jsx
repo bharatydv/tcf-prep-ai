@@ -4,6 +4,7 @@ import {
 } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
+import { useSeo } from '../lib/seo';
 import { ComingSoon } from '../components/shared';
 
 // Flip to false to restore the page below exactly as it was.
@@ -12,6 +13,11 @@ const NOT_READY = true;
 const FREE_LIMIT = 5;
 
 export default function ListeningHome() {
+  // A hook rather than an element, so no early return — loading, empty,
+  // or "coming soon" — can skip it and leave the page inheriting the
+  // shell's canonical, which points at the homepage.
+  useSeo({ titleKey: 'seo.listening.title', descKey: 'seo.listening.desc', path: '/listening' });
+
   const { user } = useAuth();
   const t = useT();
   const navigate = useNavigate();
@@ -34,7 +40,7 @@ export default function ListeningHome() {
       {/* SLIM ACTION BAR */}
       <section className="border-b border-violet-100 bg-gradient-to-r from-violet-50 to-fuchsia-50">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-2.5 px-4 py-3 sm:px-6">
-          <Link to="/methodology"
+          <Link to="/tef-tcf-writing-guide"
             className="btn-primary !py-1.5 text-sm !bg-gradient-to-r !from-primary !to-fuchsia-600">
             <Compass size={16} weight="fill" /> {t('bar.methodology')}
           </Link>

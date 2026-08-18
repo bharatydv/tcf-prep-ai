@@ -111,21 +111,42 @@
   },
   "auth": {
     "alreadyRegistered": "Déjà inscrit ?",
+    "backToLogin": "Retour à la connexion",
     "confirmPassword": "Confirmez le mot de passe",
     "createAccount": "Créez votre compte",
     "createButton": "Créer mon compte",
     "created": "Compte créé — 5 corrections IA gratuites ajoutées !",
+    "dismiss": "Fermer",
     "email": "Adresse e-mail",
+    "forgot": "Mot de passe oublié ?",
+    "forgotButton": "Envoyer le lien",
+    "forgotH": "Réinitialiser votre mot de passe",
+    "forgotSent": "Si cette adresse correspond à un compte, un lien vient d'être envoyé. Vérifiez votre boîte de réception, et vos indésirables.",
+    "forgotSub": "Saisissez l'adresse utilisée à l'inscription. Si un compte existe, un lien de réinitialisation part immédiatement — valable une heure et utilisable une seule fois.",
     "freeBadge": "5 corrections gratuites incluses",
     "fullName": "Nom complet",
+    "hidePassword": "Masquer le mot de passe",
     "loginButton": "Se connecter",
     "loginSub": "Connectez-vous pour poursuivre votre préparation TEF/TCF.",
     "mismatch": "Les mots de passe ne correspondent pas",
+    "newPassword": "Nouveau mot de passe",
     "noAccount": "Commencer gratuitement",
     "noAccountPrefix": "Pas encore de compte ?",
     "password": "Mot de passe",
     "passwordHint": "Mot de passe (8 caractères minimum)",
+    "resetBadLink": "Ce lien a expiré ou a déjà été utilisé. Demandez-en un nouveau.",
+    "resetButton": "Enregistrer le nouveau mot de passe",
+    "resetDone": "Mot de passe modifié. Vous êtes connecté.",
+    "resetH": "Choisissez un nouveau mot de passe",
+    "resetSub": "Choisissez-en un que vous n'utilisez pas ailleurs. 8 caractères minimum.",
+    "showPassword": "Afficher le mot de passe",
     "tooShort": "Le mot de passe doit contenir au moins 8 caractères",
+    "verifyBanner": "Confirmez votre adresse e-mail pour sécuriser votre compte.",
+    "verifyFail": "Ce lien de confirmation a expiré. Demandez-en un nouveau depuis votre tableau de bord.",
+    "verifyOk": "Adresse confirmée. Merci.",
+    "verifyResend": "Renvoyer le lien",
+    "verifySent": "Lien de confirmation envoyé. Vérifiez votre boîte de réception.",
+    "verifying": "Confirmation de votre adresse…",
     "welcomeBack": "Content de vous revoir",
     "welcomeToast": "Bienvenue, {{name}} !"
   },
@@ -250,38 +271,39 @@
     "soonReading": "S'entraîner en lecture",
     "soonWriting": "S'entraîner à l'écrit"
   },
+  "contact": {
+    "gradingH": "Une correction qui semble fausse",
+    "gradingP": "Envoyez le code de référence affiché avec l'erreur, ou la date et la tâche de la soumission. Cela suffit pour la retrouver dans les journaux.",
+    "h": "Contact",
+    "intro": "De vraies réponses, par une petite équipe. Choisissez la ligne qui correspond à votre besoin et nous vous répondrons.",
+    "partnerH": "Écoles et partenariats",
+    "partnerP": "Vous encadrez un groupe préparant le TEF ou le TCF Canada ? Indiquez-nous l'effectif et le calendrier.",
+    "responseH": "Délai de réponse",
+    "responseP": "Généralement sous deux jours ouvrables. Il n'y a pas de ligne téléphonique — l'e-mail nous parvient plus vite et laisse une trace pour chacun.",
+    "supportH": "Compte et facturation",
+    "supportP": "Problème de connexion, crédit dépensé pour une correction jamais reçue, ou toute question sur vos données."
+  },
   "conv": {
     "agentThinking": "L'agent se prépare…",
-    "errAnalysis": "L'analyse a échoué.",
-    "errNoReply": "L'interlocuteur IA n'a pas répondu.",
-    "errTranscription": "La transcription a échoué.",
-    "stListening": "À vous — parlez",
-    "stPaused": "En pause",
-    "stPressSpeak": "Appuyez sur Parler",
-    "stRecording": "Enregistrement…",
-    "stSpeaking": "L'agent parle…",
-    "stThinking": "L'agent réfléchit…",
-    "turnHint": "{{n}} question(s) posée(s) · visez au moins 4 échanges",
+    "analysing": "Analyse de votre conversation…",
     "briefAllTasks": "L'IA vous fait passer les trois tâches de l'oral, l'une après l'autre : vous présenter, puis une situation à gérer, puis une question d'opinion. Vous avez {{speak}}, et vous pouvez arrêter quand vous voulez.",
     "briefInterview": "Présentez-vous et parlez de vous en français. L'examinateur IA peut vous poser des questions de relance, comme au véritable TCF. Vous avez {{speak}}, sans préparation.",
-    "metaAllTasks": "Les trois tâches · {{speak}}",
-    "metaInterview": "Entretien en direct · {{speak}} · sans préparation",
-    "metaRoleplay": "Conversation en direct · Préparation : {{prep}} · Échange : {{speak}}",
-    "muteAria": "Couper la voix",
-    "noLiveStt": "Votre navigateur ne gère pas la transcription en direct : vous appuierez sur « Parler » avant chaque réplique. Pour la reconnaissance en direct, utilisez Chrome ou Edge.",
-    "startPrep": "Commencer la préparation",
-    "startSpeak": "Commencer à parler",
-    "twoWayC": ", l'agent vous répond. Vous aurez {{prep}} de préparation, puis {{speak}} de conversation.",
-    "unmuteAria": "Activer la voix",
-    "analysing": "Analyse de votre conversation…",
     "cancel": "Annuler",
     "closeAria": "Fermer",
     "consigne": "Consigne",
+    "errAnalysis": "L'analyse a échoué.",
+    "errNoReply": "L'interlocuteur IA n'a pas répondu.",
+    "errTranscription": "La transcription a échoué.",
     "finish": "Terminer et analyser",
     "freeLimit": "Limite gratuite atteinte.",
     "gradedOn": "Questions posées, registre, informations obtenues.",
+    "metaAllTasks": "Les trois tâches · {{speak}}",
+    "metaInterview": "Entretien en direct · {{speak}} · sans préparation",
+    "metaRoleplay": "Conversation en direct · Préparation : {{prep}} · Échange : {{speak}}",
     "mic": "Micro…",
     "micDenied": "Impossible d'accéder au microphone. Vérifiez les autorisations.",
+    "muteAria": "Couper la voix",
+    "noLiveStt": "Votre navigateur ne gère pas la transcription en direct : vous appuierez sur « Parler » avant chaque réplique. Pour la reconnaissance en direct, utilisez Chrome ou Edge.",
     "noSpeech": "Aucune parole détectée. Réessayez.",
     "prepHint": "Préparez vos questions — ne parlez pas encore.",
     "preparation": "Préparation",
@@ -289,10 +311,21 @@
     "retry": "Réessayer",
     "sendTurn": "Envoyer ma réplique",
     "speak": "Parler",
+    "stListening": "À vous — parlez",
+    "stPaused": "En pause",
+    "stPressSpeak": "Appuyez sur Parler",
+    "stRecording": "Enregistrement…",
+    "stSpeaking": "L'agent parle…",
+    "stThinking": "L'agent réfléchit…",
     "start": "Commencer la conversation",
+    "startPrep": "Commencer la préparation",
+    "startSpeak": "Commencer à parler",
     "titleAria": "Conversation",
+    "turnHint": "{{n}} question(s) posée(s) · visez au moins 4 échanges",
     "twoWayA": "C'est un échange à deux :",
-    "twoWayB": "vous posez les questions"
+    "twoWayB": "vous posez les questions",
+    "twoWayC": ", l'agent vous répond. Vous aurez {{prep}} de préparation, puis {{speak}} de conversation.",
+    "unmuteAria": "Activer la voix"
   },
   "credits": {
     "none": "Aucune correction gratuite restante ce mois-ci",
@@ -454,15 +487,24 @@
     "faq3q": "Le simulateur d'examen est-il identique à l'examen officiel ?",
     "faq4a": "Oui. Les 5 corrections IA gratuites par mois ne demandent aucune carte bancaire, et les formules payantes sont des achats uniques valables une durée fixe — il n'y a aucun abonnement à résilier.",
     "faq4q": "Puis-je arrêter l'essai gratuit à tout moment ?",
+    "footBlog": "Blog",
+    "footCombos": "Combinaisons de niveaux",
+    "footCompany": "À propos",
+    "footContact": "Contact",
     "footDashboard": "Mon tableau de bord",
+    "footGuide": "Guide de l'écrit",
+    "footListening": "Compréhension orale",
     "footMock": "Examens blancs",
     "footPacks": "Formules",
+    "footPrivacy": "Confidentialité",
     "footProduct": "Produit",
+    "footReading": "Compréhension écrite",
     "footRecent": "Sujets d'examen récents",
     "footResources": "Ressources",
     "footReview": "Révision des erreurs",
     "footSimulator": "Simulateur d'examen",
     "footSpeaking": "Atelier d'oral",
+    "footTerms": "Conditions",
     "footWriting": "Atelier d'écrit",
     "footerBlurb": "Entraînez-vous à l'expression orale et écrite et à la compréhension orale et écrite avec un retour par IA, des examens blancs réalistes et un plan de révision personnalisé, conçus pour les candidats au TCF Canada.",
     "footerTag": "Préparez-vous mieux. Réussissez votre TEF/TCF.",
@@ -499,6 +541,8 @@
     "nclcTable": "Table d'équivalence NCLC officielle",
     "new": "NOUVEAU",
     "newsletter": "Infolettre",
+    "newsletterBusy": "Inscription…",
+    "newsletterFail": "Inscription impossible. Réessayez.",
     "newsletterSub": "Recevez nos conseils d'apprentissage du français par e-mail.",
     "nextMilestone": "Prochain objectif",
     "noCard": "Sans carte bancaire",
@@ -546,6 +590,10 @@
   "lang": {
     "switch": "Langue"
   },
+  "legal": {
+    "backHome": "Retour à l'accueil",
+    "updated": "Dernière mise à jour : {{date}}"
+  },
   "listen": {
     "chooseSub": "Entraînez-vous sur les documents audio un par un, ou passez un test de compréhension orale complet et chronométré.",
     "chooseTitle": "Compréhension orale — choisissez votre façon de travailler",
@@ -586,12 +634,15 @@
     "testTitle": "Mode examen"
   },
   "nav": {
+    "blog": "Blog",
     "dashboard": "Tableau de bord",
     "listening": "Écoute",
     "login": "Connexion",
     "logout": "Déconnexion",
     "menu": "Menu",
     "mockExams": "Examens blancs",
+    "more": "Plus",
+    "pricing": "Tarifs",
     "reading": "Lecture",
     "register": "Créer un compte gratuit",
     "resources": "Ressources",
@@ -664,6 +715,24 @@
     "subtitle": "Des formules courtes et intensives pour préparer votre date d'examen TEF/TCF Canada.",
     "title": "Formules"
   },
+  "privacy": {
+    "h": "Politique de confidentialité",
+    "h1": "Ce que nous collectons",
+    "h2": "Enregistrements audio",
+    "h3": "Qui d'autre y a accès",
+    "h4": "Durée de conservation",
+    "h5": "Vos droits",
+    "h6": "Témoins (cookies)",
+    "h7": "Contact",
+    "intro": "monfrançais vous aide à préparer le TEF et le TCF Canada. Pour cela, le service conserve ce que vous écrivez et dites, puisque réviser ses propres erreurs est tout l'intérêt du produit. Cette page dit exactement ce qui est conservé, pourquoi, et comment le faire supprimer.",
+    "p1": "Votre nom et votre adresse e-mail, saisis à l'inscription. Un mot de passe, conservé uniquement sous forme de hachage bcrypt — personne chez monfrançais ne peut le lire. Le français que vous soumettez à la correction : textes, contenus collés et transcriptions de vos réponses orales. Les corrections elles-mêmes, avec chaque erreur relevée et le niveau CECR attribué. Votre historique : séries, XP, badges, résultats de révision et le fuseau horaire utilisé pour les regrouper.",
+    "p2": "Une réponse orale est envoyée à un prestataire de transcription, convertie en texte, et c'est ce texte qui est conservé. L'audio lui-même n'est pas enregistré dans notre base ni gardé sur nos serveurs une fois la transcription obtenue.",
+    "p3": "Votre texte ou votre transcription est transmis au prestataire d'IA qui le corrige — actuellement Anthropic, OpenAI, Google, Groq ou DeepSeek, et OpenAI, Google, Groq ou AssemblyAI pour la transcription. Ils le traitent pour produire la correction. Nous ne vendons pas vos données et ne les partageons pas avec des annonceurs.",
+    "p4": "Tant que votre compte existe, car votre historique d'erreurs est la matière des jeux de révision. Supprimez votre compte et les soumissions, erreurs et sessions de révision qui y sont rattachées disparaissent avec lui.",
+    "p5": "Vous pouvez demander une copie de tout ce qui vous concerne, demander une rectification, ou demander la suppression du compte et de son contenu. Écrivez à l'adresse ci-dessous et nous y donnerons suite sous 30 jours. Au Québec, la Loi 25 vous garantit ces droits explicitement ; ailleurs au Canada, c'est la LPRPDE.",
+    "p6": "Deux témoins httpOnly vous maintiennent connecté, plus un témoin ordinaire qui indique seulement qu'une session existe, afin d'éviter une requête inutile quand vous êtes déconnecté. Votre choix de langue est conservé dans le stockage local. Aucun suivi publicitaire ni intersite, donc rien ici ne nécessite votre consentement.",
+    "p7": "Questions ou demandes concernant vos données : {{email}}"
+  },
   "read": {
     "chooseSub": "Entraînez-vous sur les textes un par un, ou passez un test de compréhension écrite complet et chronométré.",
     "chooseTitle": "Compréhension écrite — choisissez votre façon de travailler",
@@ -671,38 +740,38 @@
     "practiceBullet": "Texte + questions à choix multiple"
   },
   "readTest": {
-    "testN": "Test {{n}}",
-    "questionN": "Question {{n}}",
-    "progress": "{{done}} sur {{total}} répondues",
-    "prev": "Précédent",
-    "next": "Suivant",
-    "handIn": "Rendre la copie",
-    "retake": "Refaire cette épreuve",
-    "keyLine": "Phrase clé",
-    "vocabulary": "Vocabulaire",
-    "correctLabel": "Correct",
-    "wrongLabel": "Faux",
     "byLevel": "Score par niveau",
-    "scorePct": "{{p}} % de réussite",
-    "practiceHint": "Choisissez une réponse pour voir immédiatement pourquoi elle est juste ou fausse.",
+    "checkFailed": "Cette réponse n'a pas pu être vérifiée. Veuillez réessayer.",
     "confirmBlank": "{{n}} question(s) sans réponse. Rendre quand même la copie ?",
+    "correctLabel": "Correct",
+    "handIn": "Rendre la copie",
+    "keyLine": "Phrase clé",
     "loadFailed": "Ce test n'a pas pu être chargé.",
+    "next": "Suivant",
+    "practiceHint": "Choisissez une réponse pour voir immédiatement pourquoi elle est juste ou fausse.",
+    "prev": "Précédent",
+    "progress": "{{done}} sur {{total}} répondues",
+    "questionN": "Question {{n}}",
+    "retake": "Refaire cette épreuve",
+    "scorePct": "{{p}} % de réussite",
     "submitFailed": "Votre copie n'a pas pu être envoyée. Veuillez réessayer.",
-    "checkFailed": "Cette réponse n'a pas pu être vérifiée. Veuillez réessayer."
+    "testN": "Test {{n}}",
+    "vocabulary": "Vocabulaire",
+    "wrongLabel": "Faux"
   },
   "readTests": {
-    "practiceTitle": "Entraînement — Compréhension écrite",
-    "practiceSub": "Dix épreuves de 40 questions. Chaque réponse est corrigée immédiatement et expliquée — y compris pourquoi chaque mauvaise option est fausse.",
-    "testTitle": "Test — Compréhension écrite",
-    "testSub": "Dix épreuves de 40 questions en conditions d'examen : 60 minutes, correction seulement après avoir rendu la copie.",
-    "badgeTimed": "60 minutes · corrigé à la fin",
     "badgeInstant": "Sans chronomètre · corrigé au fur et à mesure",
     "badgeLevels": "A1 → C2, par difficulté croissante",
-    "testN": "Test {{n}}",
+    "badgeTimed": "60 minutes · corrigé à la fin",
     "cardReady": "{{n}} questions, de A1 à C2, chacune entièrement expliquée.",
     "cardSoon": "Bientôt disponible — cette épreuve est en cours de rédaction.",
+    "footnote": "L'entraînement et le test utilisent les mêmes épreuves : vous pouvez préparer une épreuve puis la passer en conditions réelles.",
+    "practiceSub": "Dix épreuves de 40 questions. Chaque réponse est corrigée immédiatement et expliquée — y compris pourquoi chaque mauvaise option est fausse.",
+    "practiceTitle": "Entraînement — Compréhension écrite",
     "ready": "Prêt",
-    "footnote": "L'entraînement et le test utilisent les mêmes épreuves : vous pouvez préparer une épreuve puis la passer en conditions réelles."
+    "testN": "Test {{n}}",
+    "testSub": "Dix épreuves de 40 questions en conditions d'examen : 60 minutes, correction seulement après avoir rendu la copie.",
+    "testTitle": "Test — Compréhension écrite"
   },
   "res": {
     "badge": "Ressources",
@@ -756,6 +825,113 @@
     "whichCorrect": "Quelle est la forme correcte ?",
     "writeNew": "écrivez un nouveau texte",
     "yourSentence": "Votre phrase (avec erreur)"
+  },
+  "seo": {
+    "admin": {
+      "title": "Admin"
+    },
+    "blog": {
+      "desc": "Articles sur la méthode du TEF/TCF Canada, la grammaire française et les erreurs qui coûtent le plus de points aux candidats.",
+      "title": "Blog"
+    },
+    "check": {
+      "title": "Corriger mon texte"
+    },
+    "combos": {
+      "desc": "Calculez quelles combinaisons de niveaux au TEF/TCF Canada atteignent le score NCLC exigé par votre demande d'immigration.",
+      "title": "Combinaisons de niveaux"
+    },
+    "contact": {
+      "desc": "Comment joindre l'équipe monfrançais au sujet de votre compte, d'une correction ou d'un partenariat.",
+      "title": "Contact"
+    },
+    "dashboard": {
+      "title": "Votre tableau de bord"
+    },
+    "feedback": {
+      "title": "Votre correction"
+    },
+    "forgot": {
+      "desc": "Demandez un lien de réinitialisation pour votre compte monfrançais.",
+      "title": "Réinitialiser votre mot de passe"
+    },
+    "home": {
+      "desc": "Correction IA pour le TEF et le TCF Canada : expression écrite et orale notées sur l'échelle CECR, chaque erreur expliquée, et vos propres fautes transformées en exercices de révision. 5 corrections gratuites par mois.",
+      "title": "monfrançais — Réussissez votre TEF/TCF Canada"
+    },
+    "listening": {
+      "desc": "Entraînement à la compréhension orale du TCF Canada, corrigé côté serveur et enregistré dans votre historique.",
+      "title": "Entraînement à la compréhension orale"
+    },
+    "login": {
+      "desc": "Connectez-vous à monfrançais pour poursuivre votre préparation au TEF/TCF Canada.",
+      "title": "Connexion"
+    },
+    "mock": {
+      "title": "Examen blanc"
+    },
+    "practice": {
+      "desc": "Entraînez-vous aux trois tâches écrites du TCF Canada dans les fourchettes de mots officielles, avec correction IA immédiate et un niveau CECR à chaque tentative.",
+      "title": "Entraînement à l'expression écrite du TCF Canada"
+    },
+    "pricing": {
+      "desc": "Les formules monfrançais pour préparer le TEF/TCF Canada. Commencez avec 5 corrections IA gratuites par mois, sans carte bancaire.",
+      "title": "Tarifs"
+    },
+    "privacy": {
+      "desc": "Ce que monfrançais collecte, pourquoi, combien de temps c'est conservé, et comment le faire supprimer.",
+      "title": "Politique de confidentialité"
+    },
+    "reading": {
+      "desc": "Épreuves de compréhension écrite du TCF Canada en mode entraînement ou examen, corrigées avec l'explication de la bonne réponse.",
+      "title": "Entraînement à la compréhension écrite"
+    },
+    "register": {
+      "desc": "Créez un compte monfrançais gratuit et recevez 5 corrections IA par mois, sans carte bancaire.",
+      "title": "Créer votre compte"
+    },
+    "reset": {
+      "desc": "Définissez un nouveau mot de passe pour votre compte monfrançais.",
+      "title": "Choisir un nouveau mot de passe"
+    },
+    "resources": {
+      "desc": "Guides, contraintes officielles, corrigés types et matériel d'étude pour le TEF et le TCF Canada.",
+      "title": "Ressources TEF et TCF Canada"
+    },
+    "review": {
+      "title": "Révisez vos erreurs"
+    },
+    "sim": {
+      "title": "Simulateur d'examen écrit"
+    },
+    "speakTasks": {
+      "desc": "Entretien dirigé (2 min), exercice en interaction (3 min 30) et expression d'un point de vue (2 min 30) — le fonctionnement de chaque tâche orale du TCF Canada.",
+      "title": "Les trois tâches d'expression orale"
+    },
+    "speakThemes": {
+      "desc": "Entraînement oral par thème, avec un interlocuteur IA en direct pour l'exercice en interaction de la tâche 2.",
+      "title": "Thèmes d'expression orale"
+    },
+    "speaking": {
+      "desc": "Enregistrez les trois tâches orales du TCF Canada avec les minuteurs officiels de préparation et de parole, puis faites noter votre transcription sur l'échelle CECR.",
+      "title": "Entraînement à l'expression orale du TCF Canada"
+    },
+    "tasks": {
+      "desc": "Tâche 1 message court (60–120 mots), tâche 2 article ou lettre (120–150), tâche 3 texte argumentatif (120–180) — l'épreuve écrite du TCF Canada, tâche par tâche.",
+      "title": "Les trois tâches d'expression écrite"
+    },
+    "terms": {
+      "desc": "Les conditions qui s'appliquent à l'utilisation de monfrançais.",
+      "title": "Conditions d'utilisation"
+    },
+    "themes": {
+      "desc": "Entraînez-vous à l'écrit du TCF Canada par thème : travail, environnement, technologie, éducation et plus, avec de vraies consignes.",
+      "title": "Thèmes d'expression écrite"
+    },
+    "topics": {
+      "desc": "De vraies consignes récentes de l'épreuve écrite du TCF Canada, chacune accompagnée d'un corrigé au niveau visé.",
+      "title": "Sujets récents du TCF Canada"
+    }
   },
   "sexam": {
     "again": "Recommencer",
@@ -835,7 +1011,9 @@
     "level": "Niveau",
     "micDenied": "Impossible d'accéder au microphone. Vérifiez les autorisations.",
     "newAnswer": "Nouvelle réponse",
+    "noRecorder": "Ce navigateur ne peut pas enregistrer d'audio. Utilisez Safari sur iPhone ou iPad, Chrome ailleurs, ou importez un enregistrement.",
     "noSpeech": "Aucune parole détectée. Réessayez en parlant plus fort.",
+    "noSpeechRefunded": "Aucune parole détectée dans cet enregistrement : votre crédit a été rendu. Vérifiez votre micro et réessayez.",
     "notAudio": "Veuillez sélectionner un fichier audio (mp3, m4a, wav, webm).",
     "prepHint": "Prenez des notes. L'enregistrement démarre automatiquement à zéro.",
     "prepThenSpeak": "{{prep}} minutes de préparation, puis {{speak}} de parole.",
@@ -845,6 +1023,7 @@
     "pressToSpeak": "Appuyez pour parler",
     "reRecord": "Réenregistrer",
     "readyNow": "Je suis prêt · commencer maintenant",
+    "recordFailed": "L'enregistrement n'a pas pu être sauvegardé. Réessayez.",
     "recordFirst": "Enregistrez d'abord votre réponse.",
     "recording": "Enregistrement… {{clock}}",
     "recordingOf": "Enregistrement… {{clock}} / {{max}}",
@@ -973,6 +1152,28 @@
     "t3Meta": "120 – 180 mots",
     "t3Title": "Tâche 3 : synthèse et opinion"
   },
+  "terms": {
+    "h": "Conditions d'utilisation",
+    "h1": "Ce qu'est le service",
+    "h2": "Les notes sont un entraînement, pas un résultat",
+    "h3": "Votre compte",
+    "h4": "L'allocation gratuite",
+    "h5": "Paiements",
+    "h6": "Vos contenus",
+    "h7": "Usage raisonnable",
+    "h8": "Responsabilité",
+    "h9": "Contact",
+    "intro": "Des conditions claires pour utiliser monfrançais. Utiliser le service vaut acceptation.",
+    "p1": "monfrançais est un logiciel de préparation. Il évalue votre français avec un modèle d'IA selon le format du TCF Canada et explique ce qu'il a relevé. Il n'est affilié ni à France Éducation international, ni au CIEP, ni à aucun centre d'examen officiel du TEF ou du TCF.",
+    "p2": "Le niveau CECR renvoyé est une estimation produite par un modèle de langue. Il sert à suivre vos progrès et à repérer vos faiblesses. Ce n'est pas un résultat officiel, il ne prédit pas votre note à l'examen et il ne peut être présenté nulle part comme une preuve de niveau.",
+    "p3": "Un compte par personne. Gardez votre mot de passe pour vous ; vous êtes responsable de ce qui se passe sous votre compte. Prévenez-nous si vous pensez qu'une autre personne y a accès.",
+    "p4": "Les comptes gratuits disposent de 5 corrections IA par mois, réinitialisées au début de chaque mois, plus une petite allocation pour la conversation libre. Si une correction échoue parce que le prestataire d'IA est indisponible, le crédit est rendu automatiquement — vous n'êtes jamais facturé pour un travail non livré.",
+    "p5": "Aucun paiement n'est encore traité. Rien sur la page des tarifs ne peut être acheté et aucune donnée bancaire n'est collectée sur le site. À l'ouverture des formules payantes, ces conditions seront mises à jour au préalable.",
+    "p6": "Ce que vous écrivez reste à vous. Vous nous accordez uniquement l'autorisation nécessaire pour le faire corriger et vous en montrer le résultat. Nous ne le publions pas et ne l'utilisons pas pour entraîner des modèles.",
+    "p7": "N'aspirez pas le matériel d'examen, ne revendez pas l'accès et n'automatisez pas les soumissions. Des limites de débit s'appliquent et les comptes qui en abusent peuvent être suspendus.",
+    "p8": "Le service est fourni en l'état. Nous mettons tout en œuvre pour que la correction reste juste et disponible, mais nous ne pouvons être tenus responsables des résultats d'examen, des sessions manquées ou des décisions prises sur la base d'une note d'entraînement.",
+    "p9": "Questions sur ces conditions : {{email}}"
+  },
   "themes": {
     "attempted": "Questions déjà traitées",
     "backToTasks": "Retour aux tâches",
@@ -1038,18 +1239,18 @@
     "capConfirm": "À l’examen, cette longueur fait baisser la note. Analyser quand même ?",
     "clear": "Effacer",
     "combination": "Combinaison {{n}}",
+    "docsNotCounted": "Les deux documents ne sont pas comptés dans vos 120 à 180 mots. Rédigez une seule réponse continue.",
+    "documentN": "Document {{n}}",
     "doneToast": "Analyse terminée — niveau {{level}}",
     "placeholder": "Commencez à écrire en français…",
     "recentTopics": "Sujets récents",
     "seeAll": "Tout voir",
     "taskMeta": "· {{min}}–{{max}} mots · ~{{minutes}} min",
-    "docsNotCounted": "Les deux documents ne sont pas comptés dans vos 120 à 180 mots. Rédigez une seule réponse continue.",
-    "documentN": "Document {{n}}",
     "testN": "Test {{n}}",
     "testsList": "Tests d'écrit",
     "topicN": "Sujet {{n}}",
-    "topicsList": "Sujets du thème",
     "topicsCount": "{{n}} sujets",
+    "topicsList": "Sujets du thème",
     "writeFirst": "Écrivez quelque chose d’abord !",
     "yourQuestion": "Votre question"
   }

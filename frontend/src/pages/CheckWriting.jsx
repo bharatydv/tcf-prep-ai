@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { BACKEND_URL } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
+import { Seo } from '../lib/seo';
 import { AccentToolbar, AnalysisProgress, BackLink, streamAnalysis } from '../components/shared';
 
 export default function CheckWriting() {
@@ -39,6 +40,7 @@ export default function CheckWriting() {
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-10">
+      <Seo titleKey="seo.check.title" path="/check-writing" noindex />
       <BackLink />
       <h1 className="text-3xl font-bold">{t('check.title')}</h1>
       <p className="mt-2 max-w-2xl text-gray-600">
