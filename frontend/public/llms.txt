@@ -1,11 +1,11 @@
-# monfrançais
+# prepfrançais
 
 > AI-powered preparation for the TEF and TCF Canada French exams. Learners
 > write or speak in French, receive CEFR grading (A1–C2) with every error
 > highlighted, explained and categorised, then drill their own mistakes through
 > spaced repetition.
 
-Site: https://xn--monfranais-u6a.com (monfrançais.com)
+Site: https://prepfrancais.com
 Languages: French and English interface; all exam material stays in French.
 
 ## What the platform enforces
@@ -50,6 +50,6 @@ anglicismes · améliorations C1 (style upgrades, which never count as errors)
 
 ## Usage
 
-Content may be quoted with attribution to monfrançais and a link to the source
+Content may be quoted with attribution to prepfrançais and a link to the source
 page. The exam constraints above are drawn from the official TCF Canada format;
 verify current rules with France Éducation international before relying on them.

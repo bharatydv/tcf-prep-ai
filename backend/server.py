@@ -1,5 +1,5 @@
 """
-monfrancais — FastAPI backend (PostgreSQL edition)
+prepfrancais — FastAPI backend (PostgreSQL edition)
 French exam-preparation platform for TCF Canada.
 All routes are prefixed with /api.
 
@@ -31,7 +31,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from sqlalchemy import (
     String, Integer, Float, Boolean, DateTime, Text, ForeignKey, func, select,
-    update as sa_update, delete as sa_delete,
+    update as sa_update, delete as sa_delete, case,
 )
 from sqlalchemy.dialects.postgresql import JSONB, ARRAY
 from sqlalchemy.ext.asyncio import (
@@ -86,8 +86,21 @@ SMTP_HOST = os.environ.get("SMTP_HOST", "")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
-SMTP_FROM = os.environ.get("SMTP_FROM", "monfrançais <bonjour@monfrancais.com>")
+SMTP_FROM = os.environ.get("SMTP_FROM", "prepfrançais <bonjour@prepfrancais.com>")
 SMTP_STARTTLS = os.environ.get("SMTP_STARTTLS", "true").lower() != "false"
+
+# SMS, the second confirmation channel. Twilio is the only provider wired up.
+# With no credentials the code is logged rather than sent — the same bargain
+# SMTP makes above — so local development needs no account, while production
+# simply does not offer the SMS option unless it can actually deliver one.
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
+TWILIO_FROM = os.environ.get("TWILIO_FROM", "")
+SMS_ENABLED = bool(TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_FROM)
+PHONE_CODE_TTL_MINUTES = int(os.environ.get("PHONE_CODE_TTL_MINUTES", "10"))
+# Six digits fall to brute force in a way a 32-byte link never does, so a code
+# dies after a handful of wrong guesses rather than waiting out its TTL.
+PHONE_CODE_MAX_ATTEMPTS = 5
 
 # Only trust X-Forwarded-For when the request actually arrives through a proxy
 # we run. Reading it unconditionally let an anonymous caller rotate the header
@@ -154,7 +167,14 @@ AI_HTTP_TIMEOUT = float(os.environ.get("AI_HTTP_TIMEOUT", "60"))
 # product at six people being graded at once.
 AI_MAX_CONCURRENCY = int(os.environ.get("AI_MAX_CONCURRENCY", "32"))
 
-FREE_MONTHLY_LIMIT = 5
+# The free trial is granted once per account and never refills. It is split by
+# skill so one appetite cannot eat the other's share, and tâche 2 carries its
+# own ceiling inside the speaking share: the live roleplay is several AI calls
+# per attempt, far and away the most expensive thing here to give away.
+FREE_WRITING_LIMIT = 3
+FREE_SPEAKING_LIMIT = 3
+FREE_SPEAKING_TACHE2_LIMIT = 1
+FREE_TRIAL_TOTAL = FREE_WRITING_LIMIT + FREE_SPEAKING_LIMIT
 FREE_MODEL_ANSWER_LIMIT = 3
 # Cost controls. The longest TCF tâche is 180 words, so 6000 characters is far
 # above any legitimate answer while still bounding what one credit can spend.
@@ -347,7 +367,13 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(20), default="user")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Lifetime total, kept in step with the two counters below so the admin
+    # table and the older "attempts used" labels keep meaning something.
     free_submissions_used: Mapped[int] = mapped_column(Integer, default=0)
+    # The free trial, spent once and never refilled.
+    free_writing_used: Mapped[int] = mapped_column(Integer, default=0)
+    free_speaking_used: Mapped[int] = mapped_column(Integer, default=0)
+    free_speaking_tache2_used: Mapped[int] = mapped_column(Integer, default=0)
     subscription_status: Mapped[str] = mapped_column(String(20), default="free")
     monthly_reset_date: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True)
@@ -374,6 +400,13 @@ class User(Base):
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     email_verified_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    # The second channel. Optional, and the account is considered confirmed
+    # once EITHER channel is: many learners abroad read SMS long before they
+    # find a mail from an unfamiliar domain in their spam folder.
+    phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    phone_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    phone_verified_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
 
 
 class AuthToken(Base):
@@ -389,7 +422,10 @@ class AuthToken(Base):
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     user_id: Mapped[str] = mapped_column(
         String(64), ForeignKey("users.user_id"), index=True)
-    purpose: Mapped[str] = mapped_column(String(20), index=True)  # reset | verify
+    purpose: Mapped[str] = mapped_column(String(20), index=True)  # reset | verify | phone
+    # Six digits is guessable by brute force in a way a 32-byte link is not, so
+    # SMS codes carry an attempt count and burn out after a handful of tries.
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), index=True)
@@ -655,12 +691,20 @@ def public_user(u: User) -> dict:
         "model_answers_read": u.model_answers_read or 0,
         "timezone": u.timezone or "America/Toronto",
         "email_verified": bool(u.email_verified),
+        "phone": u.phone,
+        "phone_verified": bool(u.phone_verified),
+        # Either channel confirms the account; the banner clears on the first.
+        "verified": bool(u.email_verified) or bool(u.phone_verified),
         # Shown before the editor, so nobody writes 150 words only to be told
-        # afterwards that they had no credits left.
+        # afterwards that they had no attempts left.
+        "trial": trial_state(u),
         "credits_remaining": (
             None if (u.subscription_status or "free") == "premium"
-            else max(0, FREE_MONTHLY_LIMIT - (u.free_submissions_used or 0))),
-        "free_monthly_limit": FREE_MONTHLY_LIMIT,
+            else max(0, FREE_TRIAL_TOTAL - ((u.free_writing_used or 0)
+                                            + (u.free_speaking_used or 0)))),
+        "free_trial_total": FREE_TRIAL_TOTAL,
+        # Older bundles read this name; it is the same number.
+        "free_monthly_limit": FREE_TRIAL_TOTAL,
     }
 
 
@@ -681,7 +725,7 @@ def hash_password(pw: str) -> str:
 
 # Compared against when no account matches, so a login attempt for an unknown
 # address costs the same ~100ms of bcrypt as a real one.
-_DUMMY_PASSWORD_HASH = bcrypt.hashpw(b"monfrancais-timing-equaliser",
+_DUMMY_PASSWORD_HASH = bcrypt.hashpw(b"prepfrancais-timing-equaliser",
                                      bcrypt.gensalt()).decode()
 
 
@@ -755,6 +799,55 @@ async def issue_link_token(db: AsyncSession, user_id: str, purpose: str,
         created_at=now_utc(), expires_at=now_utc() + ttl, used_at=None))
     await db.commit()
     return raw
+
+
+async def issue_phone_code(db: AsyncSession, user_id: str) -> str:
+    """Mint a six-digit SMS code, storing only its hash.
+
+    The hash covers the user id as well as the digits: token_hash is unique,
+    and two people are going to be sent the same six digits eventually.
+    """
+    await db.execute(
+        sa_update(AuthToken)
+        .where(AuthToken.user_id == user_id, AuthToken.purpose == "phone",
+               AuthToken.used_at.is_(None))
+        .values(used_at=now_utc()))
+    code = f"{secrets.randbelow(1000000):06d}"
+    db.add(AuthToken(
+        token_hash=_hash_link_token(f"{user_id}:{code}"), user_id=user_id,
+        purpose="phone", created_at=now_utc(),
+        expires_at=now_utc() + timedelta(minutes=PHONE_CODE_TTL_MINUTES),
+        used_at=None, attempts=0))
+    await db.commit()
+    return code
+
+
+async def consume_phone_code(db: AsyncSession, user_id: str, code: str) -> bool:
+    """Spend the outstanding code, or record a failed guess against it."""
+    res = await db.execute(
+        select(AuthToken).where(
+            AuthToken.user_id == user_id, AuthToken.purpose == "phone",
+            AuthToken.used_at.is_(None),
+            AuthToken.expires_at > now_utc())
+        # issue_phone_code retires the previous code, but two requests racing
+        # can still leave two live rows — and scalar_one_or_none() raises on
+        # that rather than returning either. Newest wins, which is the one the
+        # learner is reading off their phone.
+        .order_by(AuthToken.created_at.desc()).limit(1))
+    row = res.scalars().first()
+    if row is None:
+        return False
+    if _hash_link_token(f"{user_id}:{(code or '').strip()}") != row.token_hash:
+        row.attempts = (row.attempts or 0) + 1
+        # Burn it rather than leaving a five-guess window open for the next
+        # caller to keep chipping at.
+        if row.attempts >= PHONE_CODE_MAX_ATTEMPTS:
+            row.used_at = now_utc()
+        await db.commit()
+        return False
+    row.used_at = now_utc()
+    await db.commit()
+    return True
 
 
 async def consume_link_token(db: AsyncSession, raw: str,
@@ -856,22 +949,73 @@ async def send_email(to: str, subject: str, body: str) -> bool:
 
 def reset_email_body(name: str, link: str) -> str:
     return (f"Bonjour {name},{NEWLINE}{NEWLINE}"
-            f"Vous avez demandé à réinitialiser votre mot de passe monfrançais."
+            f"Vous avez demandé à réinitialiser votre mot de passe prepfrançais."
             f"{NEWLINE}Ouvrez ce lien pour en choisir un nouveau :{NEWLINE}{NEWLINE}"
             f"{link}{NEWLINE}{NEWLINE}"
             f"Le lien est valable {RESET_TTL_MINUTES} minutes et ne fonctionne "
             f"qu'une fois.{NEWLINE}{NEWLINE}"
             f"Si vous n'êtes pas à l'origine de cette demande, ignorez ce "
             f"message : votre mot de passe reste inchangé.{NEWLINE}{NEWLINE}"
-            f"— monfrançais")
+            f"— prepfrançais")
+
+
+def normalize_phone(raw: str) -> str:
+    """Best-effort E.164. Keeps one leading +, drops spaces, dashes and dots.
+
+    No country is assumed: a number typed without an international prefix is
+    rejected rather than silently guessed at, because guessing wrong sends the
+    code to a stranger.
+    """
+    cleaned = re.sub(r"[^\d+]", "", raw or "")
+    if cleaned.startswith("00"):
+        cleaned = "+" + cleaned[2:]
+    if not cleaned.startswith("+") or not (8 <= len(cleaned) <= 16):
+        raise HTTPException(
+            status_code=400,
+            detail=("Indiquez le numéro au format international, indicatif "
+                    "compris — par exemple +33 6 12 34 56 78."))
+    return cleaned
+
+
+def _send_sms_sync(to: str, body: str):
+    """One message through Twilio, or logged when unconfigured."""
+    if not SMS_ENABLED:
+        log.warning("SMS not configured - message for %s:%s%s", to, NEWLINE, body)
+        return
+
+    import requests
+    resp = requests.post(
+        f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}"
+        "/Messages.json",
+        auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+        data={"From": TWILIO_FROM, "To": to, "Body": body},
+        timeout=20)
+    resp.raise_for_status()
+
+
+async def send_sms(to: str, body: str) -> bool:
+    """Send off the event loop. Like send_email, a failure is logged and never
+    raised: the endpoint must answer the same either way, or it becomes a way
+    to test which numbers are registered."""
+    try:
+        await run_ai(_send_sms_sync, to, body)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.error("SMS send failed: %s", exc)
+        return False
+
+
+def phone_code_body(code: str) -> str:
+    return (f"{code} est votre code de confirmation prepfrançais. "
+            f"Il expire dans {PHONE_CODE_TTL_MINUTES} minutes.")
 
 
 def verify_email_body(name: str, link: str) -> str:
     return (f"Bonjour {name},{NEWLINE}{NEWLINE}"
             f"Confirmez votre adresse e-mail pour sécuriser votre compte "
-            f"monfrançais :{NEWLINE}{NEWLINE}{link}{NEWLINE}{NEWLINE}"
+            f"prepfrançais :{NEWLINE}{NEWLINE}{link}{NEWLINE}{NEWLINE}"
             f"Le lien est valable {VERIFY_TTL_HOURS} heures.{NEWLINE}{NEWLINE}"
-            f"— monfrançais")
+            f"— prepfrançais")
 
 
 # small DB convenience helpers --------------------------------------------------
@@ -1003,45 +1147,56 @@ async def get_admin_user(user: User = Depends(get_current_user)) -> User:
 # ----------------------------------------------------------------------------
 # Freemium limits & streaks
 # ----------------------------------------------------------------------------
-async def check_and_reset_monthly(db: AsyncSession, user: User) -> User:
-    """Reset the free counter if the month changed; returns the fresh user."""
-    reset = user.monthly_reset_date
-    now = now_utc()
-    needs_reset = True
-    if reset:
-        if isinstance(reset, str):
-            try:
-                reset = datetime.fromisoformat(reset)
-            except ValueError:
-                reset = None
-        if reset and reset.month == now.month and reset.year == now.year:
-            needs_reset = False
-    if needs_reset:
-        user.free_submissions_used = 0
-        user.monthly_reset_date = now
-        await db.commit()
-        await db.refresh(user)
-    return user
+def trial_state(user: User) -> dict:
+    """What is left of the free trial, in the shape the paywall renders."""
+    premium = (user.subscription_status or "free") == "premium"
+    w = user.free_writing_used or 0
+    sp = user.free_speaking_used or 0
+    t2 = user.free_speaking_tache2_used or 0
+    return {
+        "premium": premium,
+        "one_time": True,          # the trial is granted once and never refills
+        "writing": {"used": w, "limit": FREE_WRITING_LIMIT,
+                    "left": None if premium else max(0, FREE_WRITING_LIMIT - w)},
+        "speaking": {"used": sp, "limit": FREE_SPEAKING_LIMIT,
+                     "left": None if premium else max(0, FREE_SPEAKING_LIMIT - sp)},
+        "speaking_tache2": {
+            "used": t2, "limit": FREE_SPEAKING_TACHE2_LIMIT,
+            "left": None if premium else max(0, FREE_SPEAKING_TACHE2_LIMIT - t2)},
+    }
 
 
-async def enforce_free_limit(db: AsyncSession, user: User) -> User:
-    """Read-only check. Anything that will spend a credit must use
-    reserve_credit() instead, which claims it atomically."""
-    user = await check_and_reset_monthly(db, user)
-    if user.subscription_status == "premium":
-        return user
-    if (user.free_submissions_used or 0) >= FREE_MONTHLY_LIMIT:
-        raise HTTPException(
-            status_code=402,
-            detail="Free tier limit reached. Please upgrade to continue.")
-    return user
+# What each exhausted allowance says, in the learner's own terms.
+_TRIAL_MSG = {
+    "writing": (f"Vous avez utilisé vos {FREE_WRITING_LIMIT} corrections "
+                "écrites gratuites."),
+    "speaking": (f"Vous avez utilisé vos {FREE_SPEAKING_LIMIT} évaluations "
+                 "orales gratuites."),
+    "speaking_tache2": ("L'essai gratuit comprend un seul exercice en "
+                        "interaction (tâche 2)."),
+}
+
+
+def trial_exhausted(kind: str, user: User) -> HTTPException:
+    """The 402 every metered endpoint raises once the trial is spent.
+
+    The detail is an object rather than a sentence so the frontend can name the
+    allowance that ran out and offer the plans in place, instead of showing the
+    learner an API error. `msg` carries the plain sentence, which is what every
+    existing toast already reads out of a FastAPI error.
+    """
+    return HTTPException(status_code=402, detail={
+        "code": "trial_exhausted",
+        "kind": kind,                       # writing | speaking | speaking_tache2
+        "msg": _TRIAL_MSG.get(kind, _TRIAL_MSG["writing"]),
+        "trial": trial_state(user),
+    })
 
 
 async def enforce_free_conversation_limit(db: AsyncSession, user: User) -> User:
     """Free-conversation allowance, counted from the conversations already
     graded this month. Derived from the submissions table rather than a new
     user column, so this needs no migration on an existing database."""
-    user = await check_and_reset_monthly(db, user)
     if user.subscription_status == "premium":
         return user
     now = now_utc()
@@ -1053,10 +1208,13 @@ async def enforce_free_conversation_limit(db: AsyncSession, user: User) -> User:
             Submission.created_at >= month_start,
         ))
     if (used or 0) >= FREE_CONVERSATION_LIMIT:
-        raise HTTPException(
-            status_code=402,
-            detail=(f"Vous avez utilisé vos {FREE_CONVERSATION_LIMIT} conversations "
-                    "gratuites ce mois-ci. Passez à la version Pro pour continuer."))
+        raise HTTPException(status_code=402, detail={
+            "code": "conversation_limit",
+            "kind": "conversation",
+            "msg": (f"Vous avez utilisé vos {FREE_CONVERSATION_LIMIT} conversations "
+                    "gratuites ce mois-ci."),
+            "trial": trial_state(user),
+        })
     return user
 
 
@@ -1067,40 +1225,71 @@ async def consume_credit(db: AsyncSession, user_id: str):
     await db.commit()
 
 
-async def reserve_credit(db: AsyncSession, user: User) -> User:
-    """Atomically claim one free credit, or 402 if none are left.
+async def reserve_credit(db: AsyncSession, user: User, kind: str = "writing",
+                         *, tache2: bool = False) -> User:
+    """Atomically claim one trial attempt of `kind`, or 402 if none are left.
 
     Checking the count and incrementing it in two statements lets two parallel
-    requests both pass the check, so the increment carries the limit in its
-    WHERE clause and the row lock decides the winner.
+    requests both pass the check, so the increment carries the limits in its
+    WHERE clause and the row lock decides the winner. A tâche 2 roleplay claims
+    two allowances at once — the speaking one and its own — and doing it in a
+    single statement means it can never take one without the other.
+
+    Whatever is claimed here must be handed back with the SAME arguments via
+    refund_credit() if the work then fails to grade.
     """
-    user = await check_and_reset_monthly(db, user)
     if user.subscription_status == "premium":
         return user
+    speaking = kind == "speaking"
+    conds = ([User.free_speaking_used < FREE_SPEAKING_LIMIT] if speaking
+             else [User.free_writing_used < FREE_WRITING_LIMIT])
+    values = ({"free_speaking_used": User.free_speaking_used + 1} if speaking
+              else {"free_writing_used": User.free_writing_used + 1})
+    if speaking and tache2:
+        conds.append(
+            User.free_speaking_tache2_used < FREE_SPEAKING_TACHE2_LIMIT)
+        values["free_speaking_tache2_used"] = User.free_speaking_tache2_used + 1
+    values["free_submissions_used"] = User.free_submissions_used + 1
     res = await db.execute(
-        sa_update(User)
-        .where(User.user_id == user.user_id,
-               User.free_submissions_used < FREE_MONTHLY_LIMIT)
-        .values(free_submissions_used=User.free_submissions_used + 1)
-        .returning(User.free_submissions_used))
+        sa_update(User).where(User.user_id == user.user_id, *conds)
+        .values(**values).returning(User.free_submissions_used))
     if res.scalar_one_or_none() is None:
         await db.rollback()
-        raise HTTPException(
-            status_code=402,
-            detail="Free tier limit reached. Please upgrade to continue.")
+        # Which of the two ceilings stopped a tâche 2 attempt decides what the
+        # paywall says, so read the row back rather than guessing.
+        await db.refresh(user)
+        if (speaking and tache2
+                and (user.free_speaking_tache2_used or 0) >= FREE_SPEAKING_TACHE2_LIMIT):
+            raise trial_exhausted("speaking_tache2", user)
+        raise trial_exhausted("speaking" if speaking else "writing", user)
     await db.commit()
     await db.refresh(user)
     return user
 
 
-async def refund_credit(db: AsyncSession, user: User):
-    """Give a reserved credit back when the work could not be graded."""
+async def refund_credit(db: AsyncSession, user: User, kind: str = "writing",
+                        *, tache2: bool = False):
+    """Give a reserved attempt back when the work could not be graded.
+
+    Must mirror the reserve_credit() call that claimed it, or the learner is
+    quietly charged for an attempt the AI never delivered.
+    """
     if user.subscription_status == "premium":
         return
+    speaking = kind == "speaking"
+    col = User.free_speaking_used if speaking else User.free_writing_used
+    values = ({"free_speaking_used": User.free_speaking_used - 1} if speaking
+              else {"free_writing_used": User.free_writing_used - 1})
+    if speaking and tache2:
+        values["free_speaking_tache2_used"] = case(
+            (User.free_speaking_tache2_used > 0,
+             User.free_speaking_tache2_used - 1), else_=0)
+    values["free_submissions_used"] = case(
+        (User.free_submissions_used > 0, User.free_submissions_used - 1),
+        else_=0)
     await db.execute(
-        sa_update(User)
-        .where(User.user_id == user.user_id, User.free_submissions_used > 0)
-        .values(free_submissions_used=User.free_submissions_used - 1))
+        sa_update(User).where(User.user_id == user.user_id, col > 0)
+        .values(**values))
     await db.commit()
 
 
@@ -2194,6 +2383,21 @@ class VerifyEmailIn(BaseModel):
     token: str = Field(min_length=16, max_length=256)
 
 
+class PhoneSendIn(BaseModel):
+    phone: str = Field(min_length=6, max_length=24)
+
+
+class PhoneVerifyIn(BaseModel):
+    code: str = Field(min_length=4, max_length=8)
+
+
+class ChangeEmailIn(BaseModel):
+    email: EmailStr
+    # Changing where the confirmation lands is an account takeover if a stolen
+    # session can do it alone, so the password is asked for again.
+    password: str = Field(max_length=72)
+
+
 class SubscribeIn(BaseModel):
     email: EmailStr
 
@@ -2755,6 +2959,37 @@ MIGRATIONS = [
     "ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE",
     "ALTER TABLE users "
     "ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ",
+    # SMS confirmation, the second channel.
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(32)",
+    "ALTER TABLE users "
+    "ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMPTZ",
+    "ALTER TABLE auth_tokens ADD COLUMN IF NOT EXISTS attempts INTEGER DEFAULT 0",
+    # The free trial, split by skill. Deliberately added WITHOUT a default, so
+    # that NULL means "not yet backfilled": the UPDATEs below then run once and
+    # are a no-op on every later boot, which an unconditional UPDATE would not
+    # be. The default is attached afterwards, for rows inserted from here on.
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS free_writing_used INTEGER",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS free_speaking_used INTEGER",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS free_speaking_tache2_used INTEGER",
+    # Existing accounts keep what they have already spent, so the upgrade hands
+    # nobody a second trial. The split is read from their submissions: anything
+    # not spoken was written.
+    f"UPDATE users u SET free_writing_used = LEAST({FREE_WRITING_LIMIT}, "
+    "(SELECT COUNT(*) FROM submissions s WHERE s.user_id = u.user_id "
+    "AND COALESCE(s.source, '') NOT IN ('speaking', 'conversation'))) "
+    "WHERE u.free_writing_used IS NULL",
+    f"UPDATE users u SET free_speaking_used = LEAST({FREE_SPEAKING_LIMIT}, "
+    "(SELECT COUNT(*) FROM submissions s WHERE s.user_id = u.user_id "
+    "AND COALESCE(s.source, '') IN ('speaking', 'conversation'))) "
+    "WHERE u.free_speaking_used IS NULL",
+    # No record survives of which speaking attempts were tâche 2, so the
+    # generous reading wins: an existing account keeps its roleplay attempt.
+    "UPDATE users SET free_speaking_tache2_used = 0 "
+    "WHERE free_speaking_tache2_used IS NULL",
+    "ALTER TABLE users ALTER COLUMN free_writing_used SET DEFAULT 0",
+    "ALTER TABLE users ALTER COLUMN free_speaking_used SET DEFAULT 0",
+    "ALTER TABLE users ALTER COLUMN free_speaking_tache2_used SET DEFAULT 0",
 ]
 
 
@@ -2780,7 +3015,7 @@ async def lifespan(app: FastAPI):
 
 ALLOWED_ORIGINS = [o.strip() for o in FRONTEND_URL.split(",") if o.strip()]
 
-app = FastAPI(title="monfrançais API", lifespan=lifespan)
+app = FastAPI(title="prepfrançais API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -2832,7 +3067,7 @@ async def unhandled_error(request: Request, exc: Exception):
 # ----------------------------------------------------------------------------
 @app.get("/api/")
 async def root():
-    return {"message": "monfrancais API", "status": "healthy"}
+    return {"message": "prepfrancais API", "status": "healthy"}
 
 
 @app.get("/api/health")
@@ -2850,7 +3085,13 @@ async def tcf_spec():
             "tasks": {str(n): s for n, s in WRITING_TASKS.items()},
         },
         "speaking": {"tasks": {str(n): s for n, s in SPEAKING_TASKS.items()}},
-        "free_monthly_limit": FREE_MONTHLY_LIMIT,
+        "free_trial": {
+            "writing": FREE_WRITING_LIMIT,
+            "speaking": FREE_SPEAKING_LIMIT,
+            "speaking_tache2": FREE_SPEAKING_TACHE2_LIMIT,
+            "one_time": True,
+        },
+        "free_monthly_limit": FREE_TRIAL_TOTAL,
         "free_model_answer_limit": FREE_MODEL_ANSWER_LIMIT,
         "free_conversation_limit": FREE_CONVERSATION_LIMIT,
         "max_text_chars": MAX_TEXT_CHARS,
@@ -2942,7 +3183,7 @@ async def _send_verification_email(db: AsyncSession, user: User) -> bool:
     raw = await issue_link_token(db, user.user_id, "verify",
                                  timedelta(hours=VERIFY_TTL_HOURS))
     link = f"{PUBLIC_URL}/verify-email?token={raw}"
-    return await send_email(user.email, "Confirmez votre adresse monfrançais",
+    return await send_email(user.email, "Confirmez votre adresse prepfrançais",
                             verify_email_body(user.name or "", link))
 
 
@@ -2989,7 +3230,6 @@ async def refresh(request: Request, response: Response,
 async def me(response: Response,
              user: User = Depends(get_current_user),
              db: AsyncSession = Depends(get_db)):
-    user = await check_and_reset_monthly(db, user)
     # Refresh the readable session hint on the way out, so a session that
     # predates the cookie stops probing after one successful load.
     response.set_cookie(SESSION_HINT_COOKIE, "1",
@@ -3046,7 +3286,7 @@ async def forgot_password(body: ForgotPasswordIn,
                                      timedelta(minutes=RESET_TTL_MINUTES))
         link = f"{PUBLIC_URL}/reset-password?token={raw}"
         await send_email(user.email,
-                         "Réinitialisez votre mot de passe monfrançais",
+                         "Réinitialisez votre mot de passe prepfrançais",
                          reset_email_body(user.name or "", link))
     return {"detail": "If that address has an account, a reset link is on its way."}
 
@@ -3105,6 +3345,89 @@ async def resend_verification(user: User = Depends(get_current_user),
         return {"detail": "Already verified"}
     await _send_verification_email(db, user)
     return {"detail": "Confirmation link sent"}
+
+
+@app.post("/api/auth/change-email")
+async def change_email(body: ChangeEmailIn, user: User = Depends(get_current_user),
+                       db: AsyncSession = Depends(get_db),
+                       _rl=Depends(auth_rate_limit)):
+    """Correct the address the account was registered with, and confirm the new
+    one. Typing it wrong at sign-up used to be unrecoverable: the confirmation
+    went to an address nobody reads, and nothing in the product let you change
+    where it was sent.
+    """
+    email = body.email.lower()
+    ok = await run_ai(verify_password, body.password, user.password_hash)
+    if not ok:
+        raise HTTPException(status_code=401, detail="Mot de passe incorrect.")
+    if email == (user.email or "").lower():
+        return {"user": public_user(user)}
+    existing = await get_user_by_email(db, email)
+    if existing:
+        raise HTTPException(status_code=400,
+                            detail="Cette adresse est déjà utilisée.")
+    await db.execute(
+        sa_update(User).where(User.user_id == user.user_id)
+        .values(email=email, email_verified=False, email_verified_at=None))
+    await db.commit()
+    await db.refresh(user)
+    await _send_verification_email(db, user)
+    return {"user": public_user(user)}
+
+
+@app.post("/api/auth/phone/send")
+async def phone_send(body: PhoneSendIn, user: User = Depends(get_current_user),
+                     db: AsyncSession = Depends(get_db),
+                     _rl=Depends(auth_rate_limit)):
+    """Attach a number to the account and text it a confirmation code.
+
+    Also the way to correct a wrong number: sending again replaces both the
+    number and the outstanding code.
+    """
+    if IS_PROD and not SMS_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail=("La confirmation par SMS n'est pas encore disponible. "
+                    "Confirmez votre adresse e-mail pour l'instant."))
+    phone = normalize_phone(body.phone)
+    # A number confirms one account, not many: without this, one handset could
+    # verify an unlimited supply of trial accounts.
+    taken = await db.scalar(
+        select(func.count()).select_from(User).where(
+            User.phone == phone, User.phone_verified == True,  # noqa: E712
+            User.user_id != user.user_id))
+    if taken:
+        raise HTTPException(
+            status_code=400,
+            detail="Ce numéro est déjà associé à un autre compte.")
+    await db.execute(
+        sa_update(User).where(User.user_id == user.user_id)
+        .values(phone=phone, phone_verified=False, phone_verified_at=None))
+    await db.commit()
+    await db.refresh(user)
+    code = await issue_phone_code(db, user.user_id)
+    await send_sms(phone, phone_code_body(code))
+    return {"detail": "Code sent", "phone": phone,
+            "expires_in_minutes": PHONE_CODE_TTL_MINUTES}
+
+
+@app.post("/api/auth/phone/verify")
+async def phone_verify(body: PhoneVerifyIn, user: User = Depends(get_current_user),
+                       db: AsyncSession = Depends(get_db),
+                       _rl=Depends(auth_rate_limit)):
+    if not user.phone:
+        raise HTTPException(status_code=400,
+                            detail="Aucun numéro à confirmer.")
+    if not await consume_phone_code(db, user.user_id, body.code):
+        raise HTTPException(
+            status_code=400,
+            detail="Code incorrect ou expiré. Demandez-en un nouveau.")
+    await db.execute(
+        sa_update(User).where(User.user_id == user.user_id)
+        .values(phone_verified=True, phone_verified_at=now_utc()))
+    await db.commit()
+    await db.refresh(user)
+    return {"user": public_user(user)}
 
 
 # ----------------------------------------------------------------------------
@@ -4096,13 +4419,16 @@ async def speaking_analyze(question: str = Form(...),
     filename = audio.filename or "audio.webm"
     mime = resolve_audio_mime(filename, mime_type or audio.content_type)
 
-    user = await reserve_credit(db, user)
+    # Tâche 2 is the interaction, whichever way it was recorded, so it draws on
+    # the same single free roleplay as the live one.
+    is_tache2 = task_type == 2
+    user = await reserve_credit(db, user, "speaking", tache2=is_tache2)
     try:
         transcript = await asyncio.wait_for(
             transcribe_audio(audio_bytes, filename, db=db, mime=mime),
             timeout=SPEAKING_MAX_WAIT_SECONDS)
     except asyncio.TimeoutError:
-        await refund_credit(db, user)
+        await refund_credit(db, user, "speaking", tache2=is_tache2)
         raise HTTPException(status_code=504, detail=AI_TIMEOUT_DETAIL)
 
     # Nothing was said, or the recording could not be read. Either way there is
@@ -4110,7 +4436,7 @@ async def speaking_analyze(question: str = Form(...),
     # attempt and charging for it — which is what every iOS recording used to
     # do, because its MP4 audio was uploaded labelled as WebM.
     if not (transcript or "").strip():
-        await refund_credit(db, user)
+        await refund_credit(db, user, "speaking", tache2=is_tache2)
         raise HTTPException(status_code=422, detail=NO_SPEECH_DETAIL)
 
     try:
@@ -4119,10 +4445,10 @@ async def speaking_analyze(question: str = Form(...),
                                      task_type=task_type),
             timeout=SPEAKING_MAX_WAIT_SECONDS)
     except asyncio.TimeoutError:
-        await refund_credit(db, user)
+        await refund_credit(db, user, "speaking", tache2=is_tache2)
         raise HTTPException(status_code=504, detail=AI_TIMEOUT_DETAIL)
     if analysis.get("ai_unavailable"):
-        await refund_credit(db, user)
+        await refund_credit(db, user, "speaking", tache2=is_tache2)
         raise HTTPException(status_code=503, detail=AI_UNAVAILABLE_DETAIL)
     analysis["transcript"] = transcript
     sub = await persist_submission(
@@ -4178,10 +4504,12 @@ async def speaking_converse_grade(body: ConverseGradeIn,
     """Grade a finished conversation. Tache 2 spends one AI credit; open-ended
     practice draws on the separate free-conversation allowance."""
     free_mode = body.mode == "free"
+    # The roleplay is the one tâche the trial hands out only once.
+    is_tache2 = body.mode == "tache2"
     if free_mode:
         user = await enforce_free_conversation_limit(db, user)
     else:
-        user = await reserve_credit(db, user)
+        user = await reserve_credit(db, user, "speaking", tache2=is_tache2)
     history = [t.model_dump() for t in body.history]
     # The mode was validated on the way in and then thrown away, so a tâche 1
     # interview reached the tâche 2 examiner. Carry it through.
@@ -4190,14 +4518,14 @@ async def speaking_converse_grade(body: ConverseGradeIn,
                                        task_type=task_type)
     if analysis.get("ai_unavailable"):
         if not free_mode:
-            await refund_credit(db, user)
+            await refund_credit(db, user, "speaking", tache2=is_tache2)
         raise HTTPException(status_code=503, detail=AI_UNAVAILABLE_DETAIL)
     if analysis.get("no_speech"):
         # Nothing was said, so nothing was graded: give the credit back rather
         # than charging for an empty attempt, and still return 200 so the
         # learner reads why instead of an unexplained failure.
         if not free_mode:
-            await refund_credit(db, user)
+            await refund_credit(db, user, "speaking", tache2=is_tache2)
     transcript = "\n".join(
         f"{'Candidat' if t['role'] == 'candidate' else 'Agent'} : {t['text']}"
         for t in history if str(t.get("text", "")).strip())
@@ -4689,7 +5017,7 @@ class BlogPost(Base):
     content: Mapped[str] = mapped_column(Text)            # markdown or HTML
     cover_image: Mapped[str] = mapped_column(Text, default="")
     meta_description: Mapped[str] = mapped_column(Text, default="")
-    author: Mapped[str] = mapped_column(String(120), default="monfrancais")
+    author: Mapped[str] = mapped_column(String(120), default="prepfrancais")
     tags: Mapped[Any] = mapped_column(JSONB, default=list)
     is_published: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -4716,7 +5044,7 @@ class BlogPostIn(BaseModel):
     excerpt: Optional[str] = ""
     cover_image: Optional[str] = ""
     meta_description: Optional[str] = ""
-    author: Optional[str] = "monfrancais"
+    author: Optional[str] = "prepfrancais"
     tags: Optional[List[str]] = None
     is_published: Optional[bool] = True
     slug: Optional[str] = None  # auto-generated from title if omitted
@@ -4806,7 +5134,7 @@ async def admin_create_blog(body: BlogPostIn,
         content=body.content,
         cover_image=body.cover_image or "",
         meta_description=body.meta_description or (body.excerpt or "")[:160],
-        author=body.author or "monfrancais",
+        author=body.author or "prepfrancais",
         tags=body.tags or [],
         is_published=body.is_published if body.is_published is not None else True,
         created_at=now,

@@ -10,7 +10,10 @@ import { ComingSoon } from '../components/shared';
 // Flip to false to restore the page below exactly as it was.
 const NOT_READY = true;
 
-const FREE_LIMIT = 5;
+// The one-time trial: 3 written corrections plus 3 spoken ones. The server is
+// the authority (free_trial_total); this is the value to show before it has
+// answered.
+const FREE_LIMIT = 6;
 
 export default function ListeningHome() {
   // A hook rather than an element, so no early return — loading, empty,
@@ -50,7 +53,7 @@ export default function ListeningHome() {
           </Link>
           {user && user.subscription_status !== 'premium' && (
             <span className="pill bg-white/80 text-primary shadow-sm">
-              {t('bar.freeAttempts', { used: user.free_submissions_used, total: FREE_LIMIT })}
+              {t('bar.freeAttempts', { used: user.free_submissions_used, total: user.free_trial_total ?? FREE_LIMIT })}
             </span>
           )}
         </div>

@@ -112,40 +112,67 @@
   "auth": {
     "alreadyRegistered": "Déjà inscrit ?",
     "backToLogin": "Retour à la connexion",
+    "changeEmail": "Ce n'est pas la bonne adresse ?",
+    "changeEmailBtn": "Modifier mon adresse",
+    "changeEmailHint": "Modifiez-la : la confirmation partira vers la nouvelle.",
+    "codeLabel": "Code à 6 chiffres",
+    "codeSent": "Code envoyé par SMS.",
     "confirmPassword": "Confirmez le mot de passe",
+    "confirmed": "Confirmé",
     "createAccount": "Créez votre compte",
     "createButton": "Créer mon compte",
-    "created": "Compte créé — 5 corrections IA gratuites ajoutées !",
+    "created": "Compte créé — 3 corrections écrites et 3 évaluations orales gratuites ajoutées !",
+    "currentEmail": "Adresse enregistrée :",
+    "currentPassword": "Votre mot de passe",
+    "currentPhone": "Numéro enregistré :",
     "dismiss": "Fermer",
     "email": "Adresse e-mail",
+    "emailChanged": "Adresse modifiée — un nouveau lien de confirmation est parti.",
     "forgot": "Mot de passe oublié ?",
     "forgotButton": "Envoyer le lien",
     "forgotH": "Réinitialiser votre mot de passe",
+    "forgotIntro": "Vous n'arrivez plus à vous connecter ?",
     "forgotSent": "Si cette adresse correspond à un compte, un lien vient d'être envoyé. Vérifiez votre boîte de réception, et vos indésirables.",
     "forgotSub": "Saisissez l'adresse utilisée à l'inscription. Si un compte existe, un lien de réinitialisation part immédiatement — valable une heure et utilisable une seule fois.",
-    "freeBadge": "5 corrections gratuites incluses",
+    "freeBadge": "3 corrections écrites + 3 orales offertes",
     "fullName": "Nom complet",
     "hidePassword": "Masquer le mot de passe",
+    "laterSkip": "Plus tard",
     "loginButton": "Se connecter",
     "loginSub": "Connectez-vous pour poursuivre votre préparation TEF/TCF.",
     "mismatch": "Les mots de passe ne correspondent pas",
+    "newEmail": "Nouvelle adresse e-mail",
     "newPassword": "Nouveau mot de passe",
     "noAccount": "Commencer gratuitement",
     "noAccountPrefix": "Pas encore de compte ?",
+    "noPhone": "Aucun numéro sur ce compte pour l'instant.",
+    "notConfirmed": "Non confirmé",
     "password": "Mot de passe",
     "passwordHint": "Mot de passe (8 caractères minimum)",
+    "phoneHint": "Format international, indicatif compris.",
+    "phoneLabel": "Numéro de téléphone",
+    "phoneVerified": "Numéro confirmé.",
+    "resendCode": "Envoyer un nouveau code",
     "resetBadLink": "Ce lien a expiré ou a déjà été utilisé. Demandez-en un nouveau.",
     "resetButton": "Enregistrer le nouveau mot de passe",
     "resetDone": "Mot de passe modifié. Vous êtes connecté.",
     "resetH": "Choisissez un nouveau mot de passe",
     "resetSub": "Choisissez-en un que vous n'utilisez pas ailleurs. 8 caractères minimum.",
+    "sendCode": "Envoyez-moi un code",
     "showPassword": "Afficher le mot de passe",
     "tooShort": "Le mot de passe doit contenir au moins 8 caractères",
+    "verifiedAlready": "Votre compte est confirmé.",
     "verifyBanner": "Confirmez votre adresse e-mail pour sécuriser votre compte.",
+    "verifyByEmail": "Par e-mail",
+    "verifyBySms": "Par SMS",
+    "verifyCode": "Confirmer mon numéro",
     "verifyFail": "Ce lien de confirmation a expiré. Demandez-en un nouveau depuis votre tableau de bord.",
+    "verifyIntro": "Confirmez votre adresse e-mail ou votre numéro de téléphone. L'un des deux suffit — et vous pouvez corriger ce que vous avez saisi à l'inscription.",
+    "verifyManage": "Changer d'adresse ou utiliser un SMS",
     "verifyOk": "Adresse confirmée. Merci.",
     "verifyResend": "Renvoyer le lien",
     "verifySent": "Lien de confirmation envoyé. Vérifiez votre boîte de réception.",
+    "verifyTitle": "Confirmez votre compte",
     "verifying": "Confirmation de votre adresse…",
     "welcomeBack": "Content de vous revoir",
     "welcomeToast": "Bienvenue, {{name}} !"
@@ -163,7 +190,7 @@
     "ctaBody": "Recevez un retour IA immédiat et votre fourchette de score TEF/TCF estimée.",
     "ctaLink": "Essayer l'assistant d'écriture",
     "ctaTitle": "Prêt à faire évaluer votre français écrit ?",
-    "docTitle": "Blog — conseils, guides et stratégies TEF / TCF | monfrançais",
+    "docTitle": "Blog — conseils, guides et stratégies TEF / TCF | prepfrançais",
     "emptyBody": "De nouveaux articles arrivent — revenez bientôt !",
     "emptyTitle": "Aucun article pour l'instant",
     "featured": "Article à la une",
@@ -235,7 +262,7 @@
   },
   "check": {
     "analyse": "Analyser",
-    "freeAttempts": "{{used}} / 5 essais gratuits",
+    "freeAttempts": "{{used}} / {{total}} essais gratuits",
     "labelPlaceholder": "Intitulé / sujet (facultatif) — ex. « Lettre de motivation »",
     "pasteFirst": "Collez votre texte d’abord !",
     "subtitle": "Collez n'importe quel texte français rédigé ailleurs — un devoir, une ancienne rédaction, un texte corrigé par un professeur. Il passe par la même correction IA, et chaque erreur rejoint votre historique personnel.",
@@ -328,9 +355,9 @@
     "unmuteAria": "Activer la voix"
   },
   "credits": {
-    "none": "Aucune correction gratuite restante ce mois-ci",
-    "remaining": "{{n}} / {{total}} corrections gratuites restantes",
-    "unlimited": "Pro · corrections illimitées"
+    "none": "Essai gratuit terminé",
+    "remaining": "{{n}} / {{total}} essais gratuits restants",
+    "unlimited": "Pro — corrections illimitées"
   },
   "dash": {
     "basedOn": "basé sur votre historique d'erreurs",
@@ -401,7 +428,7 @@
     "ctaLink": "Essayer le correcteur d'écrit",
     "ctaTitle": "Recevez un retour immédiat sur votre français écrit",
     "docDesc": "Un guide complet de l'épreuve d'expression écrite du TEF et du TCF Canada : les trois tâches, le nombre de mots, l'équivalence NCLC 7, les erreurs fréquentes et comment se préparer pour atteindre le NCLC 7 (B2 du CECR) et au-delà.",
-    "docTitle": "Guide de l'expression écrite TEF / TCF Canada : atteindre le NCLC 7 | monfrançais",
+    "docTitle": "Guide de l'expression écrite TEF / TCF Canada : atteindre le NCLC 7 | prepfrançais",
     "faq1a": "Le TEF Canada comme le TCF Canada évaluent le français écrit pour l'immigration au Canada. Chacun comporte une épreuve d'expression écrite construite autour de tâches courtes et concrètes. L'épreuve du TCF Canada comprend trois tâches de longueur et de difficulté croissantes ; celle du TEF Canada suit le même esprit. Les deux convertissent les résultats en Niveaux de compétence linguistique canadiens (NCLC / CLB).",
     "faq1q": "Quelle est la différence entre l'épreuve d'expression écrite du TEF et celle du TCF Canada ?",
     "faq2a": "De nombreux candidats à Entrée express visent le NCLC 7 dans chaque compétence, ce qui correspond environ au niveau B2 du CECR. Le NCLC 7 est un seuil courant pour maximiser les points, mais les exigences exactes dépendent de votre programme d'immigration. Vérifiez toujours l'exigence officielle en vigueur pour votre programme.",
@@ -468,7 +495,7 @@
     "cardSpeakTitle": "Atelier d'oral IA",
     "cardWriteCta": "Corriger mon texte",
     "cardWriteTitle": "Assistant d'écriture",
-    "copyright": "© {{year}} monfrançais. Tous droits réservés.",
+    "copyright": "© {{year}} prepfrançais. Tous droits réservés.",
     "ctaBody": "Cinq corrections IA gratuites par mois, sans carte bancaire. Commencez par un texte et voyez votre premier bilan d'erreurs.",
     "ctaPacks": "Voir les formules",
     "ctaTitle": "Prêt à préparer votre TEF/TCF ?",
@@ -485,7 +512,7 @@
     "faq2q": "Comment l'IA corrige-t-elle mes textes ?",
     "faq3a": "Le simulateur reproduit les conditions officielles de l'épreuve écrite : les 3 tâches, un chronomètre commun et strict de 60 minutes, l'envoi automatique à zéro, aucun correcteur orthographique et le collage désactivé — pour que le jour de l'examen ne réserve aucune surprise.",
     "faq3q": "Le simulateur d'examen est-il identique à l'examen officiel ?",
-    "faq4a": "Oui. Les 5 corrections IA gratuites par mois ne demandent aucune carte bancaire, et les formules payantes sont des achats uniques valables une durée fixe — il n'y a aucun abonnement à résilier.",
+    "faq4a": "Oui. L'essai gratuit — 3 corrections écrites et 3 évaluations orales — ne demande aucune carte bancaire, et les formules payantes sont des achats uniques valables une durée fixe : il n'y a aucun abonnement à résilier.",
     "faq4q": "Puis-je arrêter l'essai gratuit à tout moment ?",
     "footBlog": "Blog",
     "footCombos": "Combinaisons de niveaux",
@@ -508,7 +535,7 @@
     "footWriting": "Atelier d'écrit",
     "footerBlurb": "Entraînez-vous à l'expression orale et écrite et à la compréhension orale et écrite avec un retour par IA, des examens blancs réalistes et un plan de révision personnalisé, conçus pour les candidats au TCF Canada.",
     "footerTag": "Préparez-vous mieux. Réussissez votre TEF/TCF.",
-    "freeMonthly": "5 corrections gratuites par mois",
+    "freeMonthly": "3 corrections écrites + 3 orales offertes",
     "fullTest": "{{exam}} – examen complet",
     "getStarted": "Commencer",
     "h1a": "Écrivez. Évaluez.",
@@ -550,14 +577,14 @@
     "noCardSuffix": "— sans carte bancaire.",
     "offers": "Nos formules",
     "offersSub": "Des formules simples. Une préparation sérieuse.",
-    "orFree": "commencez avec 5 corrections gratuites",
+    "orFree": "commencez avec 6 corrections gratuites",
     "orPrefix": "Ou",
     "planBlurb": "Un plan de révision bâti sur vos erreurs enregistrées.",
     "practiceA": "Entraînez-vous. Recevez un retour.",
     "practiceB": "Améliorez-vous.",
     "precisionA": "Précision. Personnalisation.",
     "precisionB": "Progression.",
-    "registerToast": "Créez votre compte gratuit pour lancer le simulateur — 5 corrections gratuites incluses.",
+    "registerToast": "Créez votre compte gratuit pour lancer le simulateur — 6 corrections gratuites incluses.",
     "secure": "Sécurisé et",
     "simBlurb": "Des simulations TCF complètes dans les conditions réelles de l'examen.",
     "simPreview": "Aperçu de la simulation",
@@ -580,7 +607,7 @@
     "trust2": "Plafonds du barème réel appliqués dans le code",
     "trust3": "Retour immédiat avec un niveau CECR estimé",
     "trust4": "Sécurisé, privé et sans publicité",
-    "videoTitle": "monfrançais — la plateforme en action",
+    "videoTitle": "prepfrançais — la plateforme en action",
     "weakness": "Nous suivons vos points faibles et les transformons en plan de révision bâti sur vos propres erreurs.",
     "weeklyGoalText": "Améliorer la cohérence à l'écrit",
     "weeklyGoals": "Objectifs de la semaine",
@@ -664,6 +691,23 @@
     "writeOwn": "Écrire sur mon propre sujet",
     "writeSomething": "Écrivez votre sujet ou votre texte d’abord."
   },
+  "pay": {
+    "body": "L'essai gratuit est offert une seule fois par compte. Choisissez une formule pour continuer à travailler avec les corrections IA.",
+    "close": "Revenir à mon travail",
+    "kept": "Rien de ce que vous avez écrit n'est perdu.",
+    "notLive": "Le paiement en ligne n'est pas encore ouvert — les prix ci-dessus sont indicatifs. Écrivez-nous et nous rétablirons votre accès.",
+    "seePlans": "Voir les formules",
+    "title": "Votre essai gratuit est terminé",
+    "titleConversation": "Vous avez utilisé vos conversations gratuites du mois",
+    "titleSpeaking": "Vous avez utilisé vos 3 évaluations orales gratuites",
+    "titleTache2": "L'essai gratuit comprend un seul exercice en interaction (tâche 2)",
+    "titleWriting": "Vous avez utilisé vos 3 corrections écrites gratuites",
+    "used": {
+      "speaking": "Oral",
+      "speaking_tache2": "Tâche 2",
+      "writing": "Écrit"
+    }
+  },
   "practice": {
     "chooseMode": "Atelier d'écrit — choisissez votre mode de travail",
     "chooseModeSub": "Travaillez une tâche à la fois avec un retour immédiat, ou passez un examen complet chronométré.",
@@ -691,17 +735,17 @@
     "bonus": "{{n}} essais IA en bonus",
     "comingSoon": "Bientôt disponible",
     "createAccount": "Créer mon compte gratuit",
-    "ctaTitle": "5 corrections gratuites par mois — sans carte bancaire",
+    "ctaTitle": "3 corrections écrites + 3 orales offertes — sans carte bancaire",
     "duration1m": "1 mois",
     "duration2m": "2 mois",
     "duration5d": "5 jours",
     "faq1a": "Le paiement en ligne n'est pas encore ouvert. Les tarifs ci-dessous sont affichés à titre indicatif et aucune formule ne peut être achetée pour le moment. En attendant, tout le monde utilise la formule gratuite.",
     "faq1q": "Quand les formules seront-elles disponibles ?",
-    "faq2a": "5 corrections IA par mois (expression écrite ou orale), la simulation d'examen complète, les révisions illimitées de vos erreurs, les examens blancs, et 3 corrigés modèles.",
+    "faq2a": "3 corrections écrites et 3 évaluations orales par l'IA, dont une peut être le jeu de rôle de la tâche 2, ainsi que la simulation complète de l'épreuve, la révision illimitée de vos propres erreurs, les examens blancs et 3 corrigés types.",
     "faq2q": "Que puis-je faire gratuitement ?",
-    "faq3a": "Votre compte repassera automatiquement en formule gratuite (5 corrections IA par mois). Vos données, votre historique d'erreurs et vos statistiques seront conservés.",
+    "faq3a": "Votre compte revient à la formule gratuite. L'essai gratuit est offert une seule fois et ne se recharge pas, mais vos données, votre historique d'erreurs et vos statistiques sont conservés.",
     "faq3q": "Que se passera-t-il à la fin d'un abonnement ?",
-    "faq4a": "Non. La création de compte et les 5 corrections mensuelles ne demandent aucun moyen de paiement.",
+    "faq4a": "Non. La création du compte et l'essai gratuit ne demandent aucun moyen de paiement.",
     "faq4q": "Ai-je besoin d'une carte bancaire ?",
     "faqTitle": "Questions fréquentes",
     "feature1": "40 tests de compréhension écrite",
@@ -710,7 +754,7 @@
     "feature4": "Sujets et corrections d'expression écrite",
     "goDashboard": "Aller au tableau de bord",
     "mostPopular": "LE PLUS CHOISI",
-    "noticeBody": "Ces tarifs sont affichés à titre indicatif. Aucune formule n'est achetable pour l'instant : tous les comptes utilisent la formule gratuite, soit 5 corrections IA par mois.",
+    "noticeBody": "Ces prix sont donnés à titre indicatif. Aucune formule n'est encore achetable : tous les comptes utilisent l'essai gratuit, soit 3 corrections écrites et 3 évaluations orales.",
     "noticeTitle": "Le paiement en ligne n'est pas encore ouvert.",
     "subtitle": "Des formules courtes et intensives pour préparer votre date d'examen TEF/TCF Canada.",
     "title": "Formules"
@@ -724,8 +768,8 @@
     "h5": "Vos droits",
     "h6": "Témoins (cookies)",
     "h7": "Contact",
-    "intro": "monfrançais vous aide à préparer le TEF et le TCF Canada. Pour cela, le service conserve ce que vous écrivez et dites, puisque réviser ses propres erreurs est tout l'intérêt du produit. Cette page dit exactement ce qui est conservé, pourquoi, et comment le faire supprimer.",
-    "p1": "Votre nom et votre adresse e-mail, saisis à l'inscription. Un mot de passe, conservé uniquement sous forme de hachage bcrypt — personne chez monfrançais ne peut le lire. Le français que vous soumettez à la correction : textes, contenus collés et transcriptions de vos réponses orales. Les corrections elles-mêmes, avec chaque erreur relevée et le niveau CECR attribué. Votre historique : séries, XP, badges, résultats de révision et le fuseau horaire utilisé pour les regrouper.",
+    "intro": "prepfrançais vous aide à préparer le TEF et le TCF Canada. Pour cela, le service conserve ce que vous écrivez et dites, puisque réviser ses propres erreurs est tout l'intérêt du produit. Cette page dit exactement ce qui est conservé, pourquoi, et comment le faire supprimer.",
+    "p1": "Votre nom et votre adresse e-mail, saisis à l'inscription. Un mot de passe, conservé uniquement sous forme de hachage bcrypt — personne chez prepfrançais ne peut le lire. Le français que vous soumettez à la correction : textes, contenus collés et transcriptions de vos réponses orales. Les corrections elles-mêmes, avec chaque erreur relevée et le niveau CECR attribué. Votre historique : séries, XP, badges, résultats de révision et le fuseau horaire utilisé pour les regrouper.",
     "p2": "Une réponse orale est envoyée à un prestataire de transcription, convertie en texte, et c'est ce texte qui est conservé. L'audio lui-même n'est pas enregistré dans notre base ni gardé sur nos serveurs une fois la transcription obtenue.",
     "p3": "Votre texte ou votre transcription est transmis au prestataire d'IA qui le corrige — actuellement Anthropic, OpenAI, Google, Groq ou DeepSeek, et OpenAI, Google, Groq ou AssemblyAI pour la transcription. Ils le traitent pour produire la correction. Nous ne vendons pas vos données et ne les partageons pas avec des annonceurs.",
     "p4": "Tant que votre compte existe, car votre historique d'erreurs est la matière des jeux de révision. Supprimez votre compte et les soumissions, erreurs et sessions de révision qui y sont rattachées disparaissent avec lui.",
@@ -842,7 +886,7 @@
       "title": "Combinaisons de niveaux"
     },
     "contact": {
-      "desc": "Comment joindre l'équipe monfrançais au sujet de votre compte, d'une correction ou d'un partenariat.",
+      "desc": "Comment joindre l'équipe prepfrançais au sujet de votre compte, d'une correction ou d'un partenariat.",
       "title": "Contact"
     },
     "dashboard": {
@@ -852,19 +896,19 @@
       "title": "Votre correction"
     },
     "forgot": {
-      "desc": "Demandez un lien de réinitialisation pour votre compte monfrançais.",
+      "desc": "Demandez un lien de réinitialisation pour votre compte prepfrançais.",
       "title": "Réinitialiser votre mot de passe"
     },
     "home": {
-      "desc": "Correction IA pour le TEF et le TCF Canada : expression écrite et orale notées sur l'échelle CECR, chaque erreur expliquée, et vos propres fautes transformées en exercices de révision. 5 corrections gratuites par mois.",
-      "title": "monfrançais — Réussissez votre TEF/TCF Canada"
+      "desc": "Correction par IA pour le TEF et le TCF Canada : français écrit et oral évalué sur l'échelle du CECR, chaque erreur expliquée, et vos propres fautes transformées en exercices de révision. Essai gratuit : 3 corrections écrites et 3 orales.",
+      "title": "prepfrançais — Réussissez votre TEF/TCF Canada"
     },
     "listening": {
       "desc": "Entraînement à la compréhension orale du TCF Canada, corrigé côté serveur et enregistré dans votre historique.",
       "title": "Entraînement à la compréhension orale"
     },
     "login": {
-      "desc": "Connectez-vous à monfrançais pour poursuivre votre préparation au TEF/TCF Canada.",
+      "desc": "Connectez-vous à prepfrançais pour poursuivre votre préparation au TEF/TCF Canada.",
       "title": "Connexion"
     },
     "mock": {
@@ -875,11 +919,11 @@
       "title": "Entraînement à l'expression écrite du TCF Canada"
     },
     "pricing": {
-      "desc": "Les formules monfrançais pour préparer le TEF/TCF Canada. Commencez avec 5 corrections IA gratuites par mois, sans carte bancaire.",
+      "desc": "Formules de préparation au TEF/TCF Canada avec prepfrançais. Commencez avec 3 corrections écrites et 3 évaluations orales gratuites — sans carte bancaire.",
       "title": "Tarifs"
     },
     "privacy": {
-      "desc": "Ce que monfrançais collecte, pourquoi, combien de temps c'est conservé, et comment le faire supprimer.",
+      "desc": "Ce que prepfrançais collecte, pourquoi, combien de temps c'est conservé, et comment le faire supprimer.",
       "title": "Politique de confidentialité"
     },
     "reading": {
@@ -887,11 +931,11 @@
       "title": "Entraînement à la compréhension écrite"
     },
     "register": {
-      "desc": "Créez un compte monfrançais gratuit et recevez 5 corrections IA par mois, sans carte bancaire.",
+      "desc": "Créez un compte prepfrançais gratuit et obtenez 3 corrections écrites et 3 évaluations orales par IA, sans carte bancaire.",
       "title": "Créer votre compte"
     },
     "reset": {
-      "desc": "Définissez un nouveau mot de passe pour votre compte monfrançais.",
+      "desc": "Définissez un nouveau mot de passe pour votre compte prepfrançais.",
       "title": "Choisir un nouveau mot de passe"
     },
     "resources": {
@@ -921,7 +965,7 @@
       "title": "Les trois tâches d'expression écrite"
     },
     "terms": {
-      "desc": "Les conditions qui s'appliquent à l'utilisation de monfrançais.",
+      "desc": "Les conditions qui s'appliquent à l'utilisation de prepfrançais.",
       "title": "Conditions d'utilisation"
     },
     "themes": {
@@ -1163,11 +1207,11 @@
     "h7": "Usage raisonnable",
     "h8": "Responsabilité",
     "h9": "Contact",
-    "intro": "Des conditions claires pour utiliser monfrançais. Utiliser le service vaut acceptation.",
-    "p1": "monfrançais est un logiciel de préparation. Il évalue votre français avec un modèle d'IA selon le format du TCF Canada et explique ce qu'il a relevé. Il n'est affilié ni à France Éducation international, ni au CIEP, ni à aucun centre d'examen officiel du TEF ou du TCF.",
+    "intro": "Des conditions claires pour utiliser prepfrançais. Utiliser le service vaut acceptation.",
+    "p1": "prepfrançais est un logiciel de préparation. Il évalue votre français avec un modèle d'IA selon le format du TCF Canada et explique ce qu'il a relevé. Il n'est affilié ni à France Éducation international, ni au CIEP, ni à aucun centre d'examen officiel du TEF ou du TCF.",
     "p2": "Le niveau CECR renvoyé est une estimation produite par un modèle de langue. Il sert à suivre vos progrès et à repérer vos faiblesses. Ce n'est pas un résultat officiel, il ne prédit pas votre note à l'examen et il ne peut être présenté nulle part comme une preuve de niveau.",
     "p3": "Un compte par personne. Gardez votre mot de passe pour vous ; vous êtes responsable de ce qui se passe sous votre compte. Prévenez-nous si vous pensez qu'une autre personne y a accès.",
-    "p4": "Les comptes gratuits disposent de 5 corrections IA par mois, réinitialisées au début de chaque mois, plus une petite allocation pour la conversation libre. Si une correction échoue parce que le prestataire d'IA est indisponible, le crédit est rendu automatiquement — vous n'êtes jamais facturé pour un travail non livré.",
+    "p4": "Les comptes gratuits reçoivent un essai unique de 3 corrections écrites et 3 évaluations orales par l'IA, dont une peut être le jeu de rôle de la tâche 2, ainsi qu'une petite réserve mensuelle pour la conversation libre. Si une correction échoue parce que le fournisseur d'IA est indisponible, la tentative est restituée automatiquement — vous n'êtes jamais débité pour un travail non livré.",
     "p5": "Aucun paiement n'est encore traité. Rien sur la page des tarifs ne peut être acheté et aucune donnée bancaire n'est collectée sur le site. À l'ouverture des formules payantes, ces conditions seront mises à jour au préalable.",
     "p6": "Ce que vous écrivez reste à vous. Vous nous accordez uniquement l'autorisation nécessaire pour le faire corriger et vous en montrer le résultat. Nous ne le publions pas et ne l'utilisons pas pour entraîner des modèles.",
     "p7": "N'aspirez pas le matériel d'examen, ne revendez pas l'accès et n'automatisez pas les soumissions. Des limites de débit s'appliquent et les comptes qui en abusent peuvent être suspendus.",

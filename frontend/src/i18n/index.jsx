@@ -42,7 +42,7 @@ export const LANGUAGES = [
   { code: 'fr', label: 'FR', name: 'Français' },
 ];
 
-const STORAGE_KEY = 'monfrancais.lang';
+const STORAGE_KEY = 'prepfrancais.lang';
 
 /* Browser French of any region (fr, fr-CA, fr-FR) starts in French; everyone
    else starts in English, which is the safer default for an audience that is

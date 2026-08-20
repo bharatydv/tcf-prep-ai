@@ -3,12 +3,7 @@ import { CheckCircle } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
-
-const PLANS = [
-  { name: 'Bronze', price: '$14.99', durationKey: 'pricing.duration5d', bonus: 3, grad: 'from-amber-700 to-amber-500', popular: false },
-  { name: 'Silver', price: '$29.99', durationKey: 'pricing.duration1m', bonus: 8, grad: 'from-gray-500 to-gray-400', popular: true },
-  { name: 'Gold', price: '$49.99', durationKey: 'pricing.duration2m', bonus: 15, grad: 'from-yellow-500 to-amber-400', popular: false },
-];
+import { PLANS } from '../lib/plans';
 
 const FEATURE_KEYS = ['pricing.feature1', 'pricing.feature2', 'pricing.feature3', 'pricing.feature4'];
 const FAQ_KEYS = [

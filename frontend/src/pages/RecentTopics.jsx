@@ -115,7 +115,7 @@ export function RecentTopicDetail() {
       },
       onError: (detail, status) => {
         setStage(null); toast.error(detail);
-        if (status === 402) navigate('/pricing');
+        // 402 opens the paywall in place; nothing to do here.
       },
     });
   };
@@ -142,7 +142,7 @@ export function RecentTopicDetail() {
       setShowModel(true);
     } catch (e) {
       const status = e?.response?.status;
-      if (status === 402) { toast.error(errMsg(e)); navigate('/pricing'); }
+      if (status === 402) { /* the paywall took it */ }
       else toast.error(errMsg(e, t('topics.revealFailed')));
     }
   };

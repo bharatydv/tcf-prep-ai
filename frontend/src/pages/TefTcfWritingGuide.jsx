@@ -44,10 +44,10 @@ export default function TefTcfWritingGuide() {
       headline: `${t('guide.heroA')} ${t('guide.heroB')}`,
       description: t('guide.docDesc'),
       inLanguage: lang === 'fr' ? 'fr-CA' : 'en',
-      author: { '@type': 'Organization', name: 'monfrançais' },
+      author: { '@type': 'Organization', name: 'prepfrançais' },
       publisher: {
         '@type': 'Organization',
-        name: 'monfrançais',
+        name: 'prepfrançais',
         logo: { '@type': 'ImageObject', url: `${SITE_URL}/icon-512.png` },
       },
       datePublished: '2026-06-01',

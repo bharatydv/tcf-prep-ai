@@ -7,7 +7,7 @@ import { useT } from '../i18n';
 
 const EMPTY = {
   title: '', slug: '', excerpt: '', content: '', cover_image: '',
-  meta_description: '', author: 'monfrancais', tags: '', is_published: true,
+  meta_description: '', author: 'prepfrancais', tags: '', is_published: true,
 };
 
 export default function BlogAdmin() {
@@ -30,7 +30,7 @@ export default function BlogAdmin() {
     setForm({
       title: p.title || '', slug: p.slug || '', excerpt: p.excerpt || '',
       content: p.content || '', cover_image: p.cover_image || '',
-      meta_description: p.meta_description || '', author: p.author || 'monfrancais',
+      meta_description: p.meta_description || '', author: p.author || 'prepfrancais',
       tags: Array.isArray(p.tags) ? p.tags.join(', ') : '',
       is_published: p.is_published !== false,
     });

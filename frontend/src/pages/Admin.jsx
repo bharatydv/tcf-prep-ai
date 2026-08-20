@@ -565,7 +565,7 @@ function SimPrompts() {
 function Blog() {
   const t = useT();
   const [items, load] = useCrud('/api/admin/blog', 'posts');
-  const empty = { title: '', excerpt: '', content: '', cover_image: '', meta_description: '', author: 'MonFrancais', tags: '', is_published: true };
+  const empty = { title: '', excerpt: '', content: '', cover_image: '', meta_description: '', author: 'PrepFrancais', tags: '', is_published: true };
   const [form, setForm] = useState(empty);
   const [editing, setEditing] = useState(null);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
@@ -632,7 +632,7 @@ function Blog() {
                 setForm({
                   title: p.title, excerpt: p.excerpt || '', content: p.content || '',
                   cover_image: p.cover_image || '', meta_description: p.meta_description || '',
-                  author: p.author || 'MonFrancais',
+                  author: p.author || 'PrepFrancais',
                   tags: (p.tags || []).join(', '),
                   is_published: p.is_published,
                 });

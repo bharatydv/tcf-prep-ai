@@ -1,4 +1,4 @@
-/* Prompt to confirm the email address.
+/* Prompt to confirm the account.
  *
  * Deliberately a dismissible strip rather than a gate: blocking practice behind
  * a link that may sit in a spam folder would cost more accounts than it
@@ -6,13 +6,14 @@
  * so this must never stand between anyone and their work.
  */
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { EnvelopeSimple, X } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, errMsg } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 
-const DISMISSED_KEY = 'monfrancais.verifyDismissed';
+const DISMISSED_KEY = 'prepfrancais.verifyDismissed';
 
 export default function VerifyBanner() {
   const { user } = useAuth();
@@ -22,7 +23,10 @@ export default function VerifyBanner() {
   });
   const [busy, setBusy] = useState(false);
 
-  if (!user || user.email_verified || dismissed) return null;
+  // Either channel confirms the account. `verified` is the server's answer to
+  // that; the email flag alone is the fallback for a bundle that predates it.
+  const confirmed = user?.verified ?? user?.email_verified;
+  if (!user || confirmed || dismissed) return null;
 
   const dismiss = () => {
     setDismissed(true);
@@ -51,6 +55,11 @@ export default function VerifyBanner() {
           className="font-semibold underline underline-offset-2 disabled:opacity-60">
           {t('auth.verifyResend')}
         </button>
+        {/* Resending to an address typed wrong just repeats the mistake, so the
+            way to correct it sits right next to the resend. */}
+        <Link to="/account/verify" className="font-semibold underline underline-offset-2">
+          {t('auth.verifyManage')}
+        </Link>
         <button type="button" onClick={dismiss} aria-label={t('auth.dismiss')}
           className="-m-1 rounded p-1 text-amber-700 transition hover:text-amber-900">
           <X size={16} />

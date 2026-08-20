@@ -16,7 +16,7 @@ const GUIDE = {
 };
 const TOTAL = WRITING_TOTAL_SECONDS;
 // A refresh or a crash used to lose all three texts and restart the clock.
-const DRAFT_KEY = 'monfrancais.simulator.draft';
+const DRAFT_KEY = 'prepfrancais.simulator.draft';
 
 export default function ExamSimulator() {
   const { refreshUser } = useAuth();
