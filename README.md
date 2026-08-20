@@ -1,4 +1,4 @@
-# monfrançais 🇨🇦
+# prepfrançais 🇨🇦
 
 AI-powered preparation platform for the **TEF/TCF Canada** French exams. Learners write or speak in French, get instant CEFR grading (A1–C2) with every error highlighted and explained, then drill *their own* mistakes through spaced-repetition review games.
 
@@ -114,7 +114,7 @@ reachable on the same origin.
 - Password: from `ADMIN_PASSWORD` — **required in production**
 
 ### Health checks
-`GET /api/` → `{"message": "monfrancais API", "status": "healthy"}` · `GET /api/health` → `{"status": "ok"}` · `GET /api/tcf-spec` → the official constraints above
+`GET /api/` → `{"message": "prepfrancais API", "status": "healthy"}` · `GET /api/health` → `{"status": "ok"}` · `GET /api/tcf-spec` → the official constraints above
 
 ### Docker
 

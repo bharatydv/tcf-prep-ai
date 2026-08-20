@@ -10,7 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const SITE = (process.env.REACT_APP_SITE_URL || 'https://xn--monfranais-u6a.com').replace(/\/$/, '');
+const SITE = (process.env.REACT_APP_SITE_URL || 'https://prepfrancais.com').replace(/\/$/, '');
 const API = process.env.SITEMAP_API || '';
 const OUT = path.join(__dirname, '..', 'public', 'sitemap.xml');
 

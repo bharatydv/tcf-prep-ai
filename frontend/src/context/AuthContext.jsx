@@ -14,7 +14,7 @@ const SESSION_HINT = 'mf_session';
    anonymous visitor skips it too. It is the reason a session that predates the
    hint cookie is not locked out: with neither marker present we still probe
    once, and /auth/me sets the hint cookie on the way back. */
-const ANON_MARKER = 'monfrancais.anon';
+const ANON_MARKER = 'prepfrancais.anon';
 
 function hasSessionHint() {
   if (typeof document === 'undefined') return false;

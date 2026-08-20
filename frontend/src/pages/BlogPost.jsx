@@ -59,10 +59,10 @@ export default function BlogPost() {
     '@type': 'Article',
     headline: post.title,
     description: post.meta_description || post.excerpt || '',
-    author: { '@type': 'Organization', name: post.author || 'monfrançais' },
+    author: { '@type': 'Organization', name: post.author || 'prepfrançais' },
     publisher: {
       '@type': 'Organization',
-      name: 'monfrançais',
+      name: 'prepfrançais',
       logo: { '@type': 'ImageObject', url: `${SITE_URL}/icon-512.png` },
     },
     datePublished: post.created_at,
@@ -109,7 +109,7 @@ export default function BlogPost() {
             {post.title}
           </h1>
           <div className="mt-4 flex flex-wrap items-center gap-4 text-sm text-gray-500">
-            <span className="flex items-center gap-1.5"><User size={15} /> {post.author || 'monfrancais'}</span>
+            <span className="flex items-center gap-1.5"><User size={15} /> {post.author || 'prepfrancais'}</span>
             <span className="flex items-center gap-1.5"><CalendarBlank size={15} /> {formatDate(post.created_at, lang)}</span>
             {Array.isArray(post.tags) && post.tags.map((tag) => (
               <span key={tag} className="pill bg-white/80 capitalize text-primary">{tag}</span>

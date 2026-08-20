@@ -17,11 +17,11 @@
 import { useEffect } from 'react';
 import { useI18n } from '../i18n';
 
-export const SITE_URL = (process.env.REACT_APP_SITE_URL || 'https://xn--monfranais-u6a.com')
+export const SITE_URL = (process.env.REACT_APP_SITE_URL || 'https://prepfrancais.com')
   .replace(/\/$/, '');
 
 const DEFAULTS = {
-  title: 'monfrançais — Réussissez votre TEF/TCF Canada',
+  title: 'prepfrançais — Réussissez votre TEF/TCF Canada',
   description:
     "Préparation IA au TEF et au TCF Canada : correction de l'expression écrite et orale, "
     + 'niveau CEFR expliqué, examens blancs et révision de vos propres erreurs.',
@@ -72,7 +72,7 @@ export function useSeo({
 
   useEffect(() => {
     const fullTitle = resolvedTitle
-      ? (resolvedTitle.includes('monfrançais') ? resolvedTitle : `${resolvedTitle} | monfrançais`)
+      ? (resolvedTitle.includes('prepfrançais') ? resolvedTitle : `${resolvedTitle} | prepfrançais`)
       : DEFAULTS.title;
     const desc = resolvedDesc || DEFAULTS.description;
     const url = SITE_URL + (path || window.location.pathname);

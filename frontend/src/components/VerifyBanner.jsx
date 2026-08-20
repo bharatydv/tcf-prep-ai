@@ -13,7 +13,7 @@ import { api, errMsg } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 
-const DISMISSED_KEY = 'monfrancais.verifyDismissed';
+const DISMISSED_KEY = 'prepfrancais.verifyDismissed';
 
 export default function VerifyBanner() {
   const { user } = useAuth();

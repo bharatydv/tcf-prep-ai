@@ -2,7 +2,7 @@ import axios from "axios";
 
 
 // In production (GCP + Nginx), we use relative paths.
-// This tells the browser to append the endpoint to the current domain: https://monfrançais.com/api/...
+// This tells the browser to append the endpoint to the current domain: https://prepfrancais.com/api/...
 const baseURL = "/api"; 
 
 export const api = axios.create({ 
@@ -55,7 +55,7 @@ export const BACKEND_URL = "";
    announced once here and one host component renders it over whatever page
    they were on — their half-written essay included, which navigating away to
    /pricing used to throw out. */
-export const PAYWALL_EVENT = 'monfrancais:paywall';
+export const PAYWALL_EVENT = 'prepfrancais:paywall';
 
 // The 402 body, or null for anything else. Also accepts a bare detail object,
 // which is what the SSE stream hands back instead of an axios error.

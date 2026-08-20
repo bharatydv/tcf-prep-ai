@@ -1,5 +1,5 @@
 """
-monfrancais — FastAPI backend (PostgreSQL edition)
+prepfrancais — FastAPI backend (PostgreSQL edition)
 French exam-preparation platform for TCF Canada.
 All routes are prefixed with /api.
 
@@ -86,7 +86,7 @@ SMTP_HOST = os.environ.get("SMTP_HOST", "")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
-SMTP_FROM = os.environ.get("SMTP_FROM", "monfrançais <bonjour@monfrancais.com>")
+SMTP_FROM = os.environ.get("SMTP_FROM", "prepfrançais <bonjour@prepfrancais.com>")
 SMTP_STARTTLS = os.environ.get("SMTP_STARTTLS", "true").lower() != "false"
 
 # SMS, the second confirmation channel. Twilio is the only provider wired up.
@@ -725,7 +725,7 @@ def hash_password(pw: str) -> str:
 
 # Compared against when no account matches, so a login attempt for an unknown
 # address costs the same ~100ms of bcrypt as a real one.
-_DUMMY_PASSWORD_HASH = bcrypt.hashpw(b"monfrancais-timing-equaliser",
+_DUMMY_PASSWORD_HASH = bcrypt.hashpw(b"prepfrancais-timing-equaliser",
                                      bcrypt.gensalt()).decode()
 
 
@@ -949,14 +949,14 @@ async def send_email(to: str, subject: str, body: str) -> bool:
 
 def reset_email_body(name: str, link: str) -> str:
     return (f"Bonjour {name},{NEWLINE}{NEWLINE}"
-            f"Vous avez demandé à réinitialiser votre mot de passe monfrançais."
+            f"Vous avez demandé à réinitialiser votre mot de passe prepfrançais."
             f"{NEWLINE}Ouvrez ce lien pour en choisir un nouveau :{NEWLINE}{NEWLINE}"
             f"{link}{NEWLINE}{NEWLINE}"
             f"Le lien est valable {RESET_TTL_MINUTES} minutes et ne fonctionne "
             f"qu'une fois.{NEWLINE}{NEWLINE}"
             f"Si vous n'êtes pas à l'origine de cette demande, ignorez ce "
             f"message : votre mot de passe reste inchangé.{NEWLINE}{NEWLINE}"
-            f"— monfrançais")
+            f"— prepfrançais")
 
 
 def normalize_phone(raw: str) -> str:
@@ -1006,16 +1006,16 @@ async def send_sms(to: str, body: str) -> bool:
 
 
 def phone_code_body(code: str) -> str:
-    return (f"{code} est votre code de confirmation monfrançais. "
+    return (f"{code} est votre code de confirmation prepfrançais. "
             f"Il expire dans {PHONE_CODE_TTL_MINUTES} minutes.")
 
 
 def verify_email_body(name: str, link: str) -> str:
     return (f"Bonjour {name},{NEWLINE}{NEWLINE}"
             f"Confirmez votre adresse e-mail pour sécuriser votre compte "
-            f"monfrançais :{NEWLINE}{NEWLINE}{link}{NEWLINE}{NEWLINE}"
+            f"prepfrançais :{NEWLINE}{NEWLINE}{link}{NEWLINE}{NEWLINE}"
             f"Le lien est valable {VERIFY_TTL_HOURS} heures.{NEWLINE}{NEWLINE}"
-            f"— monfrançais")
+            f"— prepfrançais")
 
 
 # small DB convenience helpers --------------------------------------------------
@@ -3015,7 +3015,7 @@ async def lifespan(app: FastAPI):
 
 ALLOWED_ORIGINS = [o.strip() for o in FRONTEND_URL.split(",") if o.strip()]
 
-app = FastAPI(title="monfrançais API", lifespan=lifespan)
+app = FastAPI(title="prepfrançais API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -3067,7 +3067,7 @@ async def unhandled_error(request: Request, exc: Exception):
 # ----------------------------------------------------------------------------
 @app.get("/api/")
 async def root():
-    return {"message": "monfrancais API", "status": "healthy"}
+    return {"message": "prepfrancais API", "status": "healthy"}
 
 
 @app.get("/api/health")
@@ -3183,7 +3183,7 @@ async def _send_verification_email(db: AsyncSession, user: User) -> bool:
     raw = await issue_link_token(db, user.user_id, "verify",
                                  timedelta(hours=VERIFY_TTL_HOURS))
     link = f"{PUBLIC_URL}/verify-email?token={raw}"
-    return await send_email(user.email, "Confirmez votre adresse monfrançais",
+    return await send_email(user.email, "Confirmez votre adresse prepfrançais",
                             verify_email_body(user.name or "", link))
 
 
@@ -3286,7 +3286,7 @@ async def forgot_password(body: ForgotPasswordIn,
                                      timedelta(minutes=RESET_TTL_MINUTES))
         link = f"{PUBLIC_URL}/reset-password?token={raw}"
         await send_email(user.email,
-                         "Réinitialisez votre mot de passe monfrançais",
+                         "Réinitialisez votre mot de passe prepfrançais",
                          reset_email_body(user.name or "", link))
     return {"detail": "If that address has an account, a reset link is on its way."}
 
@@ -5017,7 +5017,7 @@ class BlogPost(Base):
     content: Mapped[str] = mapped_column(Text)            # markdown or HTML
     cover_image: Mapped[str] = mapped_column(Text, default="")
     meta_description: Mapped[str] = mapped_column(Text, default="")
-    author: Mapped[str] = mapped_column(String(120), default="monfrancais")
+    author: Mapped[str] = mapped_column(String(120), default="prepfrancais")
     tags: Mapped[Any] = mapped_column(JSONB, default=list)
     is_published: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -5044,7 +5044,7 @@ class BlogPostIn(BaseModel):
     excerpt: Optional[str] = ""
     cover_image: Optional[str] = ""
     meta_description: Optional[str] = ""
-    author: Optional[str] = "monfrancais"
+    author: Optional[str] = "prepfrancais"
     tags: Optional[List[str]] = None
     is_published: Optional[bool] = True
     slug: Optional[str] = None  # auto-generated from title if omitted
@@ -5134,7 +5134,7 @@ async def admin_create_blog(body: BlogPostIn,
         content=body.content,
         cover_image=body.cover_image or "",
         meta_description=body.meta_description or (body.excerpt or "")[:160],
-        author=body.author or "monfrancais",
+        author=body.author or "prepfrancais",
         tags=body.tags or [],
         is_published=body.is_published if body.is_published is not None else True,
         created_at=now,

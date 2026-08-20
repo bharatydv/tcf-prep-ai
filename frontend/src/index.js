@@ -2,6 +2,11 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import "./index.css";
 import App from "./App";
+import migrateStorageKeys from "./lib/storageMigration";
+
+// Must run before App mounts: the language provider and the exam simulator both
+// read their keys during their first render.
+migrateStorageKeys();
 
 // Suppress the benign ResizeObserver loop error triggered by recharts
 const roError = /ResizeObserver loop/;

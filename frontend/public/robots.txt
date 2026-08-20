@@ -1,4 +1,4 @@
-# monfrançais — https://xn--monfranais-u6a.com  (monfrançais.com)
+# prepfrançais — https://prepfrancais.com
 
 User-agent: *
 Allow: /
@@ -32,4 +32,4 @@ Allow: /
 User-agent: CCBot
 Allow: /
 
-Sitemap: https://xn--monfranais-u6a.com/sitemap.xml
+Sitemap: https://prepfrancais.com/sitemap.xml
