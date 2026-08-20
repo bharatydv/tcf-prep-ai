@@ -59,10 +59,10 @@ export default function BlogPost() {
     '@type': 'Article',
     headline: post.title,
     description: post.meta_description || post.excerpt || '',
-    author: { '@type': 'Organization', name: post.author || 'prepfrançais' },
+    author: { '@type': 'Organization', name: post.author || 'prepfrancais' },
     publisher: {
       '@type': 'Organization',
-      name: 'prepfrançais',
+      name: 'prepfrancais',
       logo: { '@type': 'ImageObject', url: `${SITE_URL}/icon-512.png` },
     },
     datePublished: post.created_at,

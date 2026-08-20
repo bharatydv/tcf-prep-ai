@@ -1,4 +1,4 @@
-# prepfrançais
+# prepfrancais
 
 > AI-powered preparation for the TEF and TCF Canada French exams. Learners
 > write or speak in French, receive CEFR grading (A1–C2) with every error
@@ -50,6 +50,6 @@ anglicismes · améliorations C1 (style upgrades, which never count as errors)
 
 ## Usage
 
-Content may be quoted with attribution to prepfrançais and a link to the source
+Content may be quoted with attribution to prepfrancais and a link to the source
 page. The exam constraints above are drawn from the official TCF Canada format;
 verify current rules with France Éducation international before relying on them.

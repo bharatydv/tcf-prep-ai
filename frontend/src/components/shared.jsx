@@ -125,7 +125,7 @@ export function Header() {
   return (
     <header className="glass sticky top-0 z-50 border-b border-gray-100">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
-        <Link to="/" className="flex shrink-0 items-center" data-testid="logo-link" aria-label="prepfrançais">
+        <Link to="/" className="flex shrink-0 items-center" data-testid="logo-link" aria-label="prepfrancais">
           {/* The wordmark used to be hand-authored bezier paths, which meant the
              header and footer copies could drift apart and the letters could not
              be edited. It is set in Poppins now — the same face the headings use —
@@ -134,7 +134,7 @@ export function Header() {
             className="select-none font-heading text-2xl font-extrabold leading-none tracking-tight">
             <span style={{ color: '#7F3BE7' }}>prep</span>
             <span style={{ color: '#211C2B' }}>fran</span>
-            <span style={{ color: '#E8179B' }}>ç</span>
+            <span style={{ color: '#E8179B' }}>c</span>
             <span style={{ color: '#211C2B' }}>ais</span>
           </span>
         </Link>

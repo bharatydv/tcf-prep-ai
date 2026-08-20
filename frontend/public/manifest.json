@@ -1,6 +1,6 @@
 {
-  "name": "prepfrançais — TEF/TCF Canada",
-  "short_name": "prepfrançais",
+  "name": "prepfrancais — TEF/TCF Canada",
+  "short_name": "prepfrancais",
   "description": "AI correction for the TEF/TCF Canada written and spoken exams, with CEFR grading and mistake review.",
   "start_url": "/",
   "scope": "/",

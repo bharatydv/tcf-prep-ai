@@ -20,13 +20,13 @@ export const SUPPORT_EMAIL = 'bonjour@prepfrancais.com';
 function Wordmark() {
   return (
     /* Set in Poppins rather than drawn as paths — see the header wordmark in
-       shared.jsx. On the ink ground "prep" lightens and "français" goes white,
+       shared.jsx. On the ink ground "prep" lightens and "francais" goes white,
        which is the split the drawn footer logo used. */
-    <span role="img" aria-label="prepfrançais"
+    <span role="img" aria-label="prepfrancais"
       className="block select-none font-heading text-[26px] font-extrabold leading-none tracking-tight">
       <span style={{ color: '#AE8BFF' }}>prep</span>
       <span style={{ color: '#FFFFFF' }}>fran</span>
-      <span style={{ color: '#E8179B' }}>ç</span>
+      <span style={{ color: '#E8179B' }}>c</span>
       <span style={{ color: '#FFFFFF' }}>ais</span>
     </span>
   );
