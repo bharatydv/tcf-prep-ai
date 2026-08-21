@@ -5,7 +5,11 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+# package-lock.json is written by npm 11, but node:20-alpine ships npm 10.8.2,
+# and the two disagree about whether to materialise `yaml`, an optional peer of
+# postcss-load-config. `npm ci` treats any such disagreement as fatal rather
+# than reconciling it, so pin npm to the version that wrote the lockfile.
+RUN npm i -g npm@11.6.2 && npm ci
 COPY . .
 RUN npm run build
 
