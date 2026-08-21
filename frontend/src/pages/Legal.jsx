@@ -99,7 +99,7 @@ export function Contact() {
           name: t('contact.h'),
           mainEntity: {
             '@type': 'Organization',
-            name: 'prepfrançais',
+            name: 'prepfrancais',
             email: SUPPORT_EMAIL,
             contactPoint: {
               '@type': 'ContactPoint',

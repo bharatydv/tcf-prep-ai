@@ -1,4 +1,4 @@
-# prepfrançais 🇨🇦
+# prepfrancais 🇨🇦
 
 AI-powered preparation platform for the **TEF/TCF Canada** French exams. Learners write or speak in French, get instant CEFR grading (A1–C2) with every error highlighted and explained, then drill *their own* mistakes through spaced-repetition review games.
 

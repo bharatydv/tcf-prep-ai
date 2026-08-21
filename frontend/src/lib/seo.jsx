@@ -21,7 +21,7 @@ export const SITE_URL = (process.env.REACT_APP_SITE_URL || 'https://prepfrancais
   .replace(/\/$/, '');
 
 const DEFAULTS = {
-  title: 'prepfrançais — Réussissez votre TEF/TCF Canada',
+  title: 'prepfrancais — Réussissez votre TEF/TCF Canada',
   description:
     "Préparation IA au TEF et au TCF Canada : correction de l'expression écrite et orale, "
     + 'niveau CEFR expliqué, examens blancs et révision de vos propres erreurs.',
@@ -72,7 +72,7 @@ export function useSeo({
 
   useEffect(() => {
     const fullTitle = resolvedTitle
-      ? (resolvedTitle.includes('prepfrançais') ? resolvedTitle : `${resolvedTitle} | prepfrançais`)
+      ? (resolvedTitle.includes('prepfrancais') ? resolvedTitle : `${resolvedTitle} | prepfrancais`)
       : DEFAULTS.title;
     const desc = resolvedDesc || DEFAULTS.description;
     const url = SITE_URL + (path || window.location.pathname);

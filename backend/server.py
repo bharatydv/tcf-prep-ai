@@ -86,7 +86,7 @@ SMTP_HOST = os.environ.get("SMTP_HOST", "")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
-SMTP_FROM = os.environ.get("SMTP_FROM", "prepfrançais <bonjour@prepfrancais.com>")
+SMTP_FROM = os.environ.get("SMTP_FROM", "prepfrancais <bonjour@prepfrancais.com>")
 SMTP_STARTTLS = os.environ.get("SMTP_STARTTLS", "true").lower() != "false"
 
 # SMS, the second confirmation channel. Twilio is the only provider wired up.
@@ -949,14 +949,14 @@ async def send_email(to: str, subject: str, body: str) -> bool:
 
 def reset_email_body(name: str, link: str) -> str:
     return (f"Bonjour {name},{NEWLINE}{NEWLINE}"
-            f"Vous avez demandé à réinitialiser votre mot de passe prepfrançais."
+            f"Vous avez demandé à réinitialiser votre mot de passe prepfrancais."
             f"{NEWLINE}Ouvrez ce lien pour en choisir un nouveau :{NEWLINE}{NEWLINE}"
             f"{link}{NEWLINE}{NEWLINE}"
             f"Le lien est valable {RESET_TTL_MINUTES} minutes et ne fonctionne "
             f"qu'une fois.{NEWLINE}{NEWLINE}"
             f"Si vous n'êtes pas à l'origine de cette demande, ignorez ce "
             f"message : votre mot de passe reste inchangé.{NEWLINE}{NEWLINE}"
-            f"— prepfrançais")
+            f"— prepfrancais")
 
 
 def normalize_phone(raw: str) -> str:
@@ -1006,16 +1006,16 @@ async def send_sms(to: str, body: str) -> bool:
 
 
 def phone_code_body(code: str) -> str:
-    return (f"{code} est votre code de confirmation prepfrançais. "
+    return (f"{code} est votre code de confirmation prepfrancais. "
             f"Il expire dans {PHONE_CODE_TTL_MINUTES} minutes.")
 
 
 def verify_email_body(name: str, link: str) -> str:
     return (f"Bonjour {name},{NEWLINE}{NEWLINE}"
             f"Confirmez votre adresse e-mail pour sécuriser votre compte "
-            f"prepfrançais :{NEWLINE}{NEWLINE}{link}{NEWLINE}{NEWLINE}"
+            f"prepfrancais :{NEWLINE}{NEWLINE}{link}{NEWLINE}{NEWLINE}"
             f"Le lien est valable {VERIFY_TTL_HOURS} heures.{NEWLINE}{NEWLINE}"
-            f"— prepfrançais")
+            f"— prepfrancais")
 
 
 # small DB convenience helpers --------------------------------------------------
@@ -3015,7 +3015,7 @@ async def lifespan(app: FastAPI):
 
 ALLOWED_ORIGINS = [o.strip() for o in FRONTEND_URL.split(",") if o.strip()]
 
-app = FastAPI(title="prepfrançais API", lifespan=lifespan)
+app = FastAPI(title="prepfrancais API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -3183,7 +3183,7 @@ async def _send_verification_email(db: AsyncSession, user: User) -> bool:
     raw = await issue_link_token(db, user.user_id, "verify",
                                  timedelta(hours=VERIFY_TTL_HOURS))
     link = f"{PUBLIC_URL}/verify-email?token={raw}"
-    return await send_email(user.email, "Confirmez votre adresse prepfrançais",
+    return await send_email(user.email, "Confirmez votre adresse prepfrancais",
                             verify_email_body(user.name or "", link))
 
 
@@ -3286,7 +3286,7 @@ async def forgot_password(body: ForgotPasswordIn,
                                      timedelta(minutes=RESET_TTL_MINUTES))
         link = f"{PUBLIC_URL}/reset-password?token={raw}"
         await send_email(user.email,
-                         "Réinitialisez votre mot de passe prepfrançais",
+                         "Réinitialisez votre mot de passe prepfrancais",
                          reset_email_body(user.name or "", link))
     return {"detail": "If that address has an account, a reset link is on its way."}
 

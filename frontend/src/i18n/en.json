@@ -190,7 +190,7 @@
     "ctaBody": "Get instant AI feedback and your estimated TEF/TCF score band.",
     "ctaLink": "Try the Writing Assistant",
     "ctaTitle": "Ready to evaluate your French writing?",
-    "docTitle": "Blog — TEF / TCF tips, guides & strategies | prepfrançais",
+    "docTitle": "Blog — TEF / TCF tips, guides & strategies | prepfrancais",
     "emptyBody": "New posts are on the way — check back soon!",
     "emptyTitle": "No articles yet",
     "featured": "Featured article",
@@ -428,7 +428,7 @@
     "ctaLink": "Try the writing checker",
     "ctaTitle": "Get instant feedback on your French writing",
     "docDesc": "A complete guide to the TEF and TCF Canada writing exam: the three tâches, word counts, CLB 7 score equivalency, common mistakes, and how to prepare to reach CLB 7 (CEFR B2) and beyond.",
-    "docTitle": "TEF / TCF Canada Writing Guide: How to Reach CLB 7 | prepfrançais",
+    "docTitle": "TEF / TCF Canada Writing Guide: How to Reach CLB 7 | prepfrancais",
     "faq1a": "Both the TEF Canada and TCF Canada assess French writing for Canadian immigration. Each has a written-expression section built around short, practical tasks. The TCF Canada writing section has three tasks (tâches) of increasing length and difficulty; the TEF Canada is similar in spirit. Both map results to the Canadian Language Benchmarks (CLB / NCLC).",
     "faq1q": "What is the difference between the TEF and TCF Canada writing exam?",
     "faq2a": "Many Express Entry candidates aim for CLB 7 in each skill, which corresponds roughly to CEFR B2. CLB 7 is a common threshold for maximising points, but exact requirements depend on your immigration program. Always check the current official requirement for your specific program.",
@@ -495,7 +495,7 @@
     "cardSpeakTitle": "AI Speaking Lab",
     "cardWriteCta": "Check My Writing",
     "cardWriteTitle": "Writing Assistant",
-    "copyright": "© {{year}} prepfrançais. All rights reserved.",
+    "copyright": "© {{year}} prepfrancais. All rights reserved.",
     "ctaBody": "Five free AI corrections a month, no credit card. Start with one text and see your first error report.",
     "ctaPacks": "See study packs",
     "ctaTitle": "Ready to prepare for your TEF/TCF?",
@@ -607,7 +607,7 @@
     "trust2": "Scoring caps from the real barème applied in code",
     "trust3": "Instant feedback with an estimated CEFR level",
     "trust4": "Secure, private and ad-free",
-    "videoTitle": "prepfrançais — See it in action",
+    "videoTitle": "prepfrancais — See it in action",
     "weakness": "We track your weak points and turn them into a review plan built from your own mistakes.",
     "weeklyGoalText": "Improve written coherence",
     "weeklyGoals": "Weekly goals",
@@ -768,8 +768,8 @@
     "h5": "Your rights",
     "h6": "Cookies",
     "h7": "Contact",
-    "intro": "prepfrançais helps you prepare for the TEF and TCF Canada exams. To do that it stores what you write and say, because reviewing your own mistakes is the whole point of the product. This page says exactly what is kept, why, and how to get rid of it.",
-    "p1": "Your name and email address, set when you register. A password, stored only as a bcrypt hash — nobody at prepfrançais can read it. The French you submit for correction: essays, pasted text, and the transcripts of your spoken answers. The corrections themselves, including every error found and the CEFR level awarded. Your practice history: streaks, XP, badges, review results and the timezone used to bucket them.",
+    "intro": "prepfrancais helps you prepare for the TEF and TCF Canada exams. To do that it stores what you write and say, because reviewing your own mistakes is the whole point of the product. This page says exactly what is kept, why, and how to get rid of it.",
+    "p1": "Your name and email address, set when you register. A password, stored only as a bcrypt hash — nobody at prepfrancais can read it. The French you submit for correction: essays, pasted text, and the transcripts of your spoken answers. The corrections themselves, including every error found and the CEFR level awarded. Your practice history: streaks, XP, badges, review results and the timezone used to bucket them.",
     "p2": "A speaking answer is sent to a transcription provider, turned into text, and the text is what we store. The audio itself is not written to our database or kept on our servers after the transcript comes back.",
     "p3": "Your text or transcript is sent to the AI provider that grades it — currently one of Anthropic, OpenAI, Google, Groq or DeepSeek, and one of OpenAI, Google, Groq or AssemblyAI for transcription. They process it to produce the correction. We do not sell your data, and we do not share it with advertisers.",
     "p4": "For as long as your account exists, because your mistake history is what the review games are built from. Delete your account and the submissions, mistakes and review sessions attached to it go with it.",
@@ -886,7 +886,7 @@
       "title": "Score combinations"
     },
     "contact": {
-      "desc": "How to reach the prepfrançais team about your account, a correction or a partnership.",
+      "desc": "How to reach the prepfrancais team about your account, a correction or a partnership.",
       "title": "Contact"
     },
     "dashboard": {
@@ -896,19 +896,19 @@
       "title": "Your correction"
     },
     "forgot": {
-      "desc": "Request a password reset link for your prepfrançais account.",
+      "desc": "Request a password reset link for your prepfrancais account.",
       "title": "Reset your password"
     },
     "home": {
       "desc": "AI correction for the TEF and TCF Canada exams: written and spoken French graded on the CEFR scale, every error explained, and your own mistakes turned into review drills. Free trial: 3 writing and 3 speaking corrections.",
-      "title": "prepfrançais — Réussissez votre TEF/TCF Canada"
+      "title": "prepfrancais — Réussissez votre TEF/TCF Canada"
     },
     "listening": {
       "desc": "TCF Canada compréhension orale practice, graded on the server and recorded in your history.",
       "title": "Listening comprehension practice"
     },
     "login": {
-      "desc": "Log in to prepfrançais to continue your TEF/TCF Canada preparation.",
+      "desc": "Log in to prepfrancais to continue your TEF/TCF Canada preparation.",
       "title": "Log in"
     },
     "mock": {
@@ -919,11 +919,11 @@
       "title": "Writing practice for the TCF Canada"
     },
     "pricing": {
-      "desc": "Plans for prepfrançais TEF/TCF Canada preparation. Start with 3 free writing and 3 free speaking AI corrections — no card required.",
+      "desc": "Plans for prepfrancais TEF/TCF Canada preparation. Start with 3 free writing and 3 free speaking AI corrections — no card required.",
       "title": "Pricing"
     },
     "privacy": {
-      "desc": "What prepfrançais collects, why, how long it is kept, and how to have it deleted.",
+      "desc": "What prepfrancais collects, why, how long it is kept, and how to have it deleted.",
       "title": "Privacy policy"
     },
     "reading": {
@@ -931,11 +931,11 @@
       "title": "Reading comprehension practice"
     },
     "register": {
-      "desc": "Create a free prepfrançais account and get 3 writing and 3 speaking AI corrections, with no card required.",
+      "desc": "Create a free prepfrancais account and get 3 writing and 3 speaking AI corrections, with no card required.",
       "title": "Create your account"
     },
     "reset": {
-      "desc": "Set a new password for your prepfrançais account.",
+      "desc": "Set a new password for your prepfrancais account.",
       "title": "Choose a new password"
     },
     "resources": {
@@ -965,7 +965,7 @@
       "title": "The three written tâches"
     },
     "terms": {
-      "desc": "The terms that apply to using prepfrançais.",
+      "desc": "The terms that apply to using prepfrancais.",
       "title": "Terms of service"
     },
     "themes": {
@@ -1207,8 +1207,8 @@
     "h7": "Fair use",
     "h8": "Liability",
     "h9": "Contact",
-    "intro": "Plain terms for using prepfrançais. Using the service means you accept them.",
-    "p1": "prepfrançais is preparation software. It grades your French with an AI model against the TCF Canada format and explains what it found. It is not affiliated with France Éducation international, the CIEP, or any official TEF or TCF examiner.",
+    "intro": "Plain terms for using prepfrancais. Using the service means you accept them.",
+    "p1": "prepfrancais is preparation software. It grades your French with an AI model against the TCF Canada format and explains what it found. It is not affiliated with France Éducation international, the CIEP, or any official TEF or TCF examiner.",
     "p2": "The CEFR level we return is an estimate produced by a language model. It is useful for tracking progress and finding weaknesses. It is not an official result, it does not predict your exam score, and it cannot be submitted anywhere as proof of proficiency.",
     "p3": "One account per person. Keep your password to yourself; you are responsible for what happens under your account. Tell us if you think someone else has access.",
     "p4": "Free accounts get a one-time trial of 3 AI writing corrections and 3 speaking evaluations, of which one may be the tâche 2 roleplay, plus a small monthly allowance for open-ended conversation practice. If a correction fails because the AI provider is unavailable, the attempt is returned automatically — you are never charged for work that was not delivered.",

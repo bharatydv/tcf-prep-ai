@@ -1,4 +1,4 @@
-# prepfrançais — https://prepfrancais.com
+# prepfrancais — https://prepfrancais.com
 
 User-agent: *
 Allow: /
