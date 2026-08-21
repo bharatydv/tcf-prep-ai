@@ -3871,12 +3871,18 @@ async def mistakes_summary(user: User = Depends(get_current_user),
     for category, repeats, _rows in rows.all():
         per_cat[category] = per_cat.get(category, 0) + int(repeats or 0)
 
+    # Grouped on the bare column, with the NULL folded into "new" here rather
+    # than in SQL. Selecting coalesce(status, 'new') and grouping by the same
+    # call reads as equivalent, but asyncpg binds each literal to its own
+    # placeholder — $1 in the select list, $2 in the GROUP BY — so Postgres saw
+    # two different expressions and rejected the query outright.
     status_counts = {"new": 0, "reviewing": 0, "mastered": 0}
     rows = await db.execute(
-        select(func.coalesce(Mistake.status, "new"), func.count())
+        select(Mistake.status, func.count())
         .where(Mistake.user_id == user.user_id)
-        .group_by(func.coalesce(Mistake.status, "new")))
+        .group_by(Mistake.status))
     for status, n in rows.all():
+        status = status or "new"
         status_counts[status] = status_counts.get(status, 0) + int(n)
 
     # Monthly error rate. The per-submission error count is a scalar subquery
