@@ -33,6 +33,7 @@ const RecentTopicDetail = lazy(() =>
   import("./pages/RecentTopics").then((m) => ({ default: m.RecentTopicDetail })));
 const MockExam = lazy(() => import("./pages/MockExam"));
 const Admin = lazy(() => import("./pages/Admin"));
+const BillingReturn = lazy(() => import("./pages/BillingReturn"));
 const Combinations = lazy(() => import("./pages/Combinations"));
 const ReadingHome = lazy(() => import("./pages/ReadingHome"));
 const ReadingTests = lazy(() => import("./pages/ReadingTests"));
@@ -142,6 +143,9 @@ export default function App() {
           <Route path="/blog" element={<Blog />} />
           <Route path="/blog/:slug" element={<BlogPost />} />
           <Route path="/admin/blog" element={<ProtectedRoute adminOnly><BlogAdmin /></ProtectedRoute>} />
+          {/* Where Cashfree returns the learner after the mandate. Protected:
+              it reads the signed-in account's subscription. */}
+          <Route path="/billing/return" element={<ProtectedRoute><BillingReturn /></ProtectedRoute>} />
           {/* Required before a payment processor will onboard the product, and
               linked from every page by the shared footer. */}
           <Route path="/privacy" element={<Privacy />} />

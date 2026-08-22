@@ -5,7 +5,7 @@ import {
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, BACKEND_URL } from '../lib/api';
-import { WRITING_TASKS, wordStatus } from '../lib/tcf';
+import { FREE_WRITING, WRITING_TASKS, clampWords, wordStatus } from '../lib/tcf';
 import { useAuth } from '../context/AuthContext';
 import { AnalysisProgress, BackLink, CreditsBadge, WordCountBar, streamAnalysis } from '../components/shared';
 import { useT } from '../i18n';
@@ -23,11 +23,15 @@ export default function PracticeWrite() {
   const t = useT();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const tacheParam = searchParams.get('tache');
   // No ?tache= in the URL means Tâche 1, the default writing task.
-  const tacheNum = parseInt(searchParams.get('tache'), 10) || 1;
+  const tacheNum = parseInt(tacheParam, 10) || 1;
   const themeId = searchParams.get('theme');
+  // Bare /practice/write — no tâche, no theme — is free writing: no tâche
+  // header, no test list, and the 180/200 ceiling instead of a tâche's range.
+  const freeWriting = !tacheParam && !themeId;
   // Free writing has no official length; a tâche does.
-  const taskType = WRITING_TASKS[tacheNum] ? tacheNum : null;
+  const taskType = freeWriting ? null : (WRITING_TASKS[tacheNum] ? tacheNum : null);
 
   const [prompts, setPrompts] = useState([]);
   const [activePrompt, setActivePrompt] = useState(null);
@@ -55,10 +59,10 @@ export default function PracticeWrite() {
   // brought their own topic (landing simulator, own-question panel, a theme).
   useEffect(() => {
     if (defaultedRef.current || !prompts.length) return;
-    if (themeId || navState?.ownQuestion || navState?.text) return;
+    if (freeWriting || themeId || navState?.ownQuestion || navState?.text) return;
     defaultedRef.current = true;
     setActivePrompt(prompts[0]);
-  }, [prompts, themeId, navState]);
+  }, [prompts, freeWriting, themeId, navState]);
 
   // Load every topic of the chosen theme + tâche, and open on the first one.
   // It used to pick one at random and drop the other nineteen, which left no
@@ -174,8 +178,10 @@ export default function PracticeWrite() {
         <BackLink className="!mb-6" testid="back-to-tasks"
           fallback={themeId ? `/practice/themes?tache=${tacheNum}` : '/practice/tasks'} />
 
-        <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
-          {/* LEFT: the theme's topics, or the generic test list off-theme */}
+        <div className={`grid gap-6 ${freeWriting ? '' : 'lg:grid-cols-[340px_1fr]'}`}>
+          {/* LEFT: the theme's topics, or the generic test list off-theme.
+              Free writing has neither, so the editor takes the full width. */}
+          {!freeWriting && (
           <aside className="rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-5 shadow-soft">
             <p className="flex items-center gap-2 font-heading text-sm font-bold text-gray-900">
               <BookOpen size={18} weight="duotone" className="text-primary" />
@@ -253,6 +259,7 @@ export default function PracticeWrite() {
             </div>
             )}
           </aside>
+          )}
 
           {/* RIGHT: writing panel */}
           <div className="rounded-3xl border border-violet-100 bg-white p-5 shadow-xl shadow-violet-200/40 sm:p-6">
@@ -308,7 +315,11 @@ export default function PracticeWrite() {
               <textarea
                 ref={taRef}
                 value={text}
-                onChange={(e) => setText(e.target.value)}
+                /* Free writing stops dead at 200 words: the exam's longest
+                   tâche asks for 180, so there is nothing to gain past that. */
+                onChange={(e) => setText(freeWriting
+                  ? clampWords(e.target.value, FREE_WRITING.maxWords)
+                  : e.target.value)}
                 onDrop={(e) => e.preventDefault()}
                 lang="fr"
                 className="input paper-textarea min-h-[340px] p-6 shadow-card"
@@ -317,7 +328,7 @@ export default function PracticeWrite() {
               />
             </div>
 
-            <WordCountBar text={text} taskType={taskType} className="mt-4" />
+            <WordCountBar text={text} taskType={taskType} free={freeWriting} className="mt-4" />
 
             <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
               <button

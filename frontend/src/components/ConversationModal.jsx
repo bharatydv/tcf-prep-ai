@@ -42,6 +42,14 @@ const TAIL_MIN = 8;             // « oui. », « merci. » — too small to sta
 // roughly twice how long it could plausibly take to say at SPEECH_RATE.
 const chunkDeadline = (chunk) => 2000 + chunk.length * 140;
 
+/* ---------------- how the examiner listens ----------------
+   How long the learner may go quiet mid-sentence before the turn is treated as
+   finished. The recogniser's own end-of-speech detection fires at the first
+   breath, which handed half-finished questions to the examiner and had it
+   answer over the top of the learner. Two seconds is long enough to think of
+   the next word and short enough not to feel like a dead line. */
+const SILENCE_MS = 2000;
+
 // Voices differ wildly in quality and the first French one in the list is
 // usually the flat local fallback. Score by the names the good ones carry.
 const VOICE_HINTS = [/natural/i, /neural/i, /google/i, /online/i,
@@ -236,8 +244,44 @@ export default function ConversationModal({
       const rec = new SpeechRec();
       rec.lang = 'fr-FR';
       rec.interimResults = true;
-      rec.continuous = false;
+      // Continuous, so a pause for breath does not end the turn. This was
+      // false, which made the browser close the session at the first silence
+      // it detected — the examiner replied to half a question, and the words
+      // spoken after the pause were lost with the session that ended.
+      rec.continuous = true;
+
       let finalText = '';
+      let silence = null;
+      // The silence timer and onend can both decide the turn is over. Whoever
+      // gets there first wins; without this the turn was sent twice.
+      let handed = false;
+
+      const clearSilence = () => {
+        if (silence) { clearTimeout(silence); silence = null; }
+      };
+
+      const hand = (text) => {
+        if (handed) return;
+        handed = true;
+        clearSilence();
+        setInterim('');
+        if (doneRef.current) return;
+        if (text) sendTurnRef.current?.(text);
+        else listenRef.current?.();   // heard nothing; keep the mic open
+      };
+
+      // Restarted on every result, so the countdown measures silence since the
+      // last word rather than time since the turn began.
+      const armSilence = () => {
+        clearSilence();
+        silence = setTimeout(() => {
+          const text = finalText.trim();
+          if (!text) return;                 // nothing said yet — keep waiting
+          try { rec.stop(); } catch (e) { /* already stopping */ }
+          hand(text);
+        }, SILENCE_MS);
+      };
+
       rec.onresult = (e) => {
         let live = '';
         for (let i = e.resultIndex; i < e.results.length; i += 1) {
@@ -246,7 +290,11 @@ export default function ConversationModal({
           else live += r[0].transcript;
         }
         setInterim(live);
+        armSilence();
       };
+      // Still talking: cancel any countdown armed by the trailing silence of
+      // the previous phrase.
+      rec.onspeechstart = clearSilence;
       rec.onerror = (e) => {
         if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
           setError(t('conv.micDenied'));
@@ -254,14 +302,18 @@ export default function ConversationModal({
         }
       };
       rec.onend = () => {
-        setInterim('');
-        if (doneRef.current) return;
-        const text = finalText.trim();
-        if (text) sendTurnRef.current?.(text);
-        else listenRef.current?.();   // heard nothing; keep the mic open
+        clearSilence();
+        // Continuous sessions still end on their own — a network blip, or the
+        // mobile engine's own limit. Whatever was captured is the turn.
+        hand(finalText.trim());
       };
+      // The status used to be set before start(), so the panel said "listening"
+      // while the audio stream was still opening and the first word went into
+      // a microphone that was not recording yet. onstart is the browser saying
+      // the service is actually live.
+      rec.onstart = () => setStatus('listening');
       recRef.current = rec;
-      setStatus('listening');
+      setStatus('starting');
       rec.start();
     } catch (e) {
       setStatus('idle');
@@ -388,6 +440,12 @@ export default function ConversationModal({
   // of interaction must not stretch because the tab lost focus.
   const prepEndsRef = useRef(null);
   const liveEndsRef = useRef(null);
+  // finish() drops back to 'live' when grading fails, and by then the clock is
+  // already at zero — so the deadline below fired it again straight away, and
+  // again after that: an unbounded retry loop, one error toast per pass. One
+  // automatic attempt is enough; the Finish button is still there to retry by
+  // hand, which also tells the learner something actually went wrong.
+  const autoFinishedRef = useRef(false);
 
   useEffect(() => {
     if (phase !== 'prep') { prepEndsRef.current = null; return undefined; }
@@ -417,7 +475,10 @@ export default function ConversationModal({
     const read = () => {
       const remaining = Math.max(0, Math.ceil((liveEndsRef.current - Date.now()) / 1000));
       setLeft(remaining);
-      if (remaining <= 0) finish();
+      if (remaining <= 0 && !autoFinishedRef.current) {
+        autoFinishedRef.current = true;
+        finish();
+      }
     };
 
     read();
@@ -433,6 +494,7 @@ export default function ConversationModal({
 
   const spokenTurns = turns.filter((t) => t.role === 'candidate').length;
   const statusLabel = {
+    starting: t('conv.stStarting'),
     listening: HAS_LIVE_STT ? t('conv.stListening') : t('conv.stRecording'),
     thinking: t('conv.stThinking'),
     speaking: t('conv.stSpeaking'),
