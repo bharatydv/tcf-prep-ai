@@ -22,6 +22,13 @@ services:
       - db
     expose:
       - "8000"
+    # Published on loopback so a host nginx can reach it. The port is a
+    # variable because the GCP VM already runs one on :80 that proxies to
+    # 3000/5000 — hardcoding the ports here meant every deploy pulled a
+    # docker-compose.yml that fought it, and the fix had to be re-applied by
+    # hand and re-conflicted on the next pull. Set BACKEND_PORT in .env there.
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
 
   frontend:
     build: ./frontend
@@ -29,8 +36,9 @@ services:
     restart: always
     # nginx serves the static build and proxies /api to `backend` by service
     # name, so the browser only ever talks to one origin and no CORS applies.
+    # FRONTEND_PORT lets a host that already owns :80 put this behind it.
     ports:
-      - "80:80"
+      - "${FRONTEND_PORT:-80}:80"
     depends_on:
       - backend
 
