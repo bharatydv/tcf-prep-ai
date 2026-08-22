@@ -20,7 +20,10 @@ from datetime import datetime, timedelta, timezone, date
 from typing import Optional, List, Dict, Any
 
 import bcrypt
+import base64
+import functools
 import hashlib
+import hmac
 import secrets
 import jwt
 from dotenv import load_dotenv
@@ -375,6 +378,10 @@ class User(Base):
     free_speaking_used: Mapped[int] = mapped_column(Integer, default=0)
     free_speaking_tache2_used: Mapped[int] = mapped_column(Integer, default=0)
     subscription_status: Mapped[str] = mapped_column(String(20), default="free")
+    # When the current paid cycle runs out. NULL means "does not expire", which
+    # is what a manual or seeded grant gets; a paid subscription always sets it.
+    premium_until: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     monthly_reset_date: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True)
     current_streak: Mapped[int] = mapped_column(Integer, default=0)
@@ -682,6 +689,8 @@ def public_user(u: User) -> dict:
         "created_at": u.created_at,
         "free_submissions_used": u.free_submissions_used or 0,
         "subscription_status": u.subscription_status or "free",
+        "premium": is_premium(u),
+        "premium_until": u.premium_until,
         "monthly_reset_date": u.monthly_reset_date,
         "current_streak": u.current_streak or 0,
         "longest_streak": u.longest_streak or 0,
@@ -699,7 +708,7 @@ def public_user(u: User) -> dict:
         # afterwards that they had no attempts left.
         "trial": trial_state(u),
         "credits_remaining": (
-            None if (u.subscription_status or "free") == "premium"
+            None if is_premium(u)
             else max(0, FREE_TRIAL_TOTAL - ((u.free_writing_used or 0)
                                             + (u.free_speaking_used or 0)))),
         "free_trial_total": FREE_TRIAL_TOTAL,
@@ -1147,9 +1156,22 @@ async def get_admin_user(user: User = Depends(get_current_user)) -> User:
 # ----------------------------------------------------------------------------
 # Freemium limits & streaks
 # ----------------------------------------------------------------------------
+def is_premium(user: User) -> bool:
+    """Premium *and* not expired.
+
+    Every gate used to read subscription_status alone, so once payment set it
+    to "premium" there was nothing that could ever take it away again. A NULL
+    premium_until still means unlimited - that is the seeded admin and any
+    manual grant - but a paid cycle always carries its expiry.
+    """
+    if (user.subscription_status or "free") != "premium":
+        return False
+    return user.premium_until is None or user.premium_until > now_utc()
+
+
 def trial_state(user: User) -> dict:
     """What is left of the free trial, in the shape the paywall renders."""
-    premium = (user.subscription_status or "free") == "premium"
+    premium = is_premium(user)
     w = user.free_writing_used or 0
     sp = user.free_speaking_used or 0
     t2 = user.free_speaking_tache2_used or 0
@@ -1163,6 +1185,7 @@ def trial_state(user: User) -> dict:
         "speaking_tache2": {
             "used": t2, "limit": FREE_SPEAKING_TACHE2_LIMIT,
             "left": None if premium else max(0, FREE_SPEAKING_TACHE2_LIMIT - t2)},
+        "premium_until": user.premium_until,
     }
 
 
@@ -1197,7 +1220,7 @@ async def enforce_free_conversation_limit(db: AsyncSession, user: User) -> User:
     """Free-conversation allowance, counted from the conversations already
     graded this month. Derived from the submissions table rather than a new
     user column, so this needs no migration on an existing database."""
-    if user.subscription_status == "premium":
+    if is_premium(user):
         return user
     now = now_utc()
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -1238,7 +1261,7 @@ async def reserve_credit(db: AsyncSession, user: User, kind: str = "writing",
     Whatever is claimed here must be handed back with the SAME arguments via
     refund_credit() if the work then fails to grade.
     """
-    if user.subscription_status == "premium":
+    if is_premium(user):
         return user
     speaking = kind == "speaking"
     conds = ([User.free_speaking_used < FREE_SPEAKING_LIMIT] if speaking
@@ -1274,7 +1297,7 @@ async def refund_credit(db: AsyncSession, user: User, kind: str = "writing",
     Must mirror the reserve_credit() call that claimed it, or the learner is
     quietly charged for an attempt the AI never delivered.
     """
-    if user.subscription_status == "premium":
+    if is_premium(user):
         return
     speaking = kind == "speaking"
     col = User.free_speaking_used if speaking else User.free_writing_used
@@ -1519,6 +1542,47 @@ AI_UNAVAILABLE_DETAIL = ("Correction indisponible : le correcteur IA a refusé l
                          "Réessayez dans un instant.")
 AI_TIMEOUT_DETAIL = ("Correction indisponible : l'analyse a dépassé le délai "
                      "maximum. Réessayez dans un instant.")
+# A reply that arrived but could not be read is not a key or quota problem.
+# Both used to share AI_UNAVAILABLE_DETAIL, which sent people to their billing
+# page over a JSON the model had truncated.
+AI_BAD_REPLY_DETAIL = ("Correction indisponible : le correcteur IA a répondu, "
+                       "mais sa réponse était incomplète ou illisible. "
+                       "Réessayez dans un instant.")
+
+
+# Which provider and model graded an answer is operational detail: it is kept
+# on the analysis so the Admin panel and the logs can use it, but it has no
+# business in a learner's result. The writing endpoints never leaked it —
+# persist_submission returns DB columns and these are not columns — but the
+# speaking ones return the analysis dict itself, so they did.
+_INTERNAL_ANALYSIS_KEYS = ("ai_provider", "ai_model", "ai_error")
+
+
+def public_analysis(analysis: dict) -> dict:
+    """The analysis with internal grading metadata removed."""
+    return {k: v for k, v in analysis.items()
+            if k not in _INTERNAL_ANALYSIS_KEYS}
+
+
+def public_attempt(attempt: dict) -> dict:
+    """An exam attempt with grading metadata stripped from each tâche.
+
+    Applied on read as well as on write: attempts saved before this existed
+    still carry ai_provider/ai_model inside their task JSON columns.
+    """
+    out = dict(attempt)
+    for key in ("task1", "task2", "task3"):
+        task = out.get(key)
+        if isinstance(task, dict) and isinstance(task.get("analysis"), dict):
+            out[key] = {**task, "analysis": public_analysis(task["analysis"])}
+    return out
+
+
+def ai_error_detail(analysis: dict) -> str:
+    """The message matching what actually failed, not a catch-all."""
+    if analysis.get("ai_error") == "bad_reply":
+        return AI_BAD_REPLY_DETAIL
+    return AI_UNAVAILABLE_DETAIL
 # Returned with 422 when a recording produced no transcript. The credit is
 # refunded first, so the message can promise that plainly.
 NO_SPEECH_DETAIL = ("Aucune parole n'a été détectée dans cet enregistrement. "
@@ -1595,7 +1659,19 @@ def _call_anthropic(model: str, system_prompt: str, user_text: str) -> str:
         messages=[{"role": "user", "content": user_text}],
     )
     parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
-    return "".join(parts)
+    out = "".join(parts).strip()
+    if out:
+        return out
+    # Same trap _call_openai_compatible documents: an empty 200 is not a key or
+    # quota failure, but returning "" made the caller report one.
+    stop = getattr(resp, "stop_reason", None)
+    hint = ""
+    if stop == "max_tokens":
+        hint = (f" The {GRADER_MAX_TOKENS}-token budget was used up before any "
+                f"answer was written - raise GRADER_MAX_TOKENS.")
+    raise RuntimeError(
+        f"{model} returned an empty completion "
+        f"(stop_reason={stop}, usage={getattr(resp, 'usage', None)}).{hint}")
 
 
 def _call_openai(model: str, system_prompt: str, user_text: str) -> str:
@@ -1607,7 +1683,18 @@ def _call_openai(model: str, system_prompt: str, user_text: str) -> str:
             {"role": "user", "content": user_text},
         ],
     )
-    return resp.choices[0].message.content or ""
+    choice = resp.choices[0]
+    content = (choice.message.content or "").strip()
+    if content:
+        return content
+    hint = ""
+    if choice.finish_reason == "length":
+        hint = (f" The {GRADER_MAX_TOKENS}-token budget was used up before any "
+                f"answer was written - raise GRADER_MAX_TOKENS.")
+    raise RuntimeError(
+        f"{model} returned an empty completion "
+        f"(finish_reason={choice.finish_reason}, "
+        f"usage={getattr(resp, 'usage', None)}).{hint}")
 
 
 def _call_gemini(model: str, system_prompt: str, user_text: str) -> str:
@@ -1617,10 +1704,34 @@ def _call_gemini(model: str, system_prompt: str, user_text: str) -> str:
         contents=user_text,
         config=types.GenerateContentConfig(
             system_instruction=system_prompt,
-            max_output_tokens=2000,
+            # This was pinned at 2000 while every other provider used
+            # GRADER_MAX_TOKENS, so Gemini alone still had the bug that
+            # constant was introduced to fix: a long Tache 3 reply ran past the
+            # budget and arrived truncated mid-JSON. The 2.5 models make it
+            # worse - thinking tokens are drawn from this same budget, so it
+            # can be spent before a single character of the answer is written.
+            # Either way the reply is unparseable, and the learner was told the
+            # API key or quota was at fault.
+            max_output_tokens=GRADER_MAX_TOKENS,
         ),
     )
-    return resp.text or ""
+    # .text is a property that raises when the reply carries no candidate.
+    try:
+        text = (resp.text or "").strip()
+    except Exception:  # noqa: BLE001
+        text = ""
+    if text:
+        return text
+    cand = (getattr(resp, "candidates", None) or [None])[0]
+    finish = getattr(cand, "finish_reason", None)
+    hint = ""
+    if "MAX_TOKENS" in str(finish):
+        hint = (f" The {GRADER_MAX_TOKENS}-token budget was used up before any "
+                f"answer was written - raise GRADER_MAX_TOKENS.")
+    raise RuntimeError(
+        f"{model} returned an empty completion (finish_reason={finish}, "
+        f"prompt_feedback={getattr(resp, 'prompt_feedback', None)}, "
+        f"usage={getattr(resp, 'usage_metadata', None)}).{hint}")
 
 
 def _call_openai_compatible(base_url: str, api_key: str, model: str,
@@ -1721,6 +1832,23 @@ def _scrub_secrets(text: str) -> str:
     return re.sub(r"\b(sk|gsk)[-_][A-Za-z0-9\-_]{8,}", "***", out)[:400]
 
 
+# Provider errors that will fail again however many times they are retried.
+_TERMINAL_ERROR_HINTS = (
+    "invalid_api_key", "invalid api key", "incorrect api key",
+    "insufficient_quota", "insufficient balance", "insufficient_balance",
+    "billing", "unauthorized", "permission_denied", "api key not valid",
+)
+
+
+def _is_terminal_provider_error(exc: Exception) -> bool:
+    """True for a key/billing rejection, false for a transient failure."""
+    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    if status in (401, 403):
+        return True
+    blob = f"{type(exc).__name__} {exc}".lower()
+    return any(h in blob for h in _TERMINAL_ERROR_HINTS)
+
+
 async def _grade_with_provider(provider: str, system_prompt: str,
                                user_text: str) -> Optional[str]:
     """Run a grading call on the chosen provider. Returns raw text or None."""
@@ -1733,7 +1861,8 @@ async def _grade_with_provider(provider: str, system_prompt: str,
                     "- set a real key in .env", provider)
         return None
     last_exc = None
-    for attempt in range(2):
+    attempts = 2
+    for attempt in range(attempts):
         try:
             out = await run_ai(fn, model, system_prompt, user_text)
             _PROVIDER_LAST_ERROR.pop(provider, None)
@@ -1742,7 +1871,12 @@ async def _grade_with_provider(provider: str, system_prompt: str,
             last_exc = exc
             log.warning("Grading call failed (%s/%s attempt %s): %s",
                         provider, model, attempt + 1, exc)
-            await asyncio.sleep(0.5)
+            # A rejected key or an exhausted quota is not transient: retrying
+            # buys nothing and doubles the failed calls against the account.
+            if _is_terminal_provider_error(exc):
+                break
+            if attempt < attempts - 1:
+                await asyncio.sleep(0.5)
     _PROVIDER_LAST_ERROR[provider] = f"{type(last_exc).__name__}: {_scrub_secrets(last_exc)}"
     return None
 
@@ -1816,7 +1950,7 @@ async def analyze_text_with_ai(text: str, topic: Optional[str] = None, db=None,
                     provider, exc, _scrub_secrets(raw)[:400])
         _PROVIDER_LAST_ERROR[provider] = (
             f"Replied, but the response could not be parsed: {exc}")
-        return dict(FALLBACK_ANALYSIS)
+        return {**dict(FALLBACK_ANALYSIS), "ai_error": "bad_reply"}
 
 
 STATIC_DISTRACTORS = {
@@ -2152,7 +2286,10 @@ async def grade_interaction(consigne: str, history: list, db=None,
         return apply_speaking_caps(result, spoken, task_type)
     except Exception as exc:  # noqa: BLE001
         log.warning("Could not parse interaction JSON (%s): %s", provider, exc)
-        return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
+        _PROVIDER_LAST_ERROR[provider] = (
+            f"Replied, but the response could not be parsed: {exc}")
+        return {**dict(FALLBACK_ANALYSIS), "ai_error": "bad_reply",
+                "answers_question": False,
                 "relevance_comment": "", "suggestions": []}
 
 
@@ -2349,13 +2486,296 @@ async def analyze_speaking_with_ai(transcript: str, question: str, db=None,
                     provider, exc, _scrub_secrets(raw)[:400])
         _PROVIDER_LAST_ERROR[provider] = (
             f"Replied, but the response could not be parsed: {exc}")
-        return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
+        return {**dict(FALLBACK_ANALYSIS), "ai_error": "bad_reply",
+                "answers_question": False,
                 "relevance_comment": "", "suggestions": []}
+
+
+# ----------------------------------------------------------------------------
+# Billing models
+# ----------------------------------------------------------------------------
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Our id, and the one Cashfree is told to use, so a webhook can be matched
+    # back to a row without trusting anything the browser sent.
+    subscription_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    plan_id: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    currency: Mapped[str] = mapped_column(String(8), default="USD")
+    amount: Mapped[float] = mapped_column(Float, default=0.0)
+    cf_subscription_id: Mapped[Optional[str]] = mapped_column(
+        String(128), nullable=True)
+    current_period_end: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class BillingEvent(Base):
+    """Every webhook Cashfree sends, kept whole.
+
+    The unique event_key is what makes the webhook idempotent: Cashfree retries
+    until it gets a 2xx, and without this a retried payment notification would
+    grant a second month for one charge.
+    """
+    __tablename__ = "billing_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_key: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    subscription_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True)
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+# ----------------------------------------------------------------------------
+# Billing — Cashfree recurring subscriptions
+# ----------------------------------------------------------------------------
+# Card details never reach this server: /billing/subscribe creates a mandate at
+# Cashfree and hands back their authorisation link, the learner authorises it
+# there, and the webhook below is what actually grants premium. The browser is
+# never trusted to report a payment — a POST from the client can be forged, a
+# signed webhook cannot.
+CASHFREE_APP_ID = os.environ.get("CASHFREE_APP_ID", "")
+CASHFREE_SECRET_KEY = os.environ.get("CASHFREE_SECRET_KEY", "")
+CASHFREE_ENV = os.environ.get("CASHFREE_ENV", "sandbox").lower()
+CASHFREE_API_VERSION = os.environ.get("CASHFREE_API_VERSION", "2025-01-01")
+CASHFREE_BASE_URL = os.environ.get(
+    "CASHFREE_BASE_URL",
+    "https://api.cashfree.com/pg" if CASHFREE_ENV in {"production", "prod"}
+    else "https://sandbox.cashfree.com/pg")
+# Cashfree signs webhooks with the same client secret unless a separate one is
+# configured in the dashboard.
+CASHFREE_WEBHOOK_SECRET = (os.environ.get("CASHFREE_WEBHOOK_SECRET", "")
+                           or CASHFREE_SECRET_KEY)
+# Cashfree subscription plans are INR by default and non-INR needs the
+# international product enabled on the account. Kept as one env var so a
+# currency that the account cannot actually charge is a config change, not a
+# code change.
+BILLING_CURRENCY = os.environ.get("BILLING_CURRENCY", "USD").upper()
+# The mandate is authorised with a small charge that is refunded immediately.
+BILLING_AUTH_AMOUNT = float(os.environ.get("BILLING_AUTH_AMOUNT", "1"))
+# How many cycles a mandate is allowed to run before the learner must re-authorise.
+BILLING_MAX_CYCLES = int(os.environ.get("BILLING_MAX_CYCLES", "60"))
+
+
+def _billing_price(name: str, default: str) -> float:
+    return float(os.environ.get(f"BILLING_PRICE_{name.upper()}", default))
+
+
+def _billing_first_price(name: str, default: str) -> float:
+    return float(os.environ.get(f"BILLING_FIRST_{name.upper()}", default))
+
+
+# The catalogue lives here, not in the frontend: an amount the browser sends is
+# an amount the browser can change. frontend/src/lib/plans.js renders whatever
+# GET /api/billing/plans returns.
+#
+# `first_amount` is the introductory rate for an account that has never paid.
+# It is not a first-cycle-only discount: whoever takes it keeps that rate for
+# as long as the subscription runs, which is the one shape Cashfree's immutable
+# plans model natively - one plan per price, no mid-mandate amount change.
+BILLING_PLANS = {
+    "week": {"name": "1 Week",
+             "amount": _billing_price("week", "20"),
+             "first_amount": _billing_first_price("week", "15"),
+             "interval_type": "week", "intervals": 1, "bonus": 3},
+    "month": {"name": "1 Month",
+              "amount": _billing_price("month", "80"),
+              "first_amount": _billing_first_price("month", "60"),
+              "interval_type": "month", "intervals": 1, "bonus": 8},
+    "quarter": {"name": "3 Months",
+                "amount": _billing_price("quarter", "220"),
+                "first_amount": _billing_first_price("quarter", "180"),
+                "interval_type": "month", "intervals": 3, "bonus": 15},
+}
+
+# How long one paid cycle grants premium for. Kept beside the plan rather than
+# derived from the webhook, which does not always carry a period end.
+_PLAN_PERIOD = {
+    "day": lambda n: timedelta(days=n),
+    "week": lambda n: timedelta(weeks=n),
+    "month": lambda n: timedelta(days=30 * n),
+    "year": lambda n: timedelta(days=365 * n),
+}
+
+
+def plan_period(plan: dict) -> timedelta:
+    fn = _PLAN_PERIOD.get(plan["interval_type"], _PLAN_PERIOD["month"])
+    return fn(plan["intervals"])
+
+
+def billing_configured() -> bool:
+    return bool(CASHFREE_APP_ID and CASHFREE_SECRET_KEY)
+
+
+def _cf_request_sync(method: str, path: str, payload: Optional[dict] = None) -> dict:
+    import requests
+    resp = requests.request(
+        method, f"{CASHFREE_BASE_URL}{path}",
+        headers={
+            "x-client-id": CASHFREE_APP_ID,
+            "x-client-secret": CASHFREE_SECRET_KEY,
+            "x-api-version": CASHFREE_API_VERSION,
+            "Content-Type": "application/json",
+        },
+        json=payload, timeout=30)
+    try:
+        data = resp.json()
+    except ValueError:
+        data = {"raw": resp.text[:2000]}
+    if resp.status_code >= 400:
+        # Cashfree puts the useful part in `message`; the status alone says
+        # nothing about which field was rejected.
+        raise RuntimeError(
+            f"Cashfree {method} {path} -> {resp.status_code}: "
+            f"{data.get('message') or data.get('raw') or data}")
+    return data
+
+
+async def cf_request(method: str, path: str, payload: Optional[dict] = None) -> dict:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None, functools.partial(_cf_request_sync, method, path, payload))
+
+
+def verify_cashfree_signature(raw_body: bytes, signature: str,
+                              timestamp: str) -> bool:
+    """Cashfree signs base64(HMAC-SHA256(timestamp + rawBody, secret)).
+
+    Compared with compare_digest so a wrong signature cannot be recovered one
+    byte at a time from the response timing.
+    """
+    if not (signature and timestamp and CASHFREE_WEBHOOK_SECRET):
+        return False
+    mac = hmac.new(CASHFREE_WEBHOOK_SECRET.encode("utf-8"),
+                   timestamp.encode("utf-8") + raw_body, hashlib.sha256)
+    expected = base64.b64encode(mac.digest()).decode("utf-8")
+    return hmac.compare_digest(expected, signature)
+
+
+def _dig(data: Any, *names: str) -> Any:
+    """First value found under any of `names`, at any depth.
+
+    Cashfree's subscription payloads have moved fields between the top level
+    and nested objects across API versions, and the webhook body is not the
+    same shape as the create response. Searching by name survives that.
+    """
+    if isinstance(data, dict):
+        for name in names:
+            if data.get(name) not in (None, ""):
+                return data[name]
+        for value in data.values():
+            found = _dig(value, *names)
+            if found is not None:
+                return found
+    elif isinstance(data, list):
+        for item in data:
+            found = _dig(item, *names)
+            if found is not None:
+                return found
+    return None
+
+
+async def has_paid_before(db: AsyncSession, user_id: str) -> bool:
+    """Has this account ever completed a payment?
+
+    Keyed on current_period_end, which only the payment-success branch of the
+    webhook ever writes. Counting subscription rows instead would have burned
+    the introductory rate on someone who opened a checkout and abandoned it.
+    """
+    n = await db.scalar(
+        select(func.count()).select_from(Subscription)
+        .where(Subscription.user_id == user_id,
+               Subscription.current_period_end.isnot(None)))
+    return bool(n)
+
+
+def plan_price(plan: dict, first_time: bool) -> float:
+    """What this buyer actually pays. Never read from the request."""
+    if first_time and plan.get("first_amount"):
+        return float(plan["first_amount"])
+    return float(plan["amount"])
+
+
+def cf_plan_id(plan_key: str, amount: float) -> str:
+    """The plan's id at Cashfree, for a given price.
+
+    The price is part of the id on purpose, twice over. A Cashfree plan is
+    immutable once created, so if a price changes and the id does not, every
+    new subscriber keeps being charged the old amount by a plan that silently
+    no longer matches the pricing page. It also gives the introductory rate its
+    own plan for free, which is what makes that rate hold for the life of the
+    mandate rather than needing a mid-mandate amount change Cashfree cannot do.
+    """
+    cents = f"{amount:.2f}".replace(".", "_")
+    return f"pf_{plan_key}_{BILLING_CURRENCY.lower()}_{cents}"
+
+
+async def cf_ensure_plan(plan_key: str, plan: dict, amount: float) -> str:
+    """Create the plan at Cashfree unless it is already there.
+
+    Subscriptions reference a plan by id; passing the details inline fails with
+    plan_not_found. Registering lazily on first purchase means no deploy step
+    to forget, and it is idempotent, so it costs one extra GET per checkout.
+    """
+    plan_id = cf_plan_id(plan_key, amount)
+    try:
+        await cf_request("GET", f"/plans/{plan_id}")
+        return plan_id
+    except Exception:  # noqa: BLE001
+        pass                      # not there yet - create it below
+    try:
+        await cf_request("POST", "/plans", {
+            "plan_id": plan_id,
+            "plan_name": plan["name"],
+            "plan_type": "PERIODIC",
+            "plan_currency": BILLING_CURRENCY,
+            "plan_recurring_amount": amount,
+            "plan_max_amount": amount,
+            "plan_max_cycles": BILLING_MAX_CYCLES,
+            "plan_intervals": plan["intervals"],
+            # Cashfree rejects lowercase here: "should be DAY WEEK MONTH YEAR".
+            "plan_interval_type": plan["interval_type"].upper(),
+        })
+    except Exception as exc:  # noqa: BLE001
+        # Two checkouts at once can both miss the GET and both try to create.
+        # The loser of that race is fine - the plan it wanted now exists.
+        if "exist" not in str(exc).lower():
+            raise
+    return plan_id
+
+
+async def grant_premium(db: AsyncSession, user: User, period: timedelta,
+                        bonus: int = 0) -> None:
+    """Extend premium by one paid cycle.
+
+    Extends from the current expiry when one is still in the future, so paying
+    early adds time instead of throwing away what is left.
+    """
+    base = user.premium_until
+    if base is None or base <= now_utc():
+        base = now_utc()
+    user.premium_until = base + period
+    user.subscription_status = "premium"
+    if bonus:
+        user.xp = (user.xp or 0) + bonus
+    await db.commit()
 
 
 # ----------------------------------------------------------------------------
 # Pydantic models
 # ----------------------------------------------------------------------------
+class SubscribeIn(BaseModel):
+    plan_id: str = Field(min_length=1, max_length=32)
+
+
 class RegisterIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     email: EmailStr
@@ -2933,6 +3353,9 @@ async def run_seeds():
 # create_all() only creates missing tables, so column changes on an existing
 # database need an explicit statement. Each entry must be safe to re-run.
 MIGRATIONS = [
+    # Paid cycles expire; manual grants (NULL) do not. See is_premium().
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_until "
+    "TIMESTAMP WITH TIME ZONE",
     # combined_score was declared Integer but always receives a mean like 72.3,
     # which asyncpg rejects for an int4 parameter.
     "ALTER TABLE exam_attempts "
@@ -3526,7 +3949,7 @@ async def analyze_stream(body: AnalyzeIn,
             if analysis.get("ai_unavailable"):
                 # Don't persist an empty correction or charge for it.
                 await refund_credit(db, user)
-                yield _sse("error", {"detail": AI_UNAVAILABLE_DETAIL,
+                yield _sse("error", {"detail": ai_error_detail(analysis),
                                      "status": 503})
                 return
             # persist_submission can take a moment; keep the socket warm so a
@@ -3568,7 +3991,7 @@ async def create_submission(body: AnalyzeIn,
                                           db=db, task_type=body.task_type)
     if analysis.get("ai_unavailable"):
         await refund_credit(db, user)
-        raise HTTPException(status_code=503, detail=AI_UNAVAILABLE_DETAIL)
+        raise HTTPException(status_code=503, detail=ai_error_detail(analysis))
     return await persist_submission(db, user, body.text, body.prompt_id,
                                     analysis, source=source, consume=False)
 
@@ -3677,14 +4100,15 @@ async def simulator_submit(body: SimulatorSubmitIn,
                 # the candidate they are A1 would be worse than failing loudly.
                 await refund_credit(db, user)
                 raise HTTPException(status_code=503,
-                                    detail=AI_UNAVAILABLE_DETAIL)
+                                    detail=ai_error_detail(analysis))
             graded_any = True
         else:
             # Left blank: a real examiner scores an unattempted tâche at zero.
             analysis = {**dict(FALLBACK_ANALYSIS), "ai_unavailable": False,
                         "not_attempted": True}
         tasks_out[f"task{i}"] = {
-            "prompt": task.prompt, "text": task.text, "analysis": analysis,
+            "prompt": task.prompt, "text": task.text,
+            "analysis": public_analysis(analysis),
             "word_count": len(task.text.split()),
             "word_guide": list(WORD_GUIDE[i]),
         }
@@ -3711,7 +4135,7 @@ async def simulator_submit(body: SimulatorSubmitIn,
     await db.commit()
     # The single credit for the run was already reserved before grading.
     streak = await update_streak(db, user.user_id)
-    out = _row_to_dict(attempt)
+    out = public_attempt(_row_to_dict(attempt))
     out["streak"] = streak
     return {"attempt": out}
 
@@ -3722,7 +4146,7 @@ async def simulator_attempts(user: User = Depends(get_current_user),
     res = await db.execute(
         select(ExamAttempt).where(ExamAttempt.user_id == user.user_id)
         .order_by(ExamAttempt.created_at.desc()).limit(50))
-    return [_row_to_dict(a) for a in res.scalars().all()]
+    return [public_attempt(_row_to_dict(a)) for a in res.scalars().all()]
 
 
 @app.get("/api/simulator/attempts/{attempt_id}")
@@ -3736,7 +4160,10 @@ async def simulator_attempt(attempt_id: str,
         raise HTTPException(status_code=404, detail="Attempt not found")
     if a.user_id != user.user_id and user.role != "admin":
         raise HTTPException(status_code=403, detail="Access denied")
-    return _row_to_dict(a)
+    # An admin opening an attempt for support wants to know which model graded
+    # it; the candidate who wrote it has no use for that.
+    row = _row_to_dict(a)
+    return row if user.role == "admin" else public_attempt(row)
 
 
 # ----------------------------------------------------------------------------
@@ -4455,14 +4882,14 @@ async def speaking_analyze(question: str = Form(...),
         raise HTTPException(status_code=504, detail=AI_TIMEOUT_DETAIL)
     if analysis.get("ai_unavailable"):
         await refund_credit(db, user, "speaking", tache2=is_tache2)
-        raise HTTPException(status_code=503, detail=AI_UNAVAILABLE_DETAIL)
+        raise HTTPException(status_code=503, detail=ai_error_detail(analysis))
     analysis["transcript"] = transcript
     sub = await persist_submission(
         db, user, transcript, None, analysis,
         source="speaking", consume=False)
     analysis["submission_id"] = sub.get("submission_id")
     analysis["streak"] = sub.get("streak")
-    return analysis
+    return public_analysis(analysis)
 
 
 @app.post("/api/speaking/turn/transcribe")
@@ -4525,7 +4952,7 @@ async def speaking_converse_grade(body: ConverseGradeIn,
     if analysis.get("ai_unavailable"):
         if not free_mode:
             await refund_credit(db, user, "speaking", tache2=is_tache2)
-        raise HTTPException(status_code=503, detail=AI_UNAVAILABLE_DETAIL)
+        raise HTTPException(status_code=503, detail=ai_error_detail(analysis))
     if analysis.get("no_speech"):
         # Nothing was said, so nothing was graded: give the credit back rather
         # than charging for an empty attempt, and still return 200 so the
@@ -4542,7 +4969,7 @@ async def speaking_converse_grade(body: ConverseGradeIn,
         consume=False)  # the credit, if any, was reserved above
     analysis["submission_id"] = sub.get("submission_id")
     analysis["streak"] = sub.get("streak")
-    return analysis
+    return public_analysis(analysis)
 
 
 @app.get("/api/recent-topics")
@@ -4578,7 +5005,7 @@ async def recent_topic(topic_id: str,
     t = _row_to_dict(t_obj)
     model_answer = t.pop("model_answer", "")
     unlocked = user.model_answer_topic_ids or []
-    premium = user.subscription_status == "premium"
+    premium = is_premium(user)
     t["model_answers_remaining"] = (
         None if premium
         else max(0, FREE_MODEL_ANSWER_LIMIT - len(unlocked)))
@@ -4602,7 +5029,7 @@ async def reveal_model_answer(topic_id: str,
     if not t_obj:
         raise HTTPException(status_code=404, detail="Topic not found")
     unlocked = list(user.model_answer_topic_ids or [])
-    premium = user.subscription_status == "premium"
+    premium = is_premium(user)
     if not premium and topic_id not in unlocked:
         if len(unlocked) >= FREE_MODEL_ANSWER_LIMIT:
             raise HTTPException(
@@ -4621,6 +5048,259 @@ async def reveal_model_answer(topic_id: str,
 # ----------------------------------------------------------------------------
 # Admin
 # ----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# Billing endpoints
+# ----------------------------------------------------------------------------
+@app.get("/api/billing/plans")
+async def billing_plans():
+    """The catalogue the pricing page renders.
+
+    Public, and the only source of truth for prices. The frontend used to hold
+    them, which meant the amount charged came from whatever the browser sent.
+    """
+    return {
+        "currency": BILLING_CURRENCY,
+        "configured": billing_configured(),
+        "plans": [{"id": pid, "name": p["name"], "amount": p["amount"],
+                   "first_amount": p.get("first_amount"),
+                   "interval_type": p["interval_type"],
+                   "intervals": p["intervals"], "bonus": p["bonus"]}
+                  for pid, p in BILLING_PLANS.items()],
+    }
+
+
+@app.get("/api/billing/subscription")
+async def billing_my_subscription(user: User = Depends(get_current_user),
+                                  db: AsyncSession = Depends(get_db)):
+    """The learner's most recent subscription, plus where premium stands."""
+    res = await db.execute(
+        select(Subscription).where(Subscription.user_id == user.user_id)
+        .order_by(Subscription.created_at.desc()).limit(1))
+    row = res.scalar_one_or_none()
+    return {
+        "premium": is_premium(user),
+        "premium_until": user.premium_until,
+        # Drives which price the pricing page shows. Advisory only - the amount
+        # actually charged is recomputed server-side at checkout.
+        "first_time_eligible": not await has_paid_before(db, user.user_id),
+        "subscription": _row_to_dict(row) if row else None,
+    }
+
+
+@app.post("/api/billing/subscribe")
+async def billing_subscribe(body: SubscribeIn,
+                            user: User = Depends(get_current_user),
+                            db: AsyncSession = Depends(get_db)):
+    """Open a Cashfree mandate and hand back the link that authorises it.
+
+    Nothing is granted here. The learner authorises at Cashfree and the signed
+    webhook is what turns premium on - a reply to this call cannot be trusted,
+    because the browser it goes to is the one thing an attacker controls.
+    """
+    if not billing_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Les paiements ne sont pas encore configurés.")
+    plan = BILLING_PLANS.get(body.plan_id.strip().lower())
+    if not plan:
+        raise HTTPException(status_code=400,
+                            detail=f"Formule inconnue : {body.plan_id}")
+
+    # Cashfree rejects a mandate with no phone. A placeholder would be worse
+    # than a clear error, so ask for the number instead.
+    if not user.phone:
+        raise HTTPException(
+            status_code=400,
+            detail="Ajoutez un numéro de téléphone à votre compte avant de payer.")
+
+    plan_key = body.plan_id.strip().lower()
+    # Decided here, from the database, and never from the request: a discount
+    # the browser can ask for is a discount anyone can take twice.
+    first_time = not await has_paid_before(db, user.user_id)
+    amount = plan_price(plan, first_time)
+    try:
+        cf_plan = await cf_ensure_plan(plan_key, plan, amount)
+    except Exception:  # noqa: BLE001
+        log.exception("Cashfree plan registration failed for %s", plan_key)
+        raise HTTPException(
+            status_code=502,
+            detail="La formule n'a pas pu être ouverte chez le prestataire.")
+
+    sub_id = new_id("sub")
+    payload = {
+        "subscription_id": sub_id,
+        "customer_details": {
+            "customer_name": user.name or "Learner",
+            "customer_email": user.email,
+            "customer_phone": user.phone,
+        },
+        # The plan is referenced, not described: sending the details inline
+        # fails with plan_not_found however complete they are.
+        "plan_details": {"plan_id": cf_plan},
+        "authorization_details": {
+            "authorization_amount": BILLING_AUTH_AMOUNT,
+            "authorization_amount_refund": True,
+            "payment_methods": ["card"],
+        },
+        "subscription_meta": {
+            "return_url": f"{ALLOWED_ORIGINS[0]}/billing/return?sub={sub_id}",
+        },
+    }
+
+    try:
+        data = await cf_request("POST", "/subscriptions", payload)
+    except Exception:  # noqa: BLE001
+        log.exception("Cashfree subscription create failed for %s", user.user_id)
+        raise HTTPException(
+            status_code=502,
+            detail="Le prestataire de paiement n'a pas répondu. Réessayez.")
+
+    # Logged whole: the field names move between Cashfree API versions, and
+    # without the raw reply a missing link is undiagnosable.
+    log.info("Cashfree subscription %s created: %s", sub_id, _scrub_secrets(data))
+    now = now_utc()
+    db.add(Subscription(
+        subscription_id=sub_id, user_id=user.user_id,
+        plan_id=body.plan_id.strip().lower(), status="pending",
+        currency=BILLING_CURRENCY, amount=amount,
+        cf_subscription_id=str(_dig(data, "cf_subscription_id") or ""),
+        created_at=now, updated_at=now))
+    await db.commit()
+    return {
+        "subscription_id": sub_id,
+        "amount": amount,
+        "first_time": first_time,
+        "auth_link": _dig(data, "authorization_link", "authorisation_link",
+                          "auth_link", "subscription_link"),
+        "session_id": _dig(data, "subscription_session_id"),
+    }
+
+
+@app.post("/api/billing/cancel")
+async def billing_cancel(user: User = Depends(get_current_user),
+                         db: AsyncSession = Depends(get_db)):
+    """Stop future charges. Premium already paid for runs to its expiry."""
+    res = await db.execute(
+        select(Subscription).where(Subscription.user_id == user.user_id,
+                                   Subscription.status.in_(("pending", "active")))
+        .order_by(Subscription.created_at.desc()).limit(1))
+    row = res.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404,
+                            detail="Aucun abonnement actif à résilier.")
+    try:
+        await cf_request("POST", f"/subscriptions/{row.subscription_id}/manage",
+                         {"action": "CANCEL"})
+    except Exception:  # noqa: BLE001
+        log.exception("Cashfree cancel failed for %s", row.subscription_id)
+        raise HTTPException(
+            status_code=502,
+            detail="La résiliation n'a pas pu être transmise. Réessayez.")
+    row.status = "cancelled"
+    row.cancelled_at = now_utc()
+    row.updated_at = now_utc()
+    await db.commit()
+    return {"cancelled": True, "premium_until": user.premium_until}
+
+
+# Webhook event names carry the outcome in the string rather than a field, and
+# they have changed spelling across Cashfree API versions, so match on both
+# halves instead of an exact list.
+def _is_payment_success(event_type: str) -> bool:
+    e = event_type.upper()
+    return "PAYMENT" in e and "SUCCESS" in e
+
+
+def _is_cancellation(event_type: str, status: str) -> bool:
+    blob = f"{event_type} {status}".upper()
+    return "CANCEL" in blob
+
+
+@app.post("/api/billing/webhook")
+async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
+    """Cashfree's notification. The only thing that grants premium.
+
+    Returns 2xx for anything it has already handled or does not recognise:
+    Cashfree retries until it gets one, and retrying an event we understood
+    perfectly well the first time is how one payment becomes two months.
+    """
+    raw = await request.body()
+    if not verify_cashfree_signature(
+            raw,
+            request.headers.get("x-webhook-signature", ""),
+            request.headers.get("x-webhook-timestamp", "")):
+        log.warning("Rejected a Cashfree webhook with an invalid signature")
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    try:
+        event = json.loads(raw or b"{}")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Malformed body")
+
+    event_type = str(event.get("type") or _dig(event, "type") or "UNKNOWN")
+    sub_id = _dig(event, "subscription_id")
+    status = str(_dig(event, "subscription_status", "payment_status") or "")
+    # No single id is present on every event, so the key is built from what is.
+    marker = (_dig(event, "cf_payment_id", "payment_id", "event_id",
+                   "cf_subscription_id") or request.headers.get(
+                       "x-webhook-timestamp", ""))
+    event_key = f"{event_type}:{sub_id}:{marker}"[:200]
+
+    db.add(BillingEvent(event_key=event_key, event_type=event_type,
+                        subscription_id=str(sub_id) if sub_id else None,
+                        payload=event, created_at=now_utc()))
+    try:
+        await db.commit()
+    except Exception:  # noqa: BLE001
+        # Unique violation: this is a retry of an event already applied.
+        await db.rollback()
+        log.info("Ignored duplicate Cashfree webhook %s", event_key)
+        return {"ok": True, "duplicate": True}
+
+    if not sub_id:
+        log.info("Cashfree webhook %s carried no subscription_id", event_type)
+        return {"ok": True, "ignored": "no subscription_id"}
+
+    res = await db.execute(select(Subscription)
+                           .where(Subscription.subscription_id == str(sub_id)))
+    row = res.scalar_one_or_none()
+    if not row:
+        log.warning("Cashfree webhook for unknown subscription %s", sub_id)
+        return {"ok": True, "ignored": "unknown subscription"}
+
+    res = await db.execute(select(User).where(User.user_id == row.user_id))
+    user = res.scalar_one_or_none()
+    if not user:
+        log.warning("Subscription %s has no user %s", sub_id, row.user_id)
+        return {"ok": True, "ignored": "unknown user"}
+
+    plan = BILLING_PLANS.get(row.plan_id) or BILLING_PLANS["month"]
+    row.updated_at = now_utc()
+
+    if _is_payment_success(event_type):
+        # The charge landed: add one cycle. The amount is read from our own
+        # catalogue, never from the webhook, so a forged or replayed body
+        # cannot buy a longer period than the plan sells.
+        await grant_premium(db, user, plan_period(plan), bonus=plan["bonus"])
+        row.status = "active"
+        row.current_period_end = user.premium_until
+        await db.commit()
+        log.info("Premium extended to %s for %s (plan %s)",
+                 user.premium_until, user.user_id, row.plan_id)
+        return {"ok": True, "granted": True}
+
+    if _is_cancellation(event_type, status):
+        row.status = "cancelled"
+        row.cancelled_at = now_utc()
+        await db.commit()
+        return {"ok": True, "cancelled": True}
+
+    if status:
+        row.status = status.lower()[:32]
+    await db.commit()
+    return {"ok": True}
+
+
 # Allowed providers per task (for validation + to drive the Admin UI dropdowns)
 PROVIDER_OPTIONS = {
     "transcribe_provider": ["groq", "assemblyai", "openai", "gemini"],
@@ -4699,6 +5379,76 @@ async def admin_set_ai_providers(body: dict,
     return {"saved": saved, "ok": True}
 
 
+# ----------------------------------------------------------------------------
+# "How much credit is left?"
+# ----------------------------------------------------------------------------
+# Only DeepSeek answers that over the API. OpenAI, Anthropic, Gemini and Groq
+# expose spend in their billing consoles but have no key-readable balance, so
+# for those the only programmatic signal is what a live call reports back:
+# 401 means the key is rejected, 429 + insufficient_quota means the account is
+# out of credit, and 429 without it means the request was merely too fast.
+# Distinguishing those three is the difference between "top up" and "wait".
+BALANCE_UNSUPPORTED = ("This provider has no key-readable balance endpoint - "
+                       "check its billing console. The live probe still tells "
+                       "you whether the key is rejected or out of credit.")
+
+
+def _deepseek_balance_sync() -> dict:
+    import requests
+    root = DEEPSEEK_BASE_URL.rstrip("/")
+    for suffix in ("/v1", "/beta"):
+        if root.endswith(suffix):
+            root = root[: -len(suffix)]
+    resp = requests.get(f"{root}/user/balance",
+                        headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
+                        timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+    infos = data.get("balance_infos") or []
+    first = infos[0] if infos else {}
+    return {
+        "supported": True,
+        "is_available": bool(data.get("is_available")),
+        "currency": first.get("currency"),
+        "total": first.get("total_balance"),
+        "granted": first.get("granted_balance"),
+        "topped_up": first.get("topped_up_balance"),
+    }
+
+
+async def provider_balance(provider: str) -> dict:
+    """Account balance for `provider`, when it publishes one."""
+    if provider != "deepseek":
+        return {"supported": False, "note": BALANCE_UNSUPPORTED}
+    if not _key_is_usable(DEEPSEEK_API_KEY):
+        return {"supported": True, "error": "No usable DeepSeek API key."}
+    try:
+        return await asyncio.wait_for(run_ai(_deepseek_balance_sync), timeout=20)
+    except Exception as exc:  # noqa: BLE001
+        return {"supported": True,
+                "error": f"{type(exc).__name__}: {_scrub_secrets(exc)}"}
+
+
+def classify_provider_error(exc: Exception) -> str:
+    """Turn a provider exception into a reason the Admin panel can act on."""
+    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    blob = f"{type(exc).__name__} {exc}".lower()
+    if "insufficient_quota" in blob or "insufficient balance" in blob \
+            or "exceeded your current quota" in blob or "billing" in blob:
+        return "no_credit"
+    if status in (401, 403) or "invalid_api_key" in blob \
+            or "incorrect api key" in blob or "api key not valid" in blob \
+            or "unauthorized" in blob or "permission_denied" in blob:
+        return "bad_key"
+    if status == 429 or "rate limit" in blob or "rate_limit" in blob:
+        return "rate_limited"
+    if "empty completion" in blob:
+        return "empty_reply"
+    if status == 404 or "model_not_found" in blob or "does not exist" in blob:
+        return "bad_model"
+    return "other"
+
+
 @app.post("/api/admin/ai-providers/test")
 async def admin_test_ai_providers(admin: User = Depends(get_admin_user)):
     """Live-check every grading provider and report exactly why each fails.
@@ -4710,23 +5460,30 @@ async def admin_test_ai_providers(admin: User = Depends(get_admin_user)):
     async def check(provider: str) -> dict:
         fn, key, model = _grader_backend(provider)
         if not _key_is_usable(key):
-            return {"ok": False, "model": model,
+            return {"ok": False, "model": model, "reason": "no_key",
+                    "balance": {"supported": provider == "deepseek",
+                                "error": "No usable API key."},
                     "error": "No usable API key — .env is empty or still holds "
                              "a placeholder like 'your_..._key'."}
-        loop = asyncio.get_event_loop()
+        # The balance call is independent of the completion, so a rejected key
+        # still reports whichever of the two answers.
+        balance = await provider_balance(provider)
         try:
             out = await asyncio.wait_for(
-                loop.run_in_executor(
-                    None, fn, model,
-                    "Reply with the single word: ok",
-                    "Reply with the single word: ok"),
+                run_ai(fn, model,
+                       "Reply with the single word: ok",
+                       "Reply with the single word: ok"),
                 timeout=30)
-            return {"ok": True, "model": model, "sample": (out or "").strip()[:60]}
+            return {"ok": True, "model": model, "balance": balance,
+                    "sample": (out or "").strip()[:60]}
         except asyncio.TimeoutError:
-            return {"ok": False, "model": model,
+            return {"ok": False, "model": model, "reason": "timeout",
+                    "balance": balance,
                     "error": "Timed out after 30s — provider unreachable from this host."}
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "model": model,
+                    "reason": classify_provider_error(exc),
+                    "balance": balance,
                     "error": f"{type(exc).__name__}: {_scrub_secrets(exc)}"}
 
     graders = sorted({p for k, opts in PROVIDER_OPTIONS.items()
@@ -6990,7 +7747,7 @@ async def theme_access(theme_id: str,
     t = res.scalar_one_or_none()
     if not t:
         raise HTTPException(status_code=404, detail="Theme not found")
-    allowed = (not t.is_premium) or (user.subscription_status == "premium")
+    allowed = (not t.is_premium) or is_premium(user)
     return {"theme": _row_to_dict(t), "allowed": allowed}
 
 

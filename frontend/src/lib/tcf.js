@@ -12,6 +12,11 @@ export const WRITING_TASKS = {
 
 export const WRITING_TOTAL_SECONDS = 60 * 60;
 
+/* Free writing sits outside the three tâches, so it has no official range.
+ * Its ceiling is tâche 3's — the exam never asks for more than 180 words — so
+ * past 180 the editor warns, and at 200 it stops accepting input entirely. */
+export const FREE_WRITING = { warnWords: 180, maxWords: 200 };
+
 export const SPEAKING_TASKS = {
   1: { prepSeconds: 0, speakSeconds: 120, name: 'Tâche 1 — Entretien dirigé' },
   2: { prepSeconds: 120, speakSeconds: 210, name: 'Tâche 2 — Exercice en interaction' },
@@ -43,6 +48,33 @@ export function wordStatus(text, taskType) {
     };
   }
   return { words, state: 'ok', key: 'words.ok', vars: { min, max }, capped: false };
+}
+
+/* Cut a text down to at most `max` words. Truncating rather than rejecting
+ * the whole change keeps a long paste usable: the learner gets the first 200
+ * words instead of nothing. Slicing at the offending word's index preserves
+ * the paragraph breaks a split/join would flatten. */
+export function clampWords(text, max) {
+  if (!text) return text;
+  const re = /\S+/g;
+  let n = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    n += 1;
+    if (n > max) return text.slice(0, m.index).replace(/\s+$/, '');
+  }
+  return text;
+}
+
+/* Word count against the free-writing ceiling. No `capped` flag: with no
+ * tâche there is no official range for the grader to penalise against. */
+export function freeWordStatus(text) {
+  const { warnWords: warn, maxWords: max } = FREE_WRITING;
+  const words = countWords(text);
+  if (words === 0) return { words, state: 'empty', key: null, vars: null };
+  if (words >= max) return { words, state: 'over', key: 'words.freeMax', vars: { max } };
+  if (words > warn) return { words, state: 'warn', key: 'words.freeOver', vars: { n: words - warn, warn } };
+  return { words, state: 'ok', key: null, vars: null };
 }
 
 export const fmtClock = (s) =>

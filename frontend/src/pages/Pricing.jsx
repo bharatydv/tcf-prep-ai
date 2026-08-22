@@ -1,9 +1,12 @@
-import { Link } from 'react-router-dom';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { CheckCircle } from '@phosphor-icons/react';
+import { toast } from 'sonner';
+import { api, errMsg } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
-import { PLANS } from '../lib/plans';
+import { useBillingPlans } from '../lib/plans';
 
 const FEATURE_KEYS = ['pricing.feature1', 'pricing.feature2', 'pricing.feature3', 'pricing.feature4'];
 const FAQ_KEYS = [
@@ -16,7 +19,34 @@ const FAQ_KEYS = [
 export default function Pricing() {
   const { user } = useAuth();
   const t = useT();
+  const navigate = useNavigate();
+  const { plans, configured, loading } = useBillingPlans();
+  const [busy, setBusy] = useState('');
   const cta = user ? '/dashboard' : '/register';
+
+  /* Opens the mandate at Cashfree and hands the browser over to it. Nothing is
+     granted here — the signed webhook does that — so there is no success path
+     to fake if this call is tampered with. */
+  const subscribe = async (planId) => {
+    if (!user) return navigate('/register');
+    if (busy) return;
+    setBusy(planId);
+    try {
+      const { data } = await api.post('/api/billing/subscribe', { plan_id: planId });
+      if (data?.auth_link) {
+        window.location.assign(data.auth_link);
+        return;
+      }
+      // A subscription with no authorisation link cannot be paid, and sending
+      // the learner nowhere silently is how "I paid and nothing happened"
+      // reports start.
+      toast.error(t('billing.noLink'));
+    } catch (err) {
+      toast.error(errMsg(err, t('billing.failed')));
+    } finally {
+      setBusy('');
+    }
+  };
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-12">
@@ -28,19 +58,23 @@ export default function Pricing() {
 
       {/* Selling a plan that cannot be bought sends people to a dead end at the
           exact moment they decide to pay. Say so before the cards, not in a
-          collapsed FAQ item underneath them. */}
-      <div className="mx-auto mt-6 max-w-2xl rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-center"
-        data-testid="pricing-unavailable-notice">
-        <p className="text-sm font-semibold text-amber-900">
-          {t('pricing.noticeTitle')}
-        </p>
-        <p className="mt-1 text-sm text-amber-800">
-          {t('pricing.noticeBody')}
-        </p>
-      </div>
+          collapsed FAQ item underneath them. Now driven by whether the server
+          actually holds payment credentials, rather than a hardcoded flag that
+          someone has to remember to flip. */}
+      {!loading && !configured && (
+        <div className="mx-auto mt-6 max-w-2xl rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-center"
+          data-testid="pricing-unavailable-notice">
+          <p className="text-sm font-semibold text-amber-900">
+            {t('pricing.noticeTitle')}
+          </p>
+          <p className="mt-1 text-sm text-amber-800">
+            {t('pricing.noticeBody')}
+          </p>
+        </div>
+      )}
 
       <div className="mt-12 grid items-center gap-6 md:grid-cols-3">
-        {PLANS.map((p) => (
+        {plans.map((p) => (
           <div key={p.name}
             className={`card relative overflow-hidden ${p.popular ? 'z-10 ring-4 ring-primary md:scale-110' : ''}`}
             data-testid={`plan-${p.name.toLowerCase()}`}>
@@ -50,7 +84,21 @@ export default function Pricing() {
             )}
             <div className={`bg-gradient-to-r ${p.grad} px-6 py-7 text-white`}>
               <h2 className="font-heading text-2xl font-bold">{p.name}</h2>
-              <p className="mt-2"><span className="font-heading text-4xl font-bold">{p.price}</span><span className="text-white/80"> / {t(p.durationKey)}</span></p>
+              <p className="mt-2">
+                <span className="font-heading text-4xl font-bold">{p.price}</span>
+                {/* Only rendered when the introductory rate actually applies,
+                    so no card ever strikes through a price equal to the one
+                    printed next to it. */}
+                {p.wasPrice && (
+                  <span className="ml-2 align-middle text-lg text-white/60 line-through">{p.wasPrice}</span>
+                )}
+                <span className="text-white/80"> / {t(p.durationKey)}</span>
+              </p>
+              {p.wasPrice && (
+                <p className="mt-1 inline-block rounded-full bg-white/20 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                  {t('pricing.firstTime')}
+                </p>
+              )}
               <p className="mt-1 text-sm font-semibold text-white/90">+ {t('pricing.bonus', { n: p.bonus })}</p>
             </div>
             <ul className="space-y-3 p-6 text-sm">
@@ -61,11 +109,19 @@ export default function Pricing() {
               ))}
             </ul>
             <div className="px-6 pb-6">
-              <button disabled
-                className="w-full cursor-not-allowed rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm font-semibold text-gray-400"
-                data-testid={`plan-cta-${p.name.toLowerCase()}`}>
-                {t('pricing.comingSoon')}
-              </button>
+              {configured ? (
+                <button onClick={() => subscribe(p.id)} disabled={Boolean(busy)}
+                  className="btn-primary w-full justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600 disabled:opacity-60"
+                  data-testid={`plan-cta-${p.name.toLowerCase()}`}>
+                  {busy === p.id ? t('billing.redirecting') : t('pricing.subscribe')}
+                </button>
+              ) : (
+                <button disabled
+                  className="w-full cursor-not-allowed rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm font-semibold text-gray-400"
+                  data-testid={`plan-cta-${p.name.toLowerCase()}`}>
+                  {t('pricing.comingSoon')}
+                </button>
+              )}
             </div>
           </div>
         ))}

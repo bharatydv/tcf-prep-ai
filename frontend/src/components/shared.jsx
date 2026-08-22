@@ -3,7 +3,7 @@ import { Link, NavLink, Navigate, useLocation, useNavigate } from 'react-router-
 import { Fire, SignOut, List, X, SquaresFour, ArrowLeft } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 import { ACCENTS, CATEGORY_META, announcePaywall, paywallDetail } from '../lib/api';
-import { WRITING_TASKS, countWords, wordStatus } from '../lib/tcf';
+import { FREE_WRITING, WRITING_TASKS, countWords, freeWordStatus, wordStatus } from '../lib/tcf';
 import { LANGUAGES, useI18n, useT } from '../i18n';
 
 /* --------------------------------------------------------- ComingSoon ---- */
@@ -323,10 +323,12 @@ export function CreditsBadge({ className = '' }) {
 /* Live word count against a tâche's official TCF range. `capped` mirrors the
    server-side rule, so the learner sees the penalty before submitting rather
    than discovering it in the result. */
-export function WordCountBar({ text, taskType, className = '' }) {
+export function WordCountBar({ text, taskType, free = false, className = '' }) {
   const t = useT();
-  const { words, state, key: msgKey, vars, capped } = wordStatus(text, taskType);
-  const spec = WRITING_TASKS[taskType];
+  const { words, state, key: msgKey, vars, capped } = free
+    ? { ...freeWordStatus(text), capped: false }
+    : wordStatus(text, taskType);
+  const spec = free ? { minWords: 0, maxWords: FREE_WRITING.maxWords } : WRITING_TASKS[taskType];
   if (!spec) {
     return (
       <p className={`text-xs text-gray-500 ${className}`} data-testid="word-count">
@@ -348,7 +350,9 @@ export function WordCountBar({ text, taskType, className = '' }) {
     <div className={className} data-testid="word-count">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-xs">
         <span className={`font-semibold tabular-nums ${tone}`}>
-          {t('words.range', { n: words, min: spec.minWords, max: spec.maxWords })}
+          {free
+            ? t('words.freeRange', { n: words, max: spec.maxWords })
+            : t('words.range', { n: words, min: spec.minWords, max: spec.maxWords })}
         </span>
         <span className={tone}>{msgKey ? t(msgKey, vars) : ''}</span>
       </div>

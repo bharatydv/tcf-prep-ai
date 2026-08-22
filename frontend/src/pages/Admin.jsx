@@ -213,6 +213,22 @@ function AIProviders() {
                   <span className="ml-2 font-mono text-xs font-normal text-gray-500">{r.model}</span>
                 </p>
                 {!r.ok && <p className="mt-1 break-words text-xs text-red-700">{r.error}</p>}
+                {!r.ok && REASON_KEY[r.reason] && (
+                  <p className="mt-1 text-xs font-bold text-red-800">{t(REASON_KEY[r.reason])}</p>
+                )}
+                {r.balance && (
+                  <p className="mt-1 text-xs text-gray-600" data-testid={`ai-balance-${p}`}>
+                    {!r.balance.supported
+                      ? t('admin.balanceNa')
+                      : r.balance.error
+                        ? t('admin.balanceErr', { error: r.balance.error })
+                        : t('admin.balanceIs', {
+                          total: r.balance.total,
+                          currency: r.balance.currency || '',
+                          state: t(r.balance.is_available ? 'admin.balanceOk' : 'admin.balanceEmpty'),
+                        })}
+                  </p>
+                )}
               </div>
             ))}
             {!tests && Object.entries(data.last_errors || {}).map(([p, err]) => (
@@ -227,6 +243,18 @@ function AIProviders() {
     </div>
   );
 }
+
+/* Why a provider check failed, in words an operator can act on. The raw
+   provider error is shown too, but it is rarely a sentence anyone can use. */
+const REASON_KEY = {
+  no_key: 'admin.reasonNoKey',
+  bad_key: 'admin.reasonBadKey',
+  no_credit: 'admin.reasonNoCredit',
+  rate_limited: 'admin.reasonRateLimited',
+  timeout: 'admin.reasonTimeout',
+  empty_reply: 'admin.reasonEmptyReply',
+  bad_model: 'admin.reasonBadModel',
+};
 
 /* ---------------------------------------------------------------- Users ---- */
 function Users() {

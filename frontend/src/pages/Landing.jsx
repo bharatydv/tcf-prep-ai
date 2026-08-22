@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Microphone, PenNib, GraduationCap, CheckCircle,
@@ -37,30 +37,37 @@ function Reveal({ children, delay = 0, className = '' }) {
 }
 
 /* ------------------------------------------------------------ score ring ---- */
-function ScoreRing({ value = 82, size = 92, label = '/100' }) {
+function ScoreRing({ value = 82, max = 100, size = 92, label = '/100', caption, to = '#22C55E' }) {
   const [ref, inView] = useInView(0.6);
+  const gradId = `ringGrad-${useId().replace(/:/g, '')}`;
   const r = (size - 12) / 2;
   const c = 2 * Math.PI * r;
+  const pct = Math.min(1, Math.max(0, value / max));
   return (
-    <div ref={ref} className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#EDE9FE" strokeWidth="9" />
-        <circle
-          cx={size / 2} cy={size / 2} r={r} fill="none" stroke="url(#ringGrad)" strokeWidth="9"
-          strokeLinecap="round" strokeDasharray={c} className="ring-fg"
-          strokeDashoffset={inView ? c * (1 - value / 100) : c}
-        />
-        <defs>
-          <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#7C3AED" />
-            <stop offset="100%" stopColor="#22C55E" />
-          </linearGradient>
-        </defs>
-      </svg>
-      <div className="absolute text-center leading-none">
-        <span className="font-heading text-2xl font-bold text-gray-900">{value}</span>
-        <span className="block text-[10px] text-gray-400">{label}</span>
+    <div ref={ref} className="inline-flex flex-col items-center">
+      <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
+        <svg width={size} height={size} className="-rotate-90">
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#EDE9FE" strokeWidth="9" />
+          <circle
+            cx={size / 2} cy={size / 2} r={r} fill="none" stroke={`url(#${gradId})`} strokeWidth="9"
+            strokeLinecap="round" strokeDasharray={c} className="ring-fg"
+            strokeDashoffset={inView ? c * (1 - pct) : c}
+          />
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="#7C3AED" />
+              <stop offset="100%" stopColor={to} />
+            </linearGradient>
+          </defs>
+        </svg>
+        <div className="absolute text-center leading-none">
+          <span className="font-heading text-2xl font-bold text-gray-900">{value}</span>
+          <span className="block text-[10px] text-gray-400">{label}</span>
+        </div>
       </div>
+      {caption && (
+        <span className="mt-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-400">{caption}</span>
+      )}
     </div>
   );
 }
@@ -273,13 +280,22 @@ export default function Landing() {
                   <span className="flex items-center gap-1.5 text-primary"><span className="h-2 w-2 rounded-full bg-primary" /> {t('land.writtenTest')}</span>
                   <span className="flex items-center gap-1.5 text-green-600">▲ {t('land.aiEvaluation')}</span>
                 </div>
-                <div className="mt-4 space-y-2.5">
-                  {[100, 84, 92, 68].map((w, i) => (
-                    <div key={i} className="h-2 rounded-full bg-gray-100"><div className="h-2 rounded-full bg-violet-200" style={{ width: `${w}%` }} /></div>
-                  ))}
+                <p className="mt-4 text-[11px] leading-relaxed text-gray-600">
+                  Je veux <s className="text-rose-400 decoration-rose-300">écris</s>{' '}
+                  <span className="rounded bg-emerald-50 px-1 font-semibold text-emerald-600">écrire</span> pour exprimer mon
+                  raisonnement. Hier, il <s className="text-rose-400 decoration-rose-300">a allé</s>{' '}
+                  <span className="rounded bg-emerald-50 px-1 font-semibold text-emerald-600">est allé</span> à la réunion et il a
+                  parlé <s className="text-rose-400 decoration-rose-300">de le</s>{' '}
+                  <span className="rounded bg-emerald-50 px-1 font-semibold text-emerald-600">du</span> projet avec ses collègues.
+                </p>
+                <p className="mt-3 flex items-center gap-1.5 text-[10px] font-semibold text-emerald-600">
+                  <CheckCircle size={13} weight="fill" /> {t('land.errorsFixed', { count: 3 })}
+                </p>
+                <p className="mt-4 text-center text-[10px] uppercase tracking-wider text-gray-400">{t('land.estimatedScore')}</p>
+                <div className="mt-2 flex items-start justify-center gap-6">
+                  <ScoreRing value={9} max={20} size={78} label="/20" caption={t('land.simScoreLabel')} />
+                  <ScoreRing value={6} max={10} size={78} label="CLB" caption={t('land.simClbLabel')} to="#D946EF" />
                 </div>
-                <div className="mt-5 flex items-center justify-center"><ScoreRing value={82} size={84} /></div>
-                <p className="mt-1 text-center text-[10px] uppercase tracking-wider text-gray-400">{t('land.estimatedScore')}</p>
               </div>
             </Reveal>
            
@@ -310,7 +326,6 @@ export default function Landing() {
                   </Reveal>
                 ))}
               </ul>
-              <span aria-hidden className="pointer-events-none absolute -bottom-4 right-0 select-none text-[120px] leading-none text-fuchsia-200/70 sm:text-[150px]">🗼</span>
             </div>
 
             {/* personalised plan card */}
@@ -378,7 +393,12 @@ export default function Landing() {
               body={<>
                 <p className="text-xs leading-relaxed text-violet-200/80">{t('land.writeBlurb')}</p>
                 <div className="mt-4 rounded-xl bg-white p-3 text-[11px] leading-relaxed text-gray-700">
-                  Je veux <span className="rounded bg-red-100 px-1 line-through">écris</span> <span className="rounded bg-green-100 px-1 font-semibold">écrire</span> pour exprimer mon raisonnement à la situation actuelle.
+                  Je veux <span className="rounded bg-red-100 px-1 line-through">écris</span>{' '}
+                  <span className="rounded bg-green-100 px-1 font-semibold">écrire</span> pour exprimer mon raisonnement sur la
+                  situation actuelle. <span className="rounded bg-red-100 px-1 line-through">Malgré que</span>{' '}
+                  <span className="rounded bg-green-100 px-1 font-semibold">Bien que</span> le sujet soit difficile, j’ai{' '}
+                  <span className="rounded bg-red-100 px-1 line-through">beaucoup des</span>{' '}
+                  <span className="rounded bg-green-100 px-1 font-semibold">beaucoup d’</span>idées.
                 </div>
                 <div className="mt-3 flex flex-wrap gap-1.5 text-[10px] font-bold">
                   {[['land.metricGrammar', '92%'], ['land.metricVocab', '85%'], ['land.metricCoherence', '90%']].map(([k, v]) => (

@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { X, Lock, CheckCircle } from '@phosphor-icons/react';
 import { PAYWALL_EVENT } from '../lib/api';
-import { PLANS } from '../lib/plans';
+import { useBillingPlans } from '../lib/plans';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 
@@ -25,6 +25,7 @@ const TITLE_KEY = {
 export default function Paywall() {
   const t = useT();
   const { user } = useAuth();
+  const { plans, configured } = useBillingPlans();
   const [block, setBlock] = useState(null);
 
   useEffect(() => {
@@ -83,7 +84,7 @@ export default function Paywall() {
           <p className="mt-4 text-sm leading-relaxed text-gray-600">{t('pay.body')}</p>
 
           <div className="mt-4 space-y-2">
-            {PLANS.map((plan) => (
+            {plans.map((plan) => (
               <div key={plan.name}
                 className="flex items-center gap-3 rounded-2xl border border-violet-100 px-4 py-3">
                 <span className={`h-8 w-8 shrink-0 rounded-xl bg-gradient-to-br ${plan.grad}`} />
@@ -93,17 +94,24 @@ export default function Paywall() {
                     {t(plan.durationKey)} · {t('pricing.bonus', { n: plan.bonus })}
                   </p>
                 </div>
-                <span className="font-heading text-sm font-extrabold text-gray-900">{plan.price}</span>
+                <span className="shrink-0 text-right">
+                  {plan.wasPrice && (
+                    <span className="mr-1.5 text-[11px] text-gray-400 line-through">{plan.wasPrice}</span>
+                  )}
+                  <span className="font-heading text-sm font-extrabold text-gray-900">{plan.price}</span>
+                </span>
               </div>
             ))}
           </div>
 
-          {/* Payment is not open yet. Saying so here is the difference between
-              a plan chooser and a dead button. */}
-          <p className="mt-3 flex items-start gap-1.5 text-[11px] leading-relaxed text-gray-500">
-            <CheckCircle size={14} weight="fill" className="mt-0.5 shrink-0 text-primary" />
-            {t('pay.notLive')}
-          </p>
+          {/* Only while payment really is closed — once Cashfree is configured
+              this line would be a lie sitting above a working buy button. */}
+          {!configured && (
+            <p className="mt-3 flex items-start gap-1.5 text-[11px] leading-relaxed text-gray-500">
+              <CheckCircle size={14} weight="fill" className="mt-0.5 shrink-0 text-primary" />
+              {t('pay.notLive')}
+            </p>
+          )}
         </div>
 
         <div className="flex flex-col gap-2 border-t border-gray-100 px-6 py-4 sm:flex-row-reverse">
