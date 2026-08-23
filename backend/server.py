@@ -17,7 +17,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone, date
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 import bcrypt
 import base64
@@ -1535,7 +1535,13 @@ improvement_suggestions: 3-5 concrete English tips. linking_words: French connec
 # A full grading reply lists every error with an explanation, which can run
 # past 2000 tokens on a long Tache 3. Truncation lands mid-JSON, which used
 # to surface as a bare "AI unavailable" with the provider blamed.
-GRADER_MAX_TOKENS = int(os.environ.get("GRADER_MAX_TOKENS", "4000"))
+#
+# The default is well above what a grade needs because the reasoning models now
+# used for grading draw their thinking from this same budget: 4000 was enough
+# for the answer and not always enough for the thinking that precedes it, and
+# what came back was a reply cut off mid-JSON. Unused budget costs nothing —
+# only the tokens actually generated are billed.
+GRADER_MAX_TOKENS = int(os.environ.get("GRADER_MAX_TOKENS", "8000"))
 
 AI_UNAVAILABLE_DETAIL = ("Correction indisponible : le correcteur IA a refusé la "
                          "requête (clé API ou quota du fournisseur). "
@@ -1761,10 +1767,14 @@ def _call_openai_compatible(base_url: str, api_key: str, model: str,
         return content
 
     # Some providers put chain-of-thought in a sibling field and leave content
-    # empty; the JSON we want may be in there.
+    # empty; the JSON we want may be in there. But a thinking model that ran
+    # out of budget mid-thought ALSO arrives this way, and handing that prose
+    # back turned a diagnosable "raise GRADER_MAX_TOKENS" into an unreadable
+    # reply the learner was told to retry. Only pass it on when it actually
+    # carries the answer.
     reasoning = (getattr(choice.message, "reasoning_content", None)
                  or getattr(choice.message, "reasoning", None) or "").strip()
-    if reasoning:
+    if reasoning and "{" in reasoning:
         log.warning("%s returned empty content; using reasoning_content "
                     "(finish_reason=%s)", model, choice.finish_reason)
         return reasoning
@@ -1774,6 +1784,9 @@ def _call_openai_compatible(base_url: str, api_key: str, model: str,
     if choice.finish_reason == "length":
         hint = (f" The {GRADER_MAX_TOKENS}-token budget was used up before any "
                 f"answer was written — raise GRADER_MAX_TOKENS.")
+        if reasoning:
+            hint += (f" It was spent thinking: {len(reasoning)} characters of "
+                     f"reasoning arrived and no answer.")
     raise RuntimeError(
         f"{model} returned an empty completion "
         f"(finish_reason={choice.finish_reason}, usage={usage}).{hint}")
@@ -1881,6 +1894,15 @@ async def _grade_with_provider(provider: str, system_prompt: str,
     return None
 
 
+_LEVEL_RE = re.compile(r"\b([ABC][12])\b")
+
+
+def _normalise_level(raw) -> Optional[str]:
+    """The CEFR level inside whatever the grader wrote, or None."""
+    hit = _LEVEL_RE.search(str(raw).upper())
+    return hit.group(1) if hit and hit.group(1) in CEFR_LEVELS else None
+
+
 def _validate_analysis(data: dict) -> dict:
     errors = []
     for e in data.get("errors", []) or []:
@@ -1901,12 +1923,17 @@ def _validate_analysis(data: dict) -> dict:
     if data.get("overall_score") is None or data.get("tcf_level") is None:
         raise ValueError("grader response missing overall_score/tcf_level")
     try:
-        score = max(0, min(100, int(data["overall_score"])))
+        score = max(0, min(100, int(float(str(data["overall_score"]).strip()
+                                         .split("/")[0].replace("%", "")))))
     except (TypeError, ValueError):
         raise ValueError("grader returned a non-numeric overall_score")
-    level = data["tcf_level"]
-    if level not in set(CEFR_LEVELS):
-        raise ValueError(f"grader returned an unknown level: {level!r}")
+    # "b1", "B1+", "Niveau B2" and "B2 (autonome)" all mean a level this
+    # rubric has. Rejecting them threw away a correction the model had in
+    # fact produced, and told the learner its reply was illegible.
+    level = _normalise_level(data["tcf_level"])
+    if level is None:
+        raise ValueError(
+            f"grader returned an unknown level: {data['tcf_level']!r}")
     return {
         "errors": errors,
         "overall_score": score,
@@ -1915,6 +1942,49 @@ def _validate_analysis(data: dict) -> dict:
         "linking_words": [str(x) for x in (data.get("linking_words") or [])][:12],
         "vocabulary_suggestions": [str(x) for x in (data.get("vocabulary_suggestions") or [])][:12],
     }
+
+
+# Appended to the prompt on the single retry an unreadable reply earns.
+JSON_RETRY_NUDGE = ("\n\nIMPORTANT: your previous reply could not be parsed. "
+                    "Return ONLY the JSON object - start with { and end with }, "
+                    "no markdown fence, no preamble, no commentary.")
+
+
+async def _graded_json(provider: str, system_prompt: str, prompt: str,
+                       validate) -> Tuple[Optional[dict], Optional[str]]:
+    """Grade, read the JSON back, and re-ask once if it cannot be read.
+
+    A grader that wraps its object in a sentence or stops mid-JSON has almost
+    always made a formatting slip rather than refused the work, and asking
+    again usually gets a clean reply. It used to get one attempt, so a slip
+    cost the learner the whole correction and the credit that paid for it.
+
+    Returns (analysis, None) on success, or (None, reason) where reason is
+    "unavailable" when the provider never answered and "bad_reply" when it
+    answered with something unreadable twice. The detail is left on
+    _PROVIDER_LAST_ERROR and in the log either way.
+    """
+    last_exc = None
+    for attempt in range(2):
+        raw = await _grade_with_provider(
+            provider, system_prompt,
+            prompt if attempt == 0 else prompt + JSON_RETRY_NUDGE)
+        # No reply at all is a key, quota or network problem, and _grade_with_
+        # provider has already recorded which. Re-asking cannot help.
+        if raw is None:
+            return None, "unavailable"
+        try:
+            return validate(_extract_json(raw)), None
+        except Exception as exc:  # noqa: BLE001
+            # Log what actually came back. Without this the provider looks dead
+            # when in fact it replied and only the shape was wrong.
+            last_exc = exc
+            log.warning("Could not parse grading JSON (%s, attempt %s/2): %s "
+                        "| reply[:400]=%r", provider, attempt + 1, exc,
+                        _scrub_secrets(raw)[:400])
+    _PROVIDER_LAST_ERROR[provider] = (
+        f"Replied, but the response could not be parsed: {last_exc}")
+    return None, "bad_reply"
 
 
 async def analyze_text_with_ai(text: str, topic: Optional[str] = None, db=None,
@@ -1931,26 +2001,23 @@ async def analyze_text_with_ai(text: str, topic: Optional[str] = None, db=None,
                    f"{spec['min_words']}-{spec['max_words']} words.\n\n")
     prompt = f"{header}Text to grade:\n{text}"
     provider = (await get_provider(db, "writing_grader_provider")) if db is not None else WRITING_GRADER_PROVIDER
-    raw = await _grade_with_provider(provider, GRADER_SYSTEM, prompt)
-    if raw is None:
-        return dict(FALLBACK_ANALYSIS)
-    try:
-        data = _extract_json(raw)
+
+    # The caps run inside the parse step on purpose: they are part of turning a
+    # reply into a grade, so a retry that produces a readable reply gets them
+    # applied too.
+    def build(data: dict) -> dict:
         result = _validate_analysis(data)
-        _, _, model = _grader_backend(provider)
-        result["ai_provider"] = provider
-        result["ai_model"] = model
         result = apply_error_cap(result)
-        result = apply_writing_length_cap(result, text, task_type)
-        return result
-    except Exception as exc:  # noqa: BLE001
-        # Log what actually came back. Without this the provider looks dead
-        # when in fact it replied and only the shape was wrong.
-        log.warning("Could not parse grading JSON (%s): %s | reply[:400]=%r",
-                    provider, exc, _scrub_secrets(raw)[:400])
-        _PROVIDER_LAST_ERROR[provider] = (
-            f"Replied, but the response could not be parsed: {exc}")
-        return {**dict(FALLBACK_ANALYSIS), "ai_error": "bad_reply"}
+        return apply_writing_length_cap(result, text, task_type)
+
+    result, reason = await _graded_json(provider, GRADER_SYSTEM, prompt, build)
+    if result is None:
+        return ({**dict(FALLBACK_ANALYSIS), "ai_error": "bad_reply"}
+                if reason == "bad_reply" else dict(FALLBACK_ANALYSIS))
+    _, _, model = _grader_backend(provider)
+    result["ai_provider"] = provider
+    result["ai_model"] = model
+    return result
 
 
 STATIC_DISTRACTORS = {
