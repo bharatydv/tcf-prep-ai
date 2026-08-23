@@ -23,10 +23,6 @@ const TITLE_KEY = {
 };
 
 export default function Paywall() {
-  const t = useT();
-  const { user } = useAuth();
-  const { plans, configured } = useBillingPlans();
-  const feePercent = plans.find((p) => p.checkout?.fee_percent)?.checkout?.fee_percent;
   const [block, setBlock] = useState(null);
 
   useEffect(() => {
@@ -42,14 +38,32 @@ export default function Paywall() {
     return () => window.removeEventListener('keydown', onKey);
   }, [block]);
 
+  // Nothing is fetched until a paywall actually fires. This component is
+  // mounted in the app shell on every route, so calling the catalogue hook up
+  // here spent two requests on every page view - including the landing page,
+  // where the eligibility call 401s for a visitor who has no account yet.
   if (!block) return null;
+  return <PaywallDialog block={block} onClose={() => setBlock(null)} />;
+}
+
+function PaywallDialog({ block, onClose }) {
+  const t = useT();
+  const { user } = useAuth();
+  const { plans, configured } = useBillingPlans();
+  const feePercent = plans.find((p) => p.checkout?.fee_percent)?.checkout?.fee_percent;
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   // The 402 carries a fresh count; the cached user object is a fallback for it.
   const trial = block.trial || user?.trial || null;
   const line = (key) => (trial?.[key]
     ? `${Math.min(trial[key].used, trial[key].limit)}/${trial[key].limit}` : null);
   const title = t(TITLE_KEY[block.kind] || 'pay.title');
-  const close = () => setBlock(null);
+  const close = onClose;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/60 p-4 backdrop-blur-sm"

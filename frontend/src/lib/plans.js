@@ -105,6 +105,36 @@ export const PLANS = [
  * what decides whether the buttons do anything. `firstTime` defaults to true:
  * a signed-out visitor has by definition never paid, so showing them the
  * introductory price is both the truthful number and the useful one. */
+/* Two components mounting together asked for the catalogue twice, and each
+ * ask is two requests: eligibility, then the plans. The landing page renders
+ * plan cards while the paywall sits mounted in the app shell, so one view cost
+ * four calls for one answer.
+ *
+ * Only the in-flight promise is shared, never a settled result. Caching the
+ * answer would be the obvious next step and would be wrong: whether this
+ * account still qualifies for the introductory price changes the moment
+ * somebody signs in, and a stale cache would quote a price the server will not
+ * honour. Sharing the request in flight removes the duplication with no window
+ * in which a stale price can be shown. */
+let inFlight = null;
+
+function loadCatalogue() {
+  if (!inFlight) {
+    inFlight = fetchCatalogue().finally(() => { inFlight = null; });
+  }
+  return inFlight;
+}
+
+async function fetchCatalogue() {
+  // Eligibility needs a session; a signed-out visitor 401s here and keeps
+  // the introductory price, which is correct for them.
+  const eligible = await api.get('/api/billing/subscription')
+    .then(({ data }) => data.first_time_eligible !== false)
+    .catch(() => true);
+  const { data } = await api.get('/api/billing/plans');
+  return { data, eligible };
+}
+
 export function useBillingPlans() {
   const [state, setState] = useState({
     plans: PLANS, currency: 'USD', configured: false, firstTime: true, loading: true,
@@ -114,14 +144,11 @@ export function useBillingPlans() {
     let cancelled = false;
 
     const load = async () => {
-      // Eligibility needs a session; a signed-out visitor 401s here and keeps
-      // the introductory price, which is correct for them.
-      const eligible = await api.get('/api/billing/subscription')
-        .then(({ data }) => data.first_time_eligible !== false)
-        .catch(() => true);
-
+      let eligible = true;
       try {
-        const { data } = await api.get('/api/billing/plans');
+        const loaded = await loadCatalogue();
+        const { data } = loaded;
+        eligible = loaded.eligible;
         if (cancelled) return;
         const currency = data.currency || 'USD';
         const plans = (data.plans || []).map((p) => {
