@@ -3664,6 +3664,29 @@ MIGRATIONS = [
     "DOUBLE PRECISION DEFAULT 0",
     "UPDATE subscriptions SET base_amount = amount "
     "WHERE COALESCE(base_amount, 0) = 0",
+    # Every one of these tables is read by user_id on a page the learner opens
+    # - the dashboard, the history list, the mistake summary, the review queue
+    # - and none of them indexed it. Postgres was scanning the whole table and
+    # filtering, which is free at fifty accounts and is not at five thousand.
+    # IF NOT EXISTS keeps them re-runnable; they are cheap now and would need
+    # CONCURRENTLY once the tables are large.
+    "CREATE INDEX IF NOT EXISTS ix_submissions_user_id "
+    "ON submissions (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_mistakes_user_id ON mistakes (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_exam_attempts_user_id "
+    "ON exam_attempts (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_reading_attempts_user_id "
+    "ON reading_attempts (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_mock_exam_attempts_user_id "
+    "ON mock_exam_attempts (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_review_sessions_user_id "
+    "ON review_sessions (user_id)",
+    # The two hot compound reads: "my newest submissions" and "my due
+    # mistakes". A plain user_id index still sorts; these do not.
+    "CREATE INDEX IF NOT EXISTS ix_submissions_user_created "
+    "ON submissions (user_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_mistakes_user_due "
+    "ON mistakes (user_id, srs_due_at)",
 ]
 
 
@@ -5519,6 +5542,19 @@ def _is_cancellation(event_type: str, status: str) -> bool:
     return "CANCEL" in blob
 
 
+def _is_reversal(event_type: str, status: str) -> bool:
+    """A payment being taken back: refund, chargeback or dispute.
+
+    Cancellation and reversal are different events and were not distinguished.
+    Cancelling stops future charges and leaves paid-for access alone, which is
+    right. A refund takes the money back, and leaving the access granted meant
+    a subscription could be bought, used, refunded and kept.
+    """
+    blob = f"{event_type} {status}".upper()
+    return any(word in blob for word in
+               ("REFUND", "CHARGEBACK", "DISPUTE", "REVERS"))
+
+
 # ----------------------------------------------------------------------------
 # Invoices
 # ----------------------------------------------------------------------------
@@ -5700,6 +5736,33 @@ def public_invoice(inv: Invoice) -> dict:
     }
 
 
+async def revoke_premium_for_reversal(db: AsyncSession, user: User,
+                                      row: Subscription,
+                                      plan: dict) -> None:
+    """Take back exactly the access the reversed payment paid for.
+
+    One cycle is removed rather than premium being switched off outright: an
+    account that paid for three cycles and had one refunded keeps the two it
+    still owns. If that leaves the expiry in the past, premium ends now.
+
+    A manual grant carries a NULL expiry and is left alone - it was never paid
+    for through this channel, so a gateway event has no business revoking it.
+    """
+    if user.premium_until is None:
+        log.warning("Reversal on %s left an unlimited grant untouched for %s",
+                    row.subscription_id, user.user_id)
+        return
+    user.premium_until = user.premium_until - plan_period(plan)
+    if user.premium_until <= now_utc():
+        user.subscription_status = "free"
+        log.info("Premium revoked for %s after a reversal on %s",
+                 user.user_id, row.subscription_id)
+    else:
+        log.info("Premium shortened to %s for %s after a reversal on %s",
+                 user.premium_until, user.user_id, row.subscription_id)
+    row.current_period_end = user.premium_until
+
+
 async def issue_invoice(db: AsyncSession, user: User, row: Subscription,
                         payment_reference: Optional[str] = None):
     """Write the receipt for one successful charge, and email it.
@@ -5870,7 +5933,20 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
                           row.subscription_id)
         return {"ok": True, "granted": True}
 
+    # Checked BEFORE cancellation: a refund event often carries a cancelled
+    # status too, and matching that first would have quietly turned every
+    # refund into "stop future charges, keep the access".
+    if _is_reversal(event_type, status):
+        plan = BILLING_PLANS.get(row.plan_id) or BILLING_PLANS["month"]
+        await revoke_premium_for_reversal(db, user, row, plan)
+        row.status = "refunded"
+        row.cancelled_at = row.cancelled_at or now_utc()
+        await db.commit()
+        return {"ok": True, "reversed": True}
+
     if _is_cancellation(event_type, status):
+        # Deliberately not touching premium_until: the learner paid for this
+        # cycle and keeps it to its expiry. Only the renewal stops.
         row.status = "cancelled"
         row.cancelled_at = now_utc()
         await db.commit()
