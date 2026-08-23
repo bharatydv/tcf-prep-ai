@@ -4232,11 +4232,6 @@ async def phone_send(body: PhoneSendIn, user: User = Depends(get_current_user),
     Also the way to correct a wrong number: sending again replaces both the
     number and the outstanding code.
     """
-    if IS_PROD and not SMS_ENABLED:
-        raise HTTPException(
-            status_code=503,
-            detail=("La confirmation par SMS n'est pas encore disponible. "
-                    "Confirmez votre adresse e-mail pour l'instant."))
     phone = normalize_phone(body.phone)
     # A number confirms one account, not many: without this, one handset could
     # verify an unlimited supply of trial accounts.
@@ -4253,9 +4248,31 @@ async def phone_send(body: PhoneSendIn, user: User = Depends(get_current_user),
         .values(phone=phone, phone_verified=False, phone_verified_at=None))
     await db.commit()
     await db.refresh(user)
+
+    # Without an SMS provider the number is attached but not confirmed, rather
+    # than refused outright.
+    #
+    # This used to answer 503 in production when Twilio was not configured,
+    # which deadlocked checkout: Cashfree will not open a mandate without a
+    # phone number, /billing/subscribe refuses without one, and this was the
+    # only way to set one. No customer could complete a purchase, and no
+    # customer could do anything about it.
+    #
+    # Nothing is weakened by attaching it unverified. `phone_verified` gates
+    # no permission anywhere in this file - it records whether a code was ever
+    # entered, and that is all. The uniqueness check above still only counts
+    # VERIFIED numbers, so an unverified one cannot block a real handset from
+    # claiming it later.
+    if not SMS_ENABLED:
+        log.info("Phone saved unverified for %s (no SMS provider configured)",
+                 user.user_id)
+        return {"detail": "Phone saved", "phone": phone, "verified": False,
+                "sms_available": False}
+
     code = await issue_phone_code(db, user.user_id)
     await send_sms(phone, phone_code_body(code))
-    return {"detail": "Code sent", "phone": phone,
+    return {"detail": "Code sent", "phone": phone, "verified": False,
+            "sms_available": True,
             "expires_in_minutes": PHONE_CODE_TTL_MINUTES}
 
 

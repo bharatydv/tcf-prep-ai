@@ -290,3 +290,33 @@ class TestRequestModels:
         names = [n.name for n in tree.body if isinstance(n, ast.ClassDef)]
         dupes = {n for n in names if names.count(n) > 1}
         assert not dupes, f"defined more than once: {sorted(dupes)}"
+
+
+class TestPhoneDoesNotDeadlockCheckout:
+    """Cashfree will not open a mandate without a phone number.
+
+    /billing/subscribe refuses without one, and /auth/phone/send was the only
+    way to set one - but it answered 503 in production unless Twilio was
+    configured. No customer could buy, and no customer could do anything
+    about it.
+    """
+
+    def test_phone_send_does_not_refuse_when_sms_is_unavailable(self):
+        import inspect
+        src = inspect.getsource(m.phone_send)
+        assert "SMS_ENABLED" not in src.split("phone = normalize_phone")[0], \
+            "phone_send refuses before it saves again; checkout is deadlocked"
+
+    def test_verified_phone_gates_no_permission(self):
+        """The reason attaching one unverified is safe.
+
+        If this ever fails, something started depending on phone_verified and
+        the unverified path needs revisiting.
+        """
+        import inspect
+        src = inspect.getsource(m)
+        for line in src.splitlines():
+            stripped = line.strip()
+            if stripped.startswith(("if ", "elif ")) and "phone_verified" in stripped:
+                assert "== True" in stripped, \
+                    f"phone_verified is being used as a gate: {stripped}"
