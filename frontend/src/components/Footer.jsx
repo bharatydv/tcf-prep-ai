@@ -124,7 +124,7 @@ export default function Footer() {
           </ul>
         </div>
       </div>
-      <div className="border-t border-white/10 py-5 text-center text-[11px] text-violet-300/50">
+      <div className="border-t border-white/10 py-5 text-center text-[11px] text-violet-300/75">
         {t('land.copyright', { year: new Date().getFullYear() })}
       </div>
     </footer>

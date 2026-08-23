@@ -41,15 +41,17 @@
          keeps text visible with the fallback stack in the meantime. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Loaded plainly, not with the media="print" + onload="this.media='all'"
+         trick. That trick needs an inline event handler, which the Content
+         Security Policy blocks, so the stylesheet stayed print-only and the
+         site rendered in fallback fonts for every visitor. display=swap in the
+         URL already gives the behaviour the trick was reaching for: text
+         paints immediately in the fallback face and swaps when the web font
+         arrives. The preconnects above keep the request cheap. -->
     <link
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700;800&display=swap"
-      media="print"
-      onload="this.media='all'"
     />
-    <noscript>
-      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700;800&display=swap" />
-    </noscript>
 
     <!-- Identity and product facts, in the served HTML so crawlers that do not
          execute JavaScript can still read them. Per-page Article/FAQ markup is
