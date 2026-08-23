@@ -97,7 +97,7 @@
               "@type": "Offer",
               "price": "0",
               "priceCurrency": "CAD",
-              "description": "5 corrections IA gratuites par mois."
+              "description": "6 corrections IA gratuites pour commencer : 3 à l'écrit et 3 à l'oral."
             }
           }
         ]
@@ -105,27 +105,13 @@
     </script>
   </head>
   <body>
-    <noscript>
-      <h1>prepfrancais — préparation au TEF/TCF Canada</h1>
-      <p>
-        prepfrancais corrige votre expression écrite et orale en français, attribue
-        un niveau CEFR de A1 à C2 et explique chaque erreur, puis vous fait
-        réviser vos propres fautes.
-      </p>
-      <p>
-        <strong>Expression écrite</strong> — 60 minutes pour trois tâches :
-        message court (60–120 mots), article ou lettre (120–150 mots), texte
-        argumentatif (120–180 mots).
-        <strong>Expression orale</strong> — entretien dirigé (2 min), exercice en
-        interaction (3 min 30, après 2 min de préparation), expression d'un point
-        de vue (2 min 30, après 2 min de préparation).
-      </p>
-      <p>
-        Ce site a besoin de JavaScript pour la partie interactive.
-        <a href="/tef-tcf-writing-guide">Lisez le guide de l'expression écrite</a>
-        ou <a href="/blog">consultez le blog</a>.
-      </p>
-    </noscript>
+    <!-- The <noscript> fallback that used to live here has been removed. It
+         existed because every route served an empty React shell, so a crawler
+         without JavaScript had nothing to read. The public routes are
+         prerendered at build time now, so the real page IS the fallback - and
+         keeping the block would have given every page a second, generic <h1>
+         plus a paragraph identical to every other page's, competing with the
+         page's own heading and content. -->
     <div id="root"></div>
   </body>
 </html>

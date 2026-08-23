@@ -1,9 +1,10 @@
 # prepfrancais — https://prepfrancais.com
 
-User-agent: *
-Allow: /
-
 # Signed-in surfaces: nothing to index, and crawling them only burns budget.
+# No blank line inside this group - a blank line ENDS a group, and these rules
+# used to sit after one, which orphaned every Disallow below it. The paths were
+# not actually excluded from anything.
+User-agent: *
 Disallow: /admin
 Disallow: /admin/
 Disallow: /dashboard
@@ -12,26 +13,107 @@ Disallow: /feedback/
 Disallow: /check-writing
 Disallow: /practice/simulator
 Disallow: /api/
+Allow: /
 
-# Answer engines. Allowed on purpose: the guides, blog and exam topics are
+# Answer engines, allowed on purpose: the guides, blog and exam topics are
 # written to be quoted. The public routes are prerendered to static HTML at
-# build time so a crawler that does not run JavaScript can still read them -
-# check a deploy with `curl -s https://prepfrancais.com/ | grep -c TCF`.
+# build time, so a crawler that does not run JavaScript can still read them —
+# check a deploy with:
+#   curl -s https://prepfrancais.com/ | grep -c '<div id="root"></div>'
+#   (0 means prerendered; 1 means it fell back to a client-only build)
+#
+# Each group repeats the Disallow list rather than inheriting it. A crawler
+# obeys exactly ONE group — the most specific one that names it — and ignores
+# every other, including `User-agent: *`. A group containing only `Allow: /`
+# therefore grants that bot the whole site, private surfaces included. These
+# bots are welcome on the public pages, not on a signed-in learner's feedback.
+
 User-agent: GPTBot
+Disallow: /admin
+Disallow: /admin/
+Disallow: /dashboard
+Disallow: /review
+Disallow: /feedback/
+Disallow: /check-writing
+Disallow: /practice/simulator
+Disallow: /api/
 Allow: /
+
 User-agent: OAI-SearchBot
+Disallow: /admin
+Disallow: /admin/
+Disallow: /dashboard
+Disallow: /review
+Disallow: /feedback/
+Disallow: /check-writing
+Disallow: /practice/simulator
+Disallow: /api/
 Allow: /
+
 User-agent: ClaudeBot
+Disallow: /admin
+Disallow: /admin/
+Disallow: /dashboard
+Disallow: /review
+Disallow: /feedback/
+Disallow: /check-writing
+Disallow: /practice/simulator
+Disallow: /api/
 Allow: /
+
 User-agent: Claude-Web
+Disallow: /admin
+Disallow: /admin/
+Disallow: /dashboard
+Disallow: /review
+Disallow: /feedback/
+Disallow: /check-writing
+Disallow: /practice/simulator
+Disallow: /api/
 Allow: /
+
 User-agent: PerplexityBot
+Disallow: /admin
+Disallow: /admin/
+Disallow: /dashboard
+Disallow: /review
+Disallow: /feedback/
+Disallow: /check-writing
+Disallow: /practice/simulator
+Disallow: /api/
 Allow: /
+
 User-agent: Google-Extended
+Disallow: /admin
+Disallow: /admin/
+Disallow: /dashboard
+Disallow: /review
+Disallow: /feedback/
+Disallow: /check-writing
+Disallow: /practice/simulator
+Disallow: /api/
 Allow: /
+
 User-agent: Applebot-Extended
+Disallow: /admin
+Disallow: /admin/
+Disallow: /dashboard
+Disallow: /review
+Disallow: /feedback/
+Disallow: /check-writing
+Disallow: /practice/simulator
+Disallow: /api/
 Allow: /
+
 User-agent: CCBot
+Disallow: /admin
+Disallow: /admin/
+Disallow: /dashboard
+Disallow: /review
+Disallow: /feedback/
+Disallow: /check-writing
+Disallow: /practice/simulator
+Disallow: /api/
 Allow: /
 
 Sitemap: https://prepfrancais.com/sitemap.xml
