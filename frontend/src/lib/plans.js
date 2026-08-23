@@ -43,7 +43,7 @@ export function formatPrice(amount, currency = 'USD') {
 export const PLANS = [
   { id: 'week', name: '1 Week', amount: 20, first_amount: 15, price: '$15', wasPrice: '$20', bonus: 3, ...PLAN_STYLE.week },
   { id: 'month', name: '1 Month', amount: 80, first_amount: 60, price: '$60', wasPrice: '$80', bonus: 8, ...PLAN_STYLE.month },
-  { id: 'quarter', name: '3 Months', amount: 220, first_amount: 180, price: '$180', wasPrice: '$220', bonus: 15, ...PLAN_STYLE.quarter },
+  { id: 'quarter', name: '3 Months', amount: 220, first_amount: 165, price: '$165', wasPrice: '$220', bonus: 15, ...PLAN_STYLE.quarter },
 ];
 
 /* The live catalogue.

@@ -2691,7 +2691,7 @@ BILLING_PLANS = {
               "interval_type": "month", "intervals": 1, "bonus": 8},
     "quarter": {"name": "3 Months",
                 "amount": _billing_price("quarter", "220"),
-                "first_amount": _billing_first_price("quarter", "180"),
+                "first_amount": _billing_first_price("quarter", "165"),
                 "interval_type": "month", "intervals": 3, "bonus": 15},
 }
 
