@@ -3146,6 +3146,12 @@ async def grant_premium(db: AsyncSession, user: User, period: timedelta,
 # Pydantic models
 # ----------------------------------------------------------------------------
 class SubscribeIn(BaseModel):
+    """What /api/billing/subscribe accepts: a plan id, and nothing else.
+
+    The price is never sent by the browser - the server looks it up. See
+    billing_subscribe().
+    """
+
     plan_id: str = Field(min_length=1, max_length=32)
 
 
@@ -3191,7 +3197,16 @@ class ChangeEmailIn(BaseModel):
     password: str = Field(max_length=72)
 
 
-class SubscribeIn(BaseModel):
+class NewsletterIn(BaseModel):
+    """A footer newsletter sign-up.
+
+    Named for the newsletter, not "subscribe". It used to be a second class
+    called SubscribeIn, defined after the billing one - so it replaced it, and
+    /api/billing/subscribe spent its whole life demanding an email address and
+    rejecting the plan_id the checkout button sends. Every purchase attempt
+    returned 422 before reaching any of the payment code.
+    """
+
     email: EmailStr
 
 
@@ -4267,7 +4282,7 @@ async def phone_verify(body: PhoneVerifyIn, user: User = Depends(get_current_use
 # Newsletter
 # ----------------------------------------------------------------------------
 @app.post("/api/newsletter")
-async def subscribe(body: SubscribeIn, db: AsyncSession = Depends(get_db),
+async def subscribe(body: NewsletterIn, db: AsyncSession = Depends(get_db),
                     _rl=Depends(auth_rate_limit)):
     """Record a footer newsletter sign-up.
 

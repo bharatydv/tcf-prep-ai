@@ -252,3 +252,41 @@ class TestRateLimitFallback:
     def test_buckets_do_not_leak_into_each_other(self):
         assert m._memory_rate_check("bucket-a:x", 1, 60) is None
         assert m._memory_rate_check("bucket-b:x", 1, 60) is None
+
+
+# ------------------------------------------------------ request contracts ---
+class TestRequestModels:
+    """The checkout endpoint must accept a plan id and nothing else.
+
+    /api/billing/subscribe spent its whole life returning 422 to every
+    purchase, because a second class named SubscribeIn - the newsletter
+    sign-up - was defined after the billing one and replaced it. Python
+    rebinds a name without complaint, FastAPI validated against whichever
+    class won, and nobody could buy anything.
+    """
+
+    def test_billing_subscribe_accepts_a_plan_id(self):
+        import inspect
+        model = inspect.signature(m.billing_subscribe).parameters["body"].annotation
+        assert "plan_id" in model.model_fields, \
+            f"checkout is validating against {model.__name__}: {list(model.model_fields)}"
+
+    def test_billing_subscribe_does_not_take_an_amount(self):
+        """A price the browser can send is a price the browser can change."""
+        import inspect
+        model = inspect.signature(m.billing_subscribe).parameters["body"].annotation
+        for forbidden in ("amount", "price", "total", "currency"):
+            assert forbidden not in model.model_fields
+
+    def test_no_two_classes_share_a_name(self):
+        """The general form of the bug above, for every model in the module.
+
+        A duplicate class definition is silent: the later one wins, every
+        earlier reference now means something else, and nothing warns.
+        """
+        import ast
+        import inspect
+        tree = ast.parse(inspect.getsource(m))
+        names = [n.name for n in tree.body if isinstance(n, ast.ClassDef)]
+        dupes = {n for n in names if names.count(n) > 1}
+        assert not dupes, f"defined more than once: {sorted(dupes)}"
