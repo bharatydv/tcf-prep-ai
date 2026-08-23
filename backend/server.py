@@ -6724,15 +6724,16 @@ class BlogPostUpdate(BaseModel):
 @app.get("/api/blog")
 async def list_blog_posts(db: AsyncSession = Depends(get_db)):
     """Public: list published posts, newest first (no full content)."""
+    # The body is left in the database rather than fetched and thrown away.
+    # This used to SELECT * and pop("content") in Python, so every list view
+    # read every article in full - the one column that grows without bound -
+    # to render a page that never shows it.
+    cols = [c for c in BlogPost.__table__.columns
+            if c.name not in ("id", "content")]
     res = await db.execute(
-        select(BlogPost).where(BlogPost.is_published == True)  # noqa: E712
+        select(*cols).where(BlogPost.is_published == True)  # noqa: E712
         .order_by(BlogPost.created_at.desc()))
-    out = []
-    for p in res.scalars().all():
-        d = _row_to_dict(p)
-        d.pop("content", None)  # list view doesn't need the full body
-        out.append(d)
-    return {"posts": out}
+    return {"posts": [dict(r._mapping) for r in res.all()]}
 
 
 @app.get("/api/blog/{slug}")
