@@ -124,7 +124,13 @@ export function Header() {
 
   return (
     <header className="glass sticky top-0 z-50 border-b border-gray-100">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
+      {/* gap-3 between lg and xl, not gap-4. Logo, nav and actions are all
+          shrink-0, so at exactly 1024px - where the lg: breakpoint turns the
+          desktop layout on - their combined width was 1027px against a 1024px
+          container and the whole page scrolled sideways by 3px. Four pixels
+          back from each of the two gaps clears it, and xl restores the wider
+          spacing once there is room for it. */}
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 xl:gap-4">
         <Link to="/" className="flex shrink-0 items-center" data-testid="logo-link" aria-label="prepfrancais">
           {/* The wordmark used to be hand-authored bezier paths, which meant the
              header and footer copies could drift apart and the letters could not
@@ -139,7 +145,7 @@ export function Header() {
           </span>
         </Link>
 
-        <nav className="hidden shrink-0 items-center gap-4 lg:flex xl:gap-5" aria-label="Main">
+        <nav className="hidden shrink-0 items-center gap-4 hdr:flex xl:gap-5" aria-label="Main">
           {links.map((l) => (
             <NavLink key={l.to} to={l.to}
               className={({ isActive }) => `whitespace-nowrap text-sm font-medium transition ${isActive ? 'text-primary' : 'text-gray-600 hover:text-primary'}`}>
@@ -148,7 +154,7 @@ export function Header() {
           ))}
         </nav>
 
-        <div className="hidden shrink-0 items-center gap-2.5 lg:flex xl:gap-3">
+        <div className="hidden shrink-0 items-center gap-2.5 hdr:flex xl:gap-3">
           <LangToggle lang={lang} setLang={setLang} />
           {user ? (
             <>
@@ -183,7 +189,7 @@ export function Header() {
         <button
           ref={menuButtonRef}
           type="button"
-          className="-m-2 rounded-lg p-2 text-gray-700 transition hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary lg:hidden"
+          className="-m-2 rounded-lg p-2 text-gray-700 transition hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary hdr:hidden"
           onClick={() => setOpen(!open)}
           aria-label={t('nav.menu')}
           aria-expanded={open}
@@ -193,7 +199,7 @@ export function Header() {
         </button>
       </div>
       {open && (
-        <div id="mobile-menu" className="max-h-[calc(100dvh-4rem)] overflow-y-auto border-t border-gray-100 bg-white px-4 py-3 lg:hidden">
+        <div id="mobile-menu" className="max-h-[calc(100dvh-4rem)] overflow-y-auto border-t border-gray-100 bg-white px-4 py-3 hdr:hidden">
           <div className="pb-2"><LangToggle lang={lang} setLang={setLang} /></div>
           {[...links, ...extraLinks].map((l) => (
             <Link key={l.to} to={l.to} className="block py-2.5 text-sm font-medium text-gray-700">{l.label}</Link>
