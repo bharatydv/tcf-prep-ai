@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Cards, ListChecks, Lightning, Fire, ArrowLeft } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, errMsg, CATEGORY_META } from '../lib/api';
-import { BackLink } from '../components/shared';
+import { BackLink, useConfirm } from '../components/shared';
 import { useT } from '../i18n';
 import { useSeo } from '../lib/seo';
 
@@ -20,6 +20,7 @@ export default function Review() {
 
   const [params] = useSearchParams();
   const t = useT();
+  const [confirm, confirmDialog] = useConfirm();
   const category = params.get('category');
   const [queue, setQueue] = useState(null);
   const [mode, setMode] = useState(null); // flashcards | mcq | sprint
@@ -112,16 +113,22 @@ export default function Review() {
   const start = (m) => { setMode(m); setIdx(0); setResults([]); setSummary(null); setFlipped(false); setPicked(null); setSprintLeft(SPRINT_SECONDS); sprintEndsRef.current = null; sprintOverRef.current = false; };
 
   /* Leaves a session without submitting — answers so far are discarded. */
-  const quitSession = () => {
-    if (results.length && !window.confirm(t('rev.quitConfirm'))) return;
+  const quitSession = async () => {
+    if (results.length && !(await confirm(t('rev.quitConfirm'), { danger: true }))) return;
     setMode(null); setIdx(0); setResults([]); setFlipped(false); setPicked(null);
   };
 
+  /* The dialog travels with the button rather than sitting in one page
+     return: quitting is offered from two different branches, and only one of
+     them is ever mounted. */
   const quitButton = (
-    <button onClick={quitSession} data-testid="quit-review-session"
-      className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-primary hover:underline">
-      <ArrowLeft size={16} /> {t('rev.quit')}
-    </button>
+    <>
+      {confirmDialog}
+      <button onClick={quitSession} data-testid="quit-review-session"
+        className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-primary hover:underline">
+        <ArrowLeft size={16} /> {t('rev.quit')}
+      </button>
+    </>
   );
 
   if (!queue) return <main className="flex min-h-[60vh] items-center justify-center"><div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" /></main>;

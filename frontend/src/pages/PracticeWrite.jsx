@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { api, BACKEND_URL } from '../lib/api';
 import { FREE_WRITING, WRITING_TASKS, clampWords, wordStatus } from '../lib/tcf';
 import { useAuth } from '../context/AuthContext';
-import { AnalysisProgress, BackLink, CreditsBadge, WordCountBar, streamAnalysis } from '../components/shared';
+import { AnalysisProgress, BackLink, CreditsBadge, WordCountBar, streamAnalysis, useConfirm } from '../components/shared';
 import { useT } from '../i18n';
 
 /* What the grader is told the candidate was asked to write about.
@@ -21,6 +21,7 @@ const topicText = (q) => (q.doc_1
 export default function PracticeWrite() {
   const { user, refreshUser } = useAuth();
   const t = useT();
+  const [confirm, confirmDialog] = useConfirm();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const tacheParam = searchParams.get('tache');
@@ -114,8 +115,8 @@ export default function PracticeWrite() {
     // The official range is enforced by the grader; warn before spending a
     // credit on a text the real exam would penalise anyway.
     const status = wordStatus(text, taskType);
-    if (status.capped && !window.confirm(
-      `${t(status.key, status.vars)}. ${t('write.capConfirm')}`)) {
+    if (status.capped && !(await confirm(
+      `${t(status.key, status.vars)}. ${t('write.capConfirm')}`))) {
       return;
     }
     const topic = freeMode ? (ownQuestion.trim() || null) : (activePrompt?.title || null);
@@ -173,6 +174,7 @@ export default function PracticeWrite() {
   return (
     <main className="overflow-x-clip bg-white">
       {stage && <AnalysisProgress current={stage} />}
+      {confirmDialog}
       <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
         <BackLink className="!mb-6" testid="back-to-tasks"
           fallback={themeId ? `/practice/themes?tache=${tacheNum}` : '/practice/tasks'} />
