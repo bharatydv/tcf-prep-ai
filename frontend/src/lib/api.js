@@ -46,6 +46,48 @@ api.interceptors.response.use(
   },
 );
 
+
+/* ------------------------------------------------------------ analytics ---
+ * Funnel events, sent to our own backend rather than a third party.
+ *
+ * No cookie, no fingerprint, no third-party script: an id in localStorage that
+ * is random, belongs to this browser, and means nothing anywhere else. It
+ * exists so a visitor who has not signed up yet still occupies a position in
+ * the funnel; once they sign in the backend attaches their account id instead.
+ *
+ * The important events - signup, payment, an AI result - are recorded by the
+ * server, where they cannot be blocked or forged. These are the ones only the
+ * browser can see: which pages were reached, and where people stopped.
+ *
+ * Every call is fire-and-forget and swallows its own errors. Measurement must
+ * never be able to break the thing it measures.
+ */
+const ANON_KEY = 'prepfrancais.anon';
+
+function anonId() {
+  try {
+    let id = localStorage.getItem(ANON_KEY);
+    if (!id) {
+      id = (crypto.randomUUID?.() || String(Math.random()).slice(2)).slice(0, 36);
+      localStorage.setItem(ANON_KEY, id);
+    }
+    return id;
+  } catch {
+    // Private mode, or storage disabled. The event still counts, it just
+    // cannot be tied to the visitor's other ones.
+    return null;
+  }
+}
+
+export function track(event, meta) {
+  try {
+    api.post('/api/events', { event, anon_id: anonId(), meta: meta || {} })
+      .catch(() => {});
+  } catch {
+    // Never let a metric throw into a render path.
+  }
+}
+
 // Exporting baseURL as BACKEND_URL for consistency
 export const BACKEND_URL = "";
 

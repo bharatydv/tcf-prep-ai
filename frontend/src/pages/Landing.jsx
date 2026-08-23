@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
 import { useI18n } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
+import { track } from '../lib/api';
 import { useBillingPlans } from '../lib/plans';
 
 /* ------------------------------------------------ scroll-reveal helpers ---- */
@@ -108,6 +109,9 @@ export default function Landing() {
   const [simTopic, setSimTopic] = useState('');
   const [simAnswer, setSimAnswer] = useState('');
   const trialTo = user ? '/dashboard' : '/register';
+
+  // The top of the funnel. Everything else is measured against this number.
+  useEffect(() => { track('landing_view'); }, []);
 
   const startSimulator = () => {
     if (!user) { toast.info(t('land.registerToast')); return navigate('/register'); }

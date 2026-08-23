@@ -1098,28 +1098,87 @@ def client_ip(request: Request) -> str:
     return peer
 
 
+# How often the sweep runs, as a fraction of requests. Cheap enough to be
+# worth doing inline and rare enough not to cost anything measurable.
+_SWEEP_EVERY = 200
+_sweep_counter = 0
+
+
+async def _db_rate_check(db: AsyncSession, key: str, limit: int,
+                         window_seconds: int) -> Optional[int]:
+    """Count, record, and return the seconds to wait if the caller is over.
+
+    Counting and inserting are two statements, so two requests arriving
+    together can both pass a check at the boundary. That is deliberate: the
+    alternative is a lock held across every metered request, and being off by
+    one on a 10-per-5-minutes budget is not worth serialising the API for.
+    """
+    global _sweep_counter
+    from sqlalchemy import text as sa_text
+
+    cutoff = now_utc() - timedelta(seconds=window_seconds)
+    res = await db.execute(sa_text(
+        "SELECT COUNT(*), MIN(created_at) FROM rate_hits "
+        "WHERE bucket_key = :k AND created_at >= :cutoff"),
+        {"k": key, "cutoff": cutoff})
+    count, oldest = res.first()
+
+    if count >= limit and oldest is not None:
+        return max(1, int(window_seconds - (now_utc() - oldest).total_seconds()) + 1)
+
+    db.add(RateHit(bucket_key=key, created_at=now_utc()))
+
+    _sweep_counter += 1
+    if _sweep_counter % _SWEEP_EVERY == 0:
+        # Anything older than the longest window in use is dead weight.
+        await db.execute(sa_text(
+            "DELETE FROM rate_hits WHERE created_at < :old"),
+            {"old": now_utc() - timedelta(seconds=3600)})
+    await db.commit()
+    return None
+
+
 def rate_limit(bucket: str, limit: int, window_seconds: int):
     """Dependency factory: at most `limit` calls per `window_seconds` per
-    caller — per account when signed in, per IP otherwise."""
-    async def dep(request: Request):
-        import time as _t
-        now = _t.time()
-        key = f"{bucket}:{_client_key(request)}"
-        hits = [t for t in _rate_buckets.get(key, []) if now - t < window_seconds]
-        if len(hits) >= limit:
-            retry = int(window_seconds - (now - hits[0])) + 1
+    caller — per account when signed in, per IP otherwise.
+
+    Counted in the database so the limit is one limit, not one per process,
+    and so a restart does not hand every caller a fresh allowance. The
+    in-memory buckets are kept as a fallback: if the database is unreachable
+    the API should still refuse a flood, and refusing to serve at all because
+    the *rate limiter* is down would be a worse outage than the one it
+    prevents.
+    """
+    async def dep(request: Request, db: AsyncSession = Depends(get_db)):
+        key = f"{bucket}:{_client_key(request)}"[:200]
+        try:
+            retry = await _db_rate_check(db, key, limit, window_seconds)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Rate limiter fell back to memory: %s", exc)
+            retry = _memory_rate_check(key, limit, window_seconds)
+        if retry is not None:
             raise HTTPException(
                 status_code=429,
                 detail="Trop de requêtes. Réessayez dans un instant.",
                 headers={"Retry-After": str(retry)})
-        hits.append(now)
-        _rate_buckets[key] = hits
-        # Opportunistic sweep so the dict cannot grow without bound.
-        if len(_rate_buckets) > 10_000:
-            for k in [k for k, v in _rate_buckets.items()
-                      if not v or now - v[-1] > window_seconds]:
-                _rate_buckets.pop(k, None)
     return dep
+
+
+def _memory_rate_check(key: str, limit: int,
+                       window_seconds: int) -> Optional[int]:
+    """The original in-process counter, kept as the fallback path."""
+    import time as _t
+    now = _t.time()
+    hits = [t for t in _rate_buckets.get(key, []) if now - t < window_seconds]
+    if len(hits) >= limit:
+        return int(window_seconds - (now - hits[0])) + 1
+    hits.append(now)
+    _rate_buckets[key] = hits
+    if len(_rate_buckets) > 10_000:
+        for k in [k for k, v in _rate_buckets.items()
+                  if not v or now - v[-1] > window_seconds]:
+            _rate_buckets.pop(k, None)
+    return None
 
 
 # Auth is brute-forceable; AI calls cost money. Both are capped per caller.
@@ -1132,6 +1191,9 @@ ai_rate_limit = rate_limit("ai", limit=20, window_seconds=300)
 # their own, wider bucket; grading the finished conversation still costs a
 # credit and still goes through ai_rate_limit.
 turn_rate_limit = rate_limit("turn", limit=120, window_seconds=300)
+# Funnel events are unauthenticated and cheap, but an open write endpoint
+# still needs a ceiling. Generous enough that a real session never trips it.
+event_rate_limit = rate_limit("event", limit=60, window_seconds=300)
 
 
 # ----------------------------------------------------------------------------
@@ -2679,6 +2741,53 @@ class Invoice(Base):
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class RateHit(Base):
+    """One row per metered request, so the counter is not in one process.
+
+    In-memory buckets had two failure modes that only show up in production:
+    every deploy reset them, which meant brute-force protection could be
+    defeated by waiting for a restart; and a second uvicorn worker would have
+    given each worker its own allowance, silently multiplying every limit.
+
+    Rows are pruned opportunistically rather than by a scheduled job - there is
+    no scheduler here, and a table nobody cleans is a table that eventually
+    matters.
+    """
+    __tablename__ = "rate_hits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    bucket_key: Mapped[str] = mapped_column(String(200), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True)
+
+
+class UsageEvent(Base):
+    """One row per measurable thing that happened. Funnel and cost, together.
+
+    Two questions were unanswerable before this existed: where people drop out
+    between landing and paying, and what a user costs to serve. They are the
+    same shape - a named event, a moment, and some context - so they share a
+    table rather than two that would have to be joined to answer anything
+    interesting.
+
+    Deliberately thin on personal data: an event name, an account id when there
+    is one, a random per-browser id when there is not, and a JSON blob that
+    must never carry an essay, a transcript or an email address. Nothing here
+    needs to identify a person to answer either question.
+    """
+    __tablename__ = "usage_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event: Mapped[str] = mapped_column(String(48), index=True)
+    user_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True)
+    # A browser that has not signed up yet still has a funnel position.
+    anon_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    meta: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True)
+
+
 class BillingEvent(Base):
     """Every webhook Cashfree sends, kept whole.
 
@@ -3664,6 +3773,29 @@ MIGRATIONS = [
     "DOUBLE PRECISION DEFAULT 0",
     "UPDATE subscriptions SET base_amount = amount "
     "WHERE COALESCE(base_amount, 0) = 0",
+    # Every one of these tables is read by user_id on a page the learner opens
+    # - the dashboard, the history list, the mistake summary, the review queue
+    # - and none of them indexed it. Postgres was scanning the whole table and
+    # filtering, which is free at fifty accounts and is not at five thousand.
+    # IF NOT EXISTS keeps them re-runnable; they are cheap now and would need
+    # CONCURRENTLY once the tables are large.
+    "CREATE INDEX IF NOT EXISTS ix_submissions_user_id "
+    "ON submissions (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_mistakes_user_id ON mistakes (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_exam_attempts_user_id "
+    "ON exam_attempts (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_reading_attempts_user_id "
+    "ON reading_attempts (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_mock_exam_attempts_user_id "
+    "ON mock_exam_attempts (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_review_sessions_user_id "
+    "ON review_sessions (user_id)",
+    # The two hot compound reads: "my newest submissions" and "my due
+    # mistakes". A plain user_id index still sorts; these do not.
+    "CREATE INDEX IF NOT EXISTS ix_submissions_user_created "
+    "ON submissions (user_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_mistakes_user_due "
+    "ON mistakes (user_id, srs_due_at)",
 ]
 
 
@@ -4215,6 +4347,19 @@ async def analyze_stream(body: AnalyzeIn,
                     break
                 except asyncio.TimeoutError:
                     yield ": keep-alive\n\n"
+            # Measured here rather than inside the grader because this is
+            # where the learner's wait actually ends: transcription, grading,
+            # caps and the save. Provider and model come off the analysis,
+            # which is the only place that knows which one served this call.
+            await record_event(
+                db, "ai_call", user_id=user.user_id, feature="writing",
+                provider=analysis.get("ai_provider"),
+                model=analysis.get("ai_model"),
+                seconds=round(waited + STREAM_PING_SECONDS, 1),
+                chars=len(body.text or ""))
+            await record_event(db, "ai_result", user_id=user.user_id,
+                               feature="writing",
+                               level=analysis.get("tcf_level"))
             yield _sse("complete", sub)
         except HTTPException as exc:
             await refund_credit(db, user)
@@ -5519,6 +5664,124 @@ def _is_cancellation(event_type: str, status: str) -> bool:
     return "CANCEL" in blob
 
 
+def _is_reversal(event_type: str, status: str) -> bool:
+    """A payment being taken back: refund, chargeback or dispute.
+
+    Cancellation and reversal are different events and were not distinguished.
+    Cancelling stops future charges and leaves paid-for access alone, which is
+    right. A refund takes the money back, and leaving the access granted meant
+    a subscription could be bought, used, refunded and kept.
+    """
+    blob = f"{event_type} {status}".upper()
+    return any(word in blob for word in
+               ("REFUND", "CHARGEBACK", "DISPUTE", "REVERS"))
+
+
+# ----------------------------------------------------------------------------
+# Usage and funnel events
+# ----------------------------------------------------------------------------
+# The funnel, in order. Only these names are accepted from a browser: an open
+# endpoint that writes whatever string it is given is a way to fill a disk.
+# Server-side callers may record anything, because they are this file.
+CLIENT_EVENTS = {
+    "landing_view", "signup_start", "pricing_view", "checkout_start",
+    "practice_start", "speaking_start", "mic_denied",
+}
+# Recorded by the server, where they cannot be forged or missed: a browser that
+# closes before the redirect still paid, and an ad blocker still cannot hide it.
+SERVER_EVENTS = {
+    "signup", "email_verified", "ai_result", "ai_call", "ai_failure",
+    "payment_success", "payment_reversed", "subscription_cancelled",
+}
+
+
+async def record_event(db: AsyncSession, event: str,
+                       user_id: Optional[str] = None,
+                       anon_id: Optional[str] = None,
+                       **meta) -> None:
+    """Write one event. Never raises.
+
+    Measurement must not be able to break the thing being measured: a failed
+    insert here would otherwise roll back the grade or the payment it was
+    recording. It is logged and dropped instead.
+    """
+    try:
+        db.add(UsageEvent(event=event[:48], user_id=user_id, anon_id=anon_id,
+                          meta=meta or {}, created_at=now_utc()))
+        await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        await db.rollback()
+        log.warning("Could not record event %s: %s", event, exc)
+
+
+class EventIn(BaseModel):
+    event: str = Field(min_length=1, max_length=48)
+    anon_id: Optional[str] = Field(default=None, max_length=64)
+    # A small bag of context - a plan id, a task number. Size-capped because
+    # this arrives from a browser.
+    meta: Optional[Dict[str, Any]] = None
+
+
+@app.post("/api/events")
+async def post_event(body: EventIn, request: Request,
+                     db: AsyncSession = Depends(get_db),
+                     _rl=Depends(event_rate_limit)):
+    """Funnel events from the browser. Signed in or not.
+
+    Returns 204 whatever happens, including for an event name that is not on
+    the allowlist: telling a caller which names are accepted invites someone to
+    enumerate them, and the browser has nothing useful to do with the answer.
+    """
+    name = body.event.strip().lower()
+    if name in CLIENT_EVENTS:
+        user_id = None
+        token = request.cookies.get("access_token")
+        if token:
+            user_id = decode_token(token, "access")
+        meta = {k: v for k, v in (body.meta or {}).items()
+                if isinstance(k, str)}
+        # Trim aggressively: this is analytics context, not a document store.
+        meta = {k: (v[:120] if isinstance(v, str) else v)
+                for k, v in list(meta.items())[:12]}
+        await record_event(db, name, user_id=user_id,
+                           anon_id=(body.anon_id or None), **meta)
+    return Response(status_code=204)
+
+
+@app.get("/api/admin/funnel")
+async def admin_funnel(days: int = Query(30, ge=1, le=365),
+                       admin: User = Depends(get_admin_user),
+                       db: AsyncSession = Depends(get_db)):
+    """Counts per event, and what the AI actually cost, over `days`.
+
+    Distinct users rather than raw hits: one person reloading the pricing page
+    six times is one person considering it, not six.
+    """
+    from sqlalchemy import text as sa_text
+
+    since = now_utc() - timedelta(days=days)
+    res = await db.execute(sa_text(
+        "SELECT event, COUNT(*) AS hits, "
+        "COUNT(DISTINCT COALESCE(user_id, anon_id)) AS people "
+        "FROM usage_events WHERE created_at >= :since "
+        "GROUP BY event ORDER BY people DESC"), {"since": since})
+    counts = [{"event": r[0], "hits": r[1], "people": r[2]}
+              for r in res.fetchall()]
+
+    res = await db.execute(sa_text(
+        "SELECT meta->>'provider' AS provider, meta->>'model' AS model, "
+        "COUNT(*) AS calls, "
+        "ROUND(AVG((meta->>'seconds')::numeric), 1) AS avg_seconds, "
+        "SUM(COALESCE((meta->>'total_tokens')::bigint, 0)) AS tokens "
+        "FROM usage_events WHERE event = 'ai_call' AND created_at >= :since "
+        "GROUP BY 1, 2 ORDER BY calls DESC"), {"since": since})
+    ai = [{"provider": r[0], "model": r[1], "calls": r[2],
+           "avg_seconds": float(r[3]) if r[3] is not None else None,
+           "tokens": int(r[4] or 0)} for r in res.fetchall()]
+
+    return {"days": days, "events": counts, "ai": ai}
+
+
 # ----------------------------------------------------------------------------
 # Invoices
 # ----------------------------------------------------------------------------
@@ -5700,6 +5963,33 @@ def public_invoice(inv: Invoice) -> dict:
     }
 
 
+async def revoke_premium_for_reversal(db: AsyncSession, user: User,
+                                      row: Subscription,
+                                      plan: dict) -> None:
+    """Take back exactly the access the reversed payment paid for.
+
+    One cycle is removed rather than premium being switched off outright: an
+    account that paid for three cycles and had one refunded keeps the two it
+    still owns. If that leaves the expiry in the past, premium ends now.
+
+    A manual grant carries a NULL expiry and is left alone - it was never paid
+    for through this channel, so a gateway event has no business revoking it.
+    """
+    if user.premium_until is None:
+        log.warning("Reversal on %s left an unlimited grant untouched for %s",
+                    row.subscription_id, user.user_id)
+        return
+    user.premium_until = user.premium_until - plan_period(plan)
+    if user.premium_until <= now_utc():
+        user.subscription_status = "free"
+        log.info("Premium revoked for %s after a reversal on %s",
+                 user.user_id, row.subscription_id)
+    else:
+        log.info("Premium shortened to %s for %s after a reversal on %s",
+                 user.premium_until, user.user_id, row.subscription_id)
+    row.current_period_end = user.premium_until
+
+
 async def issue_invoice(db: AsyncSession, user: User, row: Subscription,
                         payment_reference: Optional[str] = None):
     """Write the receipt for one successful charge, and email it.
@@ -5846,6 +6136,8 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     plan = BILLING_PLANS.get(row.plan_id) or BILLING_PLANS["month"]
     row.updated_at = now_utc()
 
+    was_active = row.status == "active"
+
     if _is_payment_success(event_type):
         # The charge landed: add one cycle. The period comes from our own
         # catalogue and never from the webhook - and specifically from the
@@ -5868,9 +6160,28 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         except Exception:  # noqa: BLE001
             log.exception("Invoice could not be issued for %s",
                           row.subscription_id)
+        await record_event(db, "payment_success", user_id=user.user_id,
+                           plan=row.plan_id, amount=row.amount,
+                           currency=row.currency, first_cycle=(not was_active))
         return {"ok": True, "granted": True}
 
+    # Checked BEFORE cancellation: a refund event often carries a cancelled
+    # status too, and matching that first would have quietly turned every
+    # refund into "stop future charges, keep the access".
+    if _is_reversal(event_type, status):
+        plan = BILLING_PLANS.get(row.plan_id) or BILLING_PLANS["month"]
+        await revoke_premium_for_reversal(db, user, row, plan)
+        await record_event(db, "payment_reversed", user_id=user.user_id,
+                           plan=row.plan_id, amount=row.amount,
+                           event_type=event_type)
+        row.status = "refunded"
+        row.cancelled_at = row.cancelled_at or now_utc()
+        await db.commit()
+        return {"ok": True, "reversed": True}
+
     if _is_cancellation(event_type, status):
+        # Deliberately not touching premium_until: the learner paid for this
+        # cycle and keeps it to its expiry. Only the renewal stops.
         row.status = "cancelled"
         row.cancelled_at = now_utc()
         await db.commit()

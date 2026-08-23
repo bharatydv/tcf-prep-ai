@@ -14,7 +14,9 @@ Disallow: /practice/simulator
 Disallow: /api/
 
 # Answer engines. Allowed on purpose: the guides, blog and exam topics are
-# written to be quoted, and the pages are prerendered so they can read them.
+# written to be quoted. The public routes are prerendered to static HTML at
+# build time so a crawler that does not run JavaScript can still read them -
+# check a deploy with `curl -s https://prepfrancais.com/ | grep -c TCF`.
 User-agent: GPTBot
 Allow: /
 User-agent: OAI-SearchBot

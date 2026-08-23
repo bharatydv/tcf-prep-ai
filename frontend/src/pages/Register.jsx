@@ -1,12 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { EnvelopeSimple, Lock, User, Eye, EyeSlash } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
+import { track } from '../lib/api';
 
 export default function Register() {
+  // Opening the form, as distinct from completing it: the drop between this
+  // and the server-side "signup" event is the signup form's real cost.
+  useEffect(() => { track('signup_start'); }, []);
   const { register } = useAuth();
   const t = useT();
   const navigate = useNavigate();
