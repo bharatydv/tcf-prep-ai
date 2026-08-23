@@ -1,7 +1,13 @@
 ﻿node_modules/
+# Every .env variant, not just the three that used to be listed. A .env.bak on
+# the deploy VM was untracked but NOT ignored, so one `git add -A` there would
+# have committed the production payment key and the database password.
 .env
-.env.local
-.env.*.local
+.env.*
+.env.bak
+.envy
+!.env.example
+!.env.*.example
 __pycache__/
 *.pyc
 .venv/
@@ -14,3 +20,6 @@ backend/venv312/
 venv/
 *.save
 *.save.*
+
+# Local compose overrides stay on the machine that needs them.
+docker-compose.override.yml
