@@ -9,6 +9,7 @@ original MongoDB version — only persistence was migrated.
 """ 
 import os
 import re
+import time
 import json
 import uuid
 import asyncio
@@ -1740,6 +1741,29 @@ def _call_gemini(model: str, system_prompt: str, user_text: str) -> str:
         f"usage={getattr(resp, 'usage_metadata', None)}).{hint}")
 
 
+def _log_usage(model: str, resp) -> None:
+    """What one call actually cost, in the provider's own numbers.
+
+    Character counts are a guess at tokens and a bad one for French. This
+    reads the usage the provider returns, including the two figures that
+    decide the bill and are invisible otherwise: reasoning tokens, billed as
+    output though nothing shows them, and cached prompt tokens, which is where
+    the fixed 2.5k-character grading prompt stops being paid for in full on
+    every single grade.
+    """
+    usage = getattr(resp, "usage", None)
+    if usage is None:
+        return
+    details = getattr(usage, "completion_tokens_details", None)
+    log.info("%s usage: prompt=%s completion=%s reasoning=%s cached=%s total=%s",
+             model,
+             getattr(usage, "prompt_tokens", "?"),
+             getattr(usage, "completion_tokens", "?"),
+             getattr(details, "reasoning_tokens", 0) if details else 0,
+             getattr(usage, "prompt_cache_hit_tokens", "n/a"),
+             getattr(usage, "total_tokens", "?"))
+
+
 def _call_openai_compatible(base_url: str, api_key: str, model: str,
                             system_prompt: str, user_text: str) -> str:
     """Shared adapter for any OpenAI-compatible endpoint (Groq, DeepSeek).
@@ -1762,6 +1786,7 @@ def _call_openai_compatible(base_url: str, api_key: str, model: str,
         ],
     )
     choice = resp.choices[0]
+    _log_usage(model, resp)
     content = (choice.message.content or "").strip()
     if content:
         return content
@@ -1877,7 +1902,14 @@ async def _grade_with_provider(provider: str, system_prompt: str,
     attempts = 2
     for attempt in range(attempts):
         try:
+            started = time.monotonic()
             out = await run_ai(fn, model, system_prompt, user_text)
+            # "Why is this taking so long?" is unanswerable without a number.
+            # The whole visible wait is this one call: the progress stages the
+            # browser shows are on a fixed 0.6s tick and finish long before it.
+            log.info("Graded with %s/%s in %.1fs (%d chars in, %d out)",
+                     provider, model, time.monotonic() - started,
+                     len(user_text), len(out or ""))
             _PROVIDER_LAST_ERROR.pop(provider, None)
             return out
         except Exception as exc:  # noqa: BLE001
