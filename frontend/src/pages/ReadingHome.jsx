@@ -47,7 +47,7 @@ export default function ReadingHome() {
       {/* MODE CHOICE */}
       <section className="mx-auto max-w-5xl px-4 pt-10 sm:px-6">
         <div className="mb-6 text-center">
-          <h2 className="font-heading text-2xl font-extrabold text-gray-900">{t('read.chooseTitle')}</h2>
+          <h1 className="font-heading text-2xl font-extrabold text-gray-900">{t('read.chooseTitle')}</h1>
           <p className="mx-auto mt-2 max-w-lg text-sm text-gray-600">{t('read.chooseSub')}</p>
         </div>
 
