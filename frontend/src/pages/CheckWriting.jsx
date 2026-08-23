@@ -20,6 +20,10 @@ export default function CheckWriting() {
 
   const submit = async () => {
     if (!text.trim()) return toast.error(t('check.pasteFirst'));
+    // The progress dialog now sits over the form rather than replacing it,
+    // so the button behind it still exists and can be reached from the
+    // keyboard. A second submit would spend a second credit.
+    if (stage) return;
     setStage('parsing');
     await streamAnalysis(BACKEND_URL, { text, source: 'paste', label: label || null }, {
       onStage: setStage,
@@ -37,10 +41,9 @@ export default function CheckWriting() {
     });
   };
 
-  if (stage) return <main className="px-4 py-16"><AnalysisProgress current={stage} /></main>;
-
   return (
     <main className="mx-auto max-w-4xl px-4 py-10">
+      {stage && <AnalysisProgress current={stage} />}
       <Seo titleKey="seo.check.title" path="/check-writing" noindex />
       <BackLink />
       <h1 className="text-3xl font-bold">{t('check.title')}</h1>

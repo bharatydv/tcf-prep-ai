@@ -7,7 +7,7 @@ import { WRITING_TASKS, WRITING_TOTAL_SECONDS } from '../lib/tcf';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
-import { AccentToolbar, BackLink, ErrorHighlightedText, WordCountBar } from '../components/shared';
+import { AccentToolbar, BackLink, ErrorHighlightedText, WordCountBar, useConfirm } from '../components/shared';
 
 const GUIDE = {
   1: { name: WRITING_TASKS[1].name, min: WRITING_TASKS[1].minWords, max: WRITING_TASKS[1].maxWords },
@@ -21,6 +21,7 @@ const DRAFT_KEY = 'prepfrancais.simulator.draft';
 export default function ExamSimulator() {
   const { refreshUser } = useAuth();
   const t = useT();
+  const [confirm, confirmDialog] = useConfirm();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState(null);
   const [sets, setSets] = useState([]);
@@ -145,8 +146,8 @@ export default function ExamSimulator() {
   }, [phase]);
 
   /* Abandons the attempt without submitting — no credit is spent. */
-  const quitExam = () => {
-    if (!window.confirm(t('sim.quitConfirm'))) return;
+  const quitExam = async () => {
+    if (!(await confirm(t('sim.quitConfirm'), { danger: true }))) return;
     setPhase('intro');
     setSeconds(TOTAL);
     secondsRef.current = TOTAL;
@@ -305,6 +306,7 @@ export default function ExamSimulator() {
 
   return (
     <main className="fixed inset-0 z-40 overflow-y-auto bg-white">
+      {confirmDialog}
       <div className="mx-auto max-w-4xl px-4 py-6">
         <button onClick={quitExam} data-testid="quit-exam"
           className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-gray-400 hover:text-red-600 hover:underline">

@@ -314,7 +314,9 @@
   },
   "common": {
     "back": "Retour",
+    "cancel": "Annuler",
     "comingSoon": "Bientôt disponible",
+    "confirm": "Continuer",
     "dashboard": "Tableau de bord",
     "disclaimerLevels": "Ceci est un outil d'entraînement, pas l'examen officiel TEF/TCF. Les scores et les niveaux sont des estimations destinées à guider votre préparation.",
     "disclaimerScores": "Ceci est un outil d'entraînement, pas l'examen officiel TEF/TCF. Les scores sont des estimations destinées à guider votre préparation.",

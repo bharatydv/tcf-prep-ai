@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { PlusCircle, PencilSimple, Trash, FloppyDisk, X } from '@phosphor-icons/react';
 import { api } from '../lib/api';
-import { BackLink } from '../components/shared';
+import { BackLink, useConfirm } from '../components/shared';
 import { useT } from '../i18n';
 
 const EMPTY = {
@@ -12,6 +12,7 @@ const EMPTY = {
 
 export default function BlogAdmin() {
   const t = useT();
+  const [confirm, confirmDialog] = useConfirm();
   const [posts, setPosts] = useState([]);
   const [form, setForm] = useState(EMPTY);
   const [editingId, setEditingId] = useState(null);
@@ -71,7 +72,8 @@ export default function BlogAdmin() {
   };
 
   const remove = async (p) => {
-    if (!window.confirm(t('blogAdmin.confirmDelete', { title: p.title }))) return;
+    if (!(await confirm(t('blogAdmin.confirmDelete', { title: p.title }),
+                        { danger: true }))) return;
     try {
       await api.delete(`/api/admin/blog/${p.post_id}`);
       toast.success(t('blogAdmin.deleted'));
@@ -86,6 +88,7 @@ export default function BlogAdmin() {
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
+      {confirmDialog}
       <BackLink to="/admin" label={t('blogAdmin.backToAdmin')} />
       <h1 className="font-heading text-3xl font-extrabold text-gray-900">{t('blogAdmin.title')}</h1>
       <p className="mt-2 text-sm text-gray-600">{t('blogAdmin.subtitleA')} <code>/blog</code>.</p>

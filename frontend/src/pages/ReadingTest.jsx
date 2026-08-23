@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
-import { BackLink } from '../components/shared';
+import { BackLink, useConfirm } from '../components/shared';
 
 /* The official Compréhension écrite paper runs 60 minutes. Test mode counts
    down from it and hands the paper in at zero; practice mode is untimed. */
@@ -26,6 +26,7 @@ const LEVEL_STYLE = {
 const clock = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
 export default function ReadingTest() {
+  const [confirm, confirmDialog] = useConfirm();
   const { testNumber } = useParams();
   const isTest = useLocation().pathname.startsWith('/reading/test');
   const { user } = useAuth();
@@ -132,10 +133,10 @@ export default function ReadingTest() {
     }
   };
 
-  const handIn = () => {
+  const handIn = async () => {
     if (!user) return navigate('/login');
     const blank = questions.length - answeredCount;
-    if (blank > 0 && !window.confirm(t('readTest.confirmBlank', { n: blank }))) return;
+    if (blank > 0 && !(await confirm(t('readTest.confirmBlank', { n: blank })))) return;
     submit();
   };
 
@@ -167,6 +168,7 @@ export default function ReadingTest() {
 
   return (
     <main className="overflow-x-clip bg-white">
+      {confirmDialog}
       <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         <BackLink to={`/reading/${isTest ? 'test' : 'practice'}`} className="!mb-6"
           testid="back-to-reading-tests" />

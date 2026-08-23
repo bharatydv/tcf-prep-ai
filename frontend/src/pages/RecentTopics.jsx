@@ -4,7 +4,7 @@ import { LockSimple, Eye, Lightning } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, errMsg, BACKEND_URL } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import { AccentToolbar, AnalysisProgress, BackLink, streamAnalysis } from '../components/shared';
+import { AccentToolbar, AnalysisProgress, BackLink, streamAnalysis, useConfirm } from '../components/shared';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
 
@@ -70,6 +70,7 @@ export default function RecentTopics() {
 
 export function RecentTopicDetail() {
   const t = useT();
+  const [confirm, confirmDialog] = useConfirm();
   const { topicId } = useParams();
   const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
@@ -101,10 +102,12 @@ export function RecentTopicDetail() {
   if (error) return <main className="px-4 py-20 text-center text-gray-600">{error}</main>;
   if (!topic) return <main className="flex min-h-[60vh] items-center justify-center"><div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" /></main>;
 
-  if (stage) return <main className="px-4 py-16"><AnalysisProgress current={stage} /></main>;
-
   const submit = async () => {
     if (!text.trim()) return toast.error(t('topics.writeFirst'));
+    // The progress dialog now sits over the form rather than replacing it,
+    // so the button behind it still exists and can be reached from the
+    // keyboard. A second submit would spend a second credit.
+    if (stage) return;
     setStage('parsing');
     await streamAnalysis(BACKEND_URL, { text, source: 'practice', label: topic.title }, {
       onStage: setStage,
@@ -131,7 +134,7 @@ export function RecentTopicDetail() {
     if (hasRemaining && remaining <= 0) {
       return navigate('/pricing');
     }
-    if (hasRemaining && !window.confirm(t('topics.confirmReveal', { n: remaining }))) {
+    if (hasRemaining && !(await confirm(t('topics.confirmReveal', { n: remaining })))) {
       return;
     }
     try {
@@ -151,6 +154,8 @@ export function RecentTopicDetail() {
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-10">
+      {stage && <AnalysisProgress current={stage} />}
+      {confirmDialog}
       <BackLink to="/recent-topics" label={t('topics.allTopics')} />
       <div className="flex flex-wrap gap-2">
         <span className="pill bg-violet-50 text-primary">{TASK_LABELS[topic.task_type] ? t(TASK_LABELS[topic.task_type]) : `Tâche ${topic.task_type}`}</span>

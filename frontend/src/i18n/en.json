@@ -314,7 +314,9 @@
   },
   "common": {
     "back": "Back",
+    "cancel": "Cancel",
     "comingSoon": "Coming soon",
+    "confirm": "Continue",
     "dashboard": "Dashboard",
     "disclaimerLevels": "This is a practice tool, not the official TEF/TCF exam. Scores and levels are estimates to guide your preparation.",
     "disclaimerScores": "This is a practice tool, not the official TEF/TCF exam. Scores are estimates to guide your preparation.",

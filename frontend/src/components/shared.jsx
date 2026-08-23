@@ -368,6 +368,70 @@ export function WordCountBar({ text, taskType, free = false, className = '' }) {
   );
 }
 
+/* ------------------------------------------------------ confirm dialog ---- */
+/* window.confirm, replaced.
+ *
+ * The native one is drawn by the browser, not the app: it lands wherever the
+ * browser decides rather than over what it is asking about, wears the OS
+ * styling, and is stamped with the bare domain name. It also blocks the main
+ * thread while it is open. This keeps the question inside the product —
+ * centred, in the app's own type and colours, translated by the same
+ * dictionary as everything else.
+ *
+ * Returns [confirm, dialog]. `await confirm(message)` resolves true or false
+ * exactly as window.confirm does, so a call site changes by one keyword and
+ * its enclosing function becoming async. Render {dialog} anywhere in the page:
+ * it is fixed-position, so where in the tree makes no difference.
+ *
+ * Escape and a click on the backdrop both answer false, matching what people
+ * already expect a dialog to do with those two gestures. */
+export function useConfirm() {
+  const t = useT();
+  const [req, setReq] = useState(null);
+
+  const confirm = (message, opts = {}) =>
+    new Promise((resolve) => setReq({ message, ...opts, resolve }));
+
+  useEffect(() => {
+    if (!req) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') { req.resolve(false); setReq(null); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [req]);
+
+  const answer = (value) => { req.resolve(value); setReq(null); };
+
+  const dialog = !req ? null : (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-gray-900/50 p-4 backdrop-blur-sm"
+      role="dialog" aria-modal="true" data-testid="confirm-dialog"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) answer(false); }}>
+      <div className="w-full max-w-sm rounded-3xl bg-white p-6 text-center shadow-2xl">
+        {req.title && (
+          <h3 className="font-heading text-lg font-bold text-gray-900">{req.title}</h3>
+        )}
+        <p className="mt-1 text-sm leading-relaxed text-gray-600">{req.message}</p>
+        <div className="mt-6 flex gap-3">
+          <button type="button" onClick={() => answer(false)}
+            className="btn-outline flex-1" data-testid="confirm-cancel">
+            {req.cancelLabel || t('common.cancel')}
+          </button>
+          {/* Autofocused so Enter answers the question the same way it answers
+              the native dialog, and Escape still cancels. */}
+          <button type="button" autoFocus onClick={() => answer(true)}
+            className={`btn-primary flex-1 ${req.danger ? '!bg-red-600 hover:!bg-red-700' : ''}`}
+            data-testid="confirm-ok">
+            {req.confirmLabel || t('common.confirm')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  return [confirm, dialog];
+}
+
 /* --------------------------------------------------- AnalysisProgress ---- */
 const STAGES = [
   ['parsing', 'analysis.parsing'],
@@ -378,25 +442,41 @@ const STAGES = [
   ['generating', 'analysis.generating'],
 ];
 
+/* Shown over the page the learner is on, not in place of it.
+ *
+ * Every caller used to swap its whole page out for this card, so submitting an
+ * essay wiped the essay off the screen and dropped the learner somewhere that
+ * looked like a different part of the site. Their text stays where it was now
+ * and this sits on top of it; when the analysis lands, the caller navigates or
+ * renders the result exactly as before.
+ *
+ * There is deliberately no close button: the grade is already being paid for
+ * by the time this appears, and dismissing it would leave the request running
+ * with nowhere to land. The backdrop swallows clicks meant for the form behind
+ * it, which is the other half of the same guarantee. */
 export function AnalysisProgress({ current }) {
   const t = useT();
   const idx = STAGES.findIndex(([k]) => k === current);
   return (
-    <div className="card mx-auto max-w-md p-6" data-testid="analysis-progress">
-      <h3 className="mb-4 font-heading text-lg font-semibold">{t('analysis.title')}</h3>
-      <ul className="space-y-3">
-        {STAGES.map(([key, label], i) => {
-          const state = i < idx ? 'done' : i === idx ? 'active' : 'todo';
-          return (
-            <li key={key} className="flex items-center gap-3 text-sm">
-              {state === 'done' && <span className="flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-[10px] text-white">✓</span>}
-              {state === 'active' && <span className="h-5 w-5 animate-spin rounded-full border-2 border-violet-200 border-t-primary" />}
-              {state === 'todo' && <span className="h-5 w-5 rounded-full border-2 border-gray-200" />}
-              <span className={state === 'todo' ? 'text-gray-400' : state === 'active' ? 'font-semibold text-primary' : 'text-gray-700'}>{t(label)}</span>
-            </li>
-          );
-        })}
-      </ul>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/50 p-4 backdrop-blur-sm"
+      role="dialog" aria-modal="true" aria-busy="true" aria-label={t('analysis.title')}
+      data-testid="analysis-progress">
+      <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+        <h3 className="mb-4 font-heading text-lg font-semibold">{t('analysis.title')}</h3>
+        <ul className="space-y-3">
+          {STAGES.map(([key, label], i) => {
+            const state = i < idx ? 'done' : i === idx ? 'active' : 'todo';
+            return (
+              <li key={key} className="flex items-center gap-3 text-sm">
+                {state === 'done' && <span className="flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-[10px] text-white">✓</span>}
+                {state === 'active' && <span className="h-5 w-5 animate-spin rounded-full border-2 border-violet-200 border-t-primary" />}
+                {state === 'todo' && <span className="h-5 w-5 rounded-full border-2 border-gray-200" />}
+                <span className={state === 'todo' ? 'text-gray-400' : state === 'active' ? 'font-semibold text-primary' : 'text-gray-700'}>{t(label)}</span>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
     </div>
   );
 }
