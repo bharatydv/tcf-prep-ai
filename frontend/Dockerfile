@@ -36,7 +36,17 @@ COPY package*.json ./
 # and the two disagree about whether to materialise `yaml`, an optional peer of
 # postcss-load-config. `npm ci` treats any such disagreement as fatal rather
 # than reconciling it, so pin npm to the version that wrote the lockfile.
-RUN npm i -g npm@11.6.2 && npm ci
+#
+# The cache is a throwaway directory inside this layer, not npm's default in
+# /root/.npm. A build on the VM died with "File exists" and "no such file or
+# directory" naming the same _cacache path - the signature of a cache that was
+# written into a layer and then reused in a state npm could not reconcile. A
+# cache that only exists for the length of one RUN cannot be inherited broken,
+# and deleting it keeps roughly 200MB out of the image, which matters on a
+# small disk when the Chromium download lands in the same build.
+RUN npm i -g npm@11.6.2 \
+    && npm ci --no-audit --no-fund --cache /tmp/npm-cache \
+    && rm -rf /tmp/npm-cache
 
 COPY . .
 

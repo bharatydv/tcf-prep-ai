@@ -74,6 +74,37 @@ def say(status, label, detail=""):
     print(f"  {status:5} {label:44} {detail}")
 
 
+def stop_if_auth_failed(code, body):
+    """A rejected key answers nothing except "the key is wrong".
+
+    This exists because an earlier version of this script reported a 401 on
+    the plan-creation step as "plan in USD REFUSED - this is the answer to the
+    currency question". It was not. Cashfree never looked at the currency; it
+    refused the credentials and stopped. Reporting a capability verdict from
+    an authentication error is worse than reporting nothing.
+    """
+    if code not in (401, 403):
+        return False
+    print()
+    print(f"  Cashfree rejected the credentials (HTTP {code}).")
+    print(f"  It said: {json.dumps(body)[:160]}")
+    print()
+    print("  Nothing about currencies, plans or mandates has been tested - the")
+    print("  request never got past the door. Check, in order:")
+    print()
+    print("   1. These are SANDBOX keys, not production ones. A sandbox secret")
+    print("      starts cfsk_ma_test_ ; production starts cfsk_ma_prod_.")
+    print("   2. Sandbox keys exist at all. They are generated separately from")
+    print("      production, under Developers -> API Keys with the environment")
+    print("      toggle set to Sandbox - having production keys does not create")
+    print("      them.")
+    print("   3. The app id and secret are from the SAME pair. Mixing the app")
+    print("      id of one environment with the secret of another fails exactly")
+    print("      like this.")
+    print("   4. No stray whitespace or a trailing newline in .env.cashfree.")
+    return True
+
+
 def call(method, path, payload=None):
     """One Cashfree request, with the reply returned whole."""
     url = f"{BASE}{path}"
@@ -125,11 +156,14 @@ def main():
         return 1
     else:
         # A 404 here is fine - not every account exposes the list endpoint.
-        say(INFO, "list endpoint answered", f"HTTP {code} (not fatal)")
+        # Step 2 establishes whether the credentials actually work.
+        say(INFO, "list endpoint answered", f"HTTP {code} (proves nothing yet)")
 
     # --- 2. what can this account actually do ----------------------------
     print("\n2. account capability")
     code, body = call("GET", "/subscriptions/plans?limit=1")
+    if stop_if_auth_failed(code, body):
+        return 1
     say(PASS if code in (200, 404) else FAIL, "plans endpoint reachable",
         f"HTTP {code}")
 
@@ -154,6 +188,8 @@ def main():
     })
     if code in (200, 201):
         say(PASS, f"plan created in {CURRENCY}", plan_id)
+    elif stop_if_auth_failed(code, body):
+        return 1
     else:
         say(FAIL, f"plan in {CURRENCY} REFUSED", f"HTTP {code} {json.dumps(body)[:200]}")
         print(f"\n  ^ This is the answer to the currency question. If Cashfree will\n"
