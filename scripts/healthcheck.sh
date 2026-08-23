@@ -21,14 +21,20 @@ FAIL=0
 STAMP="$(date -Iseconds)"
 
 say() { printf '%s %-22s %s\n' "$STAMP" "$1" "$2"; }
+# Run a command, return its output, and fall back only when nothing came back.
+# `cmd || echo default` appends rather than replaces when the command prints
+# something and then fails, which turned a healthy "200" into "200000".
+cap() { out=$( "$@" 2>/dev/null ); out=$(printf '%s' "$out" | tr -d '\r\n'); printf '%s' "$out"; }
 bad() { say "$1" "FAIL $2"; FAIL=1; }
 
 # ---------------------------------------------------------------- website ---
-CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$SITE/" 2>/dev/null || echo 000)
+CODE=$(cap curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$SITE/")
+[ -n "$CODE" ] || CODE=000
 [ "$CODE" = "200" ] && say website "ok ($CODE)" || bad website "homepage returned $CODE"
 
 # -------------------------------------------------------------------- api ---
-CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$API/api/health" 2>/dev/null || echo 000)
+CODE=$(cap curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$API/api/health")
+[ -n "$CODE" ] || CODE=000
 [ "$CODE" = "200" ] && say api "ok ($CODE)" || bad api "health returned $CODE"
 
 # TLS expiry. Certbot renews automatically, but a renewal that silently stops
@@ -44,8 +50,10 @@ fi
 
 # --------------------------------------------------------------- containers -
 for NAME in tcf_db tcf_backend tcf_frontend; do
-    STATE=$(docker inspect -f '{{.State.Status}}' "$NAME" 2>/dev/null || echo missing)
-    RESTARTS=$(docker inspect -f '{{.RestartCount}}' "$NAME" 2>/dev/null || echo 0)
+    STATE=$(cap docker inspect -f '{{.State.Status}}' "$NAME")
+    [ -n "$STATE" ] || STATE=missing
+    RESTARTS=$(cap docker inspect -f '{{.RestartCount}}' "$NAME")
+    case "$RESTARTS" in ''|*[!0-9]*) RESTARTS=0 ;; esac
     if [ "$STATE" != "running" ]; then
         bad "container:$NAME" "state=$STATE"
     elif [ "$RESTARTS" -gt 5 ]; then
@@ -67,18 +75,25 @@ fi
 # ------------------------------------------------------------------ errors ---
 # Backend tracebacks and grading failures in the last hour. Not every WARNING
 # matters; these two do.
-ERRS=$(docker logs --since 1h tcf_backend 2>&1 | grep -cE "Traceback|CRITICAL|Unhandled error" || true)
-[ "${ERRS:-0}" -eq 0 ] && say backend-errors "ok (none in 1h)" || bad backend-errors "$ERRS traceback(s) in 1h"
+ERRS=$(docker logs --since 1h tcf_backend 2>&1 | grep -cE "Traceback|CRITICAL|Unhandled error" )
+case "$ERRS" in ''|*[!0-9]*) ERRS=0 ;; esac
+[ "$ERRS" -eq 0 ] && say backend-errors "ok (none in 1h)" || bad backend-errors "$ERRS traceback(s) in 1h"
 
-AMOUNT=$(docker logs --since 24h tcf_backend 2>&1 | grep -c "AMOUNT MISMATCH" || true)
-[ "${AMOUNT:-0}" -eq 0 ] && say payment-mismatch "ok (none in 24h)" \
+AMOUNT=$(docker logs --since 24h tcf_backend 2>&1 | grep -c "AMOUNT MISMATCH" )
+case "$AMOUNT" in ''|*[!0-9]*) AMOUNT=0 ;; esac
+[ "$AMOUNT" -eq 0 ] && say payment-mismatch "ok (none in 24h)" \
     || bad payment-mismatch "$AMOUNT payment(s) charged an unexpected amount"
 
-NGINX=$(docker logs --since 1h tcf_frontend 2>&1 | grep -cE "\[error\]|\[crit\]" || true)
-[ "${NGINX:-0}" -eq 0 ] && say nginx-errors "ok (none in 1h)" || bad nginx-errors "$NGINX error(s) in 1h"
+NGINX=$(docker logs --since 1h tcf_frontend 2>&1 | grep -cE "\[error\]|\[crit\]" )
+case "$NGINX" in ''|*[!0-9]*) NGINX=0 ;; esac
+[ "$NGINX" -eq 0 ] && say nginx-errors "ok (none in 1h)" || bad nginx-errors "$NGINX error(s) in 1h"
 
 # ------------------------------------------------------------------- host ----
-DISK=$(df -P / | awk 'NR==2 {gsub("%","",$5); print $5}')
+DISK=$(df -P / 2>/dev/null | awk 'NR==2 {gsub(/[^0-9]/,"",$5); print $5}')
+case "$DISK" in ''|*[!0-9]*) DISK=0 ;; esac
+# A percentage above 100 is not a full disk, it is a df output this parser did
+# not understand. Waking someone for that is worse than staying quiet.
+[ "$DISK" -gt 100 ] && DISK=0
 [ "$DISK" -lt "$DISK_MAX" ] && say disk "ok (${DISK}% used)" \
     || bad disk "${DISK}% used - the database volume shares this disk"
 
