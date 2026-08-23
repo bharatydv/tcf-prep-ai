@@ -115,18 +115,45 @@ PHONE_CODE_MAX_ATTEMPTS = 5
 TRUSTED_PROXIES = {p.strip() for p in
                    os.environ.get("TRUSTED_PROXIES", "").split(",") if p.strip()}
 
-# A forgeable JWT secret or a published admin password in production is a full
+# Passwords that are not the built-in default but might as well be. This check
+# used to compare against one exact string, and a production deployment sat on
+# "ChangeMe123!" for weeks: it is not the default, so nothing objected, and it
+# would survive about a second of guessing. The admin account can read every
+# learner's submissions.
+_WEAK_ADMIN_HINTS = (
+    "changeme", "change_me", "change-me", "admin123", "password", "passw0rd",
+    "letmein", "qwerty", "secret", "welcome", "test123", "prepfrancais",
+)
+
+
+def _admin_password_problem(pw: str) -> Optional[str]:
+    """Why this password must not protect a production admin account."""
+    if pw == _DEFAULT_ADMIN_PASSWORD:
+        return "still the built-in default"
+    if len(pw) < 12:
+        return f"only {len(pw)} characters; use at least 12"
+    low = pw.lower()
+    for hint in _WEAK_ADMIN_HINTS:
+        if hint in low:
+            return f"contains {hint!r}, which is among the first things guessed"
+    return None
+
+
+# A forgeable JWT secret or a guessable admin password in production is a full
 # account takeover, so fail at boot rather than serve traffic with either.
 if IS_PROD:
     _bad = []
     if JWT_SECRET == _DEFAULT_JWT_SECRET or len(JWT_SECRET) < 32:
         _bad.append("JWT_SECRET (set a random value of 32+ characters)")
-    if ADMIN_PASSWORD == _DEFAULT_ADMIN_PASSWORD:
-        _bad.append("ADMIN_PASSWORD (still the built-in default)")
+    _pw_problem = _admin_password_problem(ADMIN_PASSWORD)
+    if _pw_problem:
+        _bad.append(f"ADMIN_PASSWORD ({_pw_problem})")
     if _bad:
         raise RuntimeError(
             "Refusing to start with insecure production settings: "
-            + "; ".join(_bad))
+            + "; ".join(_bad)
+            + ". Generate one with: python -c "
+              "\"import secrets; print(secrets.token_urlsafe(24))\"")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
