@@ -176,7 +176,7 @@ export default function Blog() {
                     </h3>
                     <p className="mt-3 text-sm leading-relaxed text-gray-600">{featured.excerpt}</p>
                     <div className="mt-5 flex items-center justify-between">
-                      <span className="flex items-center gap-1.5 text-xs text-gray-400">
+                      <span className="flex items-center gap-1.5 text-xs text-gray-500">
                         <CalendarBlank size={14} /> {formatDate(featured.created_at, lang)}
                       </span>
                       <span className="flex items-center gap-1 text-sm font-semibold text-primary">

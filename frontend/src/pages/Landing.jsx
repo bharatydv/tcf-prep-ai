@@ -535,7 +535,8 @@ export default function Landing() {
               <h3 className="font-heading text-2xl font-extrabold text-white sm:text-3xl">{t('land.nclcTable')}</h3>
               <p className="mt-1.5 text-xs text-violet-100/80">{t('land.nclcSub')}</p>
             </div>
-            <div className="overflow-x-auto bg-white">
+            <div className="overflow-x-auto bg-white" tabIndex={0} role="region"
+              aria-label={t('land.nclcTable')}>
               <table className="w-full min-w-[560px] text-center text-sm">
                 <thead>
                   <tr className="bg-violet-50/70 text-xs font-bold text-gray-700">

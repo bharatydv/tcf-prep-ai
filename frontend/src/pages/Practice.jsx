@@ -87,7 +87,7 @@ export default function Practice() {
                 <p className="text-xs font-semibold text-pink-700">{t('practice.testModeSub')}</p>
               </div>
             </div>
-            <p className="mt-5 text-xs font-bold uppercase tracking-wide text-gray-400">{t('practice.whatToExpect')}</p>
+            <p className="mt-5 text-xs font-bold uppercase tracking-wide text-gray-500">{t('practice.whatToExpect')}</p>
             <ul className="mt-2 space-y-2.5 text-sm text-gray-600">
               <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-pink-600" /> {t('practice.testBullet1')}</li>
               <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-pink-600" /> {t('practice.testBullet2')}</li>
@@ -100,7 +100,7 @@ export default function Practice() {
           </div>
         </div>
 
-        <p className="mx-auto mt-5 max-w-xl pb-12 text-center text-xs leading-relaxed text-gray-400">
+        <p className="mx-auto mt-5 max-w-xl pb-12 text-center text-xs leading-relaxed text-gray-500">
           {t('practice.disclaimer')}
         </p>
       </section>
