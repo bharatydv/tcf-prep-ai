@@ -1098,28 +1098,87 @@ def client_ip(request: Request) -> str:
     return peer
 
 
+# How often the sweep runs, as a fraction of requests. Cheap enough to be
+# worth doing inline and rare enough not to cost anything measurable.
+_SWEEP_EVERY = 200
+_sweep_counter = 0
+
+
+async def _db_rate_check(db: AsyncSession, key: str, limit: int,
+                         window_seconds: int) -> Optional[int]:
+    """Count, record, and return the seconds to wait if the caller is over.
+
+    Counting and inserting are two statements, so two requests arriving
+    together can both pass a check at the boundary. That is deliberate: the
+    alternative is a lock held across every metered request, and being off by
+    one on a 10-per-5-minutes budget is not worth serialising the API for.
+    """
+    global _sweep_counter
+    from sqlalchemy import text as sa_text
+
+    cutoff = now_utc() - timedelta(seconds=window_seconds)
+    res = await db.execute(sa_text(
+        "SELECT COUNT(*), MIN(created_at) FROM rate_hits "
+        "WHERE bucket_key = :k AND created_at >= :cutoff"),
+        {"k": key, "cutoff": cutoff})
+    count, oldest = res.first()
+
+    if count >= limit and oldest is not None:
+        return max(1, int(window_seconds - (now_utc() - oldest).total_seconds()) + 1)
+
+    db.add(RateHit(bucket_key=key, created_at=now_utc()))
+
+    _sweep_counter += 1
+    if _sweep_counter % _SWEEP_EVERY == 0:
+        # Anything older than the longest window in use is dead weight.
+        await db.execute(sa_text(
+            "DELETE FROM rate_hits WHERE created_at < :old"),
+            {"old": now_utc() - timedelta(seconds=3600)})
+    await db.commit()
+    return None
+
+
 def rate_limit(bucket: str, limit: int, window_seconds: int):
     """Dependency factory: at most `limit` calls per `window_seconds` per
-    caller — per account when signed in, per IP otherwise."""
-    async def dep(request: Request):
-        import time as _t
-        now = _t.time()
-        key = f"{bucket}:{_client_key(request)}"
-        hits = [t for t in _rate_buckets.get(key, []) if now - t < window_seconds]
-        if len(hits) >= limit:
-            retry = int(window_seconds - (now - hits[0])) + 1
+    caller — per account when signed in, per IP otherwise.
+
+    Counted in the database so the limit is one limit, not one per process,
+    and so a restart does not hand every caller a fresh allowance. The
+    in-memory buckets are kept as a fallback: if the database is unreachable
+    the API should still refuse a flood, and refusing to serve at all because
+    the *rate limiter* is down would be a worse outage than the one it
+    prevents.
+    """
+    async def dep(request: Request, db: AsyncSession = Depends(get_db)):
+        key = f"{bucket}:{_client_key(request)}"[:200]
+        try:
+            retry = await _db_rate_check(db, key, limit, window_seconds)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Rate limiter fell back to memory: %s", exc)
+            retry = _memory_rate_check(key, limit, window_seconds)
+        if retry is not None:
             raise HTTPException(
                 status_code=429,
                 detail="Trop de requêtes. Réessayez dans un instant.",
                 headers={"Retry-After": str(retry)})
-        hits.append(now)
-        _rate_buckets[key] = hits
-        # Opportunistic sweep so the dict cannot grow without bound.
-        if len(_rate_buckets) > 10_000:
-            for k in [k for k, v in _rate_buckets.items()
-                      if not v or now - v[-1] > window_seconds]:
-                _rate_buckets.pop(k, None)
     return dep
+
+
+def _memory_rate_check(key: str, limit: int,
+                       window_seconds: int) -> Optional[int]:
+    """The original in-process counter, kept as the fallback path."""
+    import time as _t
+    now = _t.time()
+    hits = [t for t in _rate_buckets.get(key, []) if now - t < window_seconds]
+    if len(hits) >= limit:
+        return int(window_seconds - (now - hits[0])) + 1
+    hits.append(now)
+    _rate_buckets[key] = hits
+    if len(_rate_buckets) > 10_000:
+        for k in [k for k, v in _rate_buckets.items()
+                  if not v or now - v[-1] > window_seconds]:
+            _rate_buckets.pop(k, None)
+    return None
 
 
 # Auth is brute-forceable; AI calls cost money. Both are capped per caller.
@@ -2680,6 +2739,26 @@ class Invoice(Base):
     emailed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True)
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class RateHit(Base):
+    """One row per metered request, so the counter is not in one process.
+
+    In-memory buckets had two failure modes that only show up in production:
+    every deploy reset them, which meant brute-force protection could be
+    defeated by waiting for a restart; and a second uvicorn worker would have
+    given each worker its own allowance, silently multiplying every limit.
+
+    Rows are pruned opportunistically rather than by a scheduled job - there is
+    no scheduler here, and a table nobody cleans is a table that eventually
+    matters.
+    """
+    __tablename__ = "rate_hits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    bucket_key: Mapped[str] = mapped_column(String(200), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True)
 
 
 class UsageEvent(Base):

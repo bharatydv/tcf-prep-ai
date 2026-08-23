@@ -232,3 +232,23 @@ class TestInvoice:
     def test_money_formatting_falls_back_for_an_undrawable_symbol(self):
         assert m.fmt_money(1234.5, "USD") == "$1,234.50"
         assert m.fmt_money(1234.5, "INR") == "INR 1,234.50"
+
+
+# ------------------------------------------------------------ rate limits ---
+class TestRateLimitFallback:
+    """The in-memory path, used only when the database is unreachable.
+
+    It must still refuse a flood: an API that stops metering because the
+    metering store is down is a worse outage than the one it prevents.
+    """
+
+    def test_allows_up_to_the_limit_then_refuses(self):
+        key = "test-bucket:only-here"
+        assert m._memory_rate_check(key, 2, 60) is None
+        assert m._memory_rate_check(key, 2, 60) is None
+        retry = m._memory_rate_check(key, 2, 60)
+        assert retry is not None and retry > 0
+
+    def test_buckets_do_not_leak_into_each_other(self):
+        assert m._memory_rate_check("bucket-a:x", 1, 60) is None
+        assert m._memory_rate_check("bucket-b:x", 1, 60) is None
