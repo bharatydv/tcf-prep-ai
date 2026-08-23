@@ -3,6 +3,13 @@ module.exports = {
   content: ["./src/**/*.{js,jsx}", "./public/index.html"],
   theme: {
     extend: {
+      screens: {
+        // The header's own breakpoint. Its three parts measure 1019px wide
+        // with the real fonts loaded, which does not fit the 992px content box
+        // at lg (1024px) - the page scrolled sideways by 3px there, and by
+        // 35px once the web fonts actually loaded. It first fits at ~1075px.
+        hdr: "1100px",
+      },
       fontFamily: {
         sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
         heading: ["Poppins", "Inter", "sans-serif"],
