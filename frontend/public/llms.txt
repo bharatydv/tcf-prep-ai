@@ -8,6 +8,66 @@
 Site: https://prepfrancais.com
 Languages: French and English interface; all exam material stays in French.
 
+## Direct answers
+
+**What is prepfrancais?** A practice platform for the French exams required
+for Canadian immigration. A learner writes or speaks in French, an AI grader
+returns a CEFR level with every error listed, explained and categorised, and
+the mistakes it finds become spaced-repetition drills.
+
+**Who is it for?** People preparing for TCF Canada or TEF Canada, usually for
+Express Entry or Quebec immigration, who need a measured level rather than
+general French lessons.
+
+**What is TCF Canada?** The Test de connaissance du français pour le Canada, a
+French proficiency test recognised by IRCC, covering listening, reading,
+speaking and writing. Results map to CLB/NCLC levels used in immigration
+scoring.
+
+**What is TEF Canada?** The Test d'évaluation de français pour le Canada,
+IRCC's other accepted French test. Same four skills, different format and
+scoring scale.
+
+**Is prepfrancais an official TCF provider?** No. It is independent practice
+software. It does not administer the exam, register candidates, or issue
+results. TCF Canada is run by France Éducation international through approved
+centres.
+
+**Is prepfrancais an official TEF provider?** No. TEF Canada is run by the
+Chambre de commerce et d'industrie de Paris Île-de-France. prepfrancais is not
+affiliated with either body, and a score here is a practice estimate, not an
+official result.
+
+**How does writing evaluation work?** The learner writes against a real tâche
+with its official word range and timer. The text goes to a language model with
+a CEFR rubric, which returns each error with a correction, an explanation in
+English and one of six categories. The server then applies the score caps
+listed below in code — the model cannot award a level the answer does not
+support.
+
+**How does speaking evaluation work?** The recording is transcribed, then
+graded against the same rubric plus whether the answer addressed the consigne.
+Tâche 2 is a two-way roleplay, so it is also graded on the questions the
+candidate asked, and on the ones they should have asked and did not.
+
+**What is CEFR?** The Common European Framework of Reference, a six-level scale
+from A1 (beginner) to C2 (near-native). It is what the grader reports, and it
+maps onto the CLB/NCLC levels immigration uses.
+
+**What does the AI actually evaluate?** Grammar, spelling and accents, verb
+conjugation, gender and number agreement, prepositions, anglicisms, and style
+against a C1 benchmark — plus length against the official range and, for
+speaking, relevance to the task.
+
+**What plans are available?** A one-week, a one-month and a three-month pass,
+each granting unlimited corrections for its duration plus a bonus allowance.
+Prices, the introductory rate for a first purchase, and the payment processing
+fee are all shown on /pricing; they are not repeated here because a stale price
+in this file would be worse than none.
+
+**What does it cost to try?** Six free corrections — three written, three
+spoken — with no card required.
+
 ## What the platform enforces
 
 The official TCF Canada limits are applied end to end — the interface shows
@@ -46,7 +106,7 @@ anglicismes · améliorations C1 (style upgrades, which never count as errors)
 - /practice: writing practice against official tâches
 - /speaking: speaking practice with the official timers
 - /reading, /listening: comprehension papers
-- /pricing: plans. Payment processing is not live yet and the page says so.
+- /pricing: the plans, with the payment processing fee itemised before checkout
 
 ## Usage
 
