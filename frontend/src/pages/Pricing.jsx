@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { CheckCircle } from '@phosphor-icons/react';
 import { toast } from 'sonner';
@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
 import { CheckoutBreakdown, useBillingPlans } from '../lib/plans';
+import { track } from '../lib/api';
 
 const FEATURE_KEYS = ['pricing.feature1', 'pricing.feature2', 'pricing.feature3', 'pricing.feature4'];
 const FAQ_KEYS = [
@@ -22,6 +23,10 @@ export default function Pricing() {
   const navigate = useNavigate();
   const { plans, currency, configured, loading } = useBillingPlans();
   const [busy, setBusy] = useState('');
+
+  // Reaching the pricing page is the step before checkout, and the gap
+  // between the two is the most useful number in the funnel.
+  useEffect(() => { track('pricing_view'); }, []);
   const cta = user ? '/dashboard' : '/register';
 
   /* Opens the mandate at Cashfree and hands the browser over to it. Nothing is
@@ -31,6 +36,7 @@ export default function Pricing() {
     if (!user) return navigate('/register');
     if (busy) return;
     setBusy(planId);
+    track('checkout_start', { plan: planId });
     try {
       const { data } = await api.post('/api/billing/subscribe', { plan_id: planId });
       if (data?.auth_link) {

@@ -1132,6 +1132,9 @@ ai_rate_limit = rate_limit("ai", limit=20, window_seconds=300)
 # their own, wider bucket; grading the finished conversation still costs a
 # credit and still goes through ai_rate_limit.
 turn_rate_limit = rate_limit("turn", limit=120, window_seconds=300)
+# Funnel events are unauthenticated and cheap, but an open write endpoint
+# still needs a ceiling. Generous enough that a real session never trips it.
+event_rate_limit = rate_limit("event", limit=60, window_seconds=300)
 
 
 # ----------------------------------------------------------------------------
@@ -2677,6 +2680,33 @@ class Invoice(Base):
     emailed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True)
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class UsageEvent(Base):
+    """One row per measurable thing that happened. Funnel and cost, together.
+
+    Two questions were unanswerable before this existed: where people drop out
+    between landing and paying, and what a user costs to serve. They are the
+    same shape - a named event, a moment, and some context - so they share a
+    table rather than two that would have to be joined to answer anything
+    interesting.
+
+    Deliberately thin on personal data: an event name, an account id when there
+    is one, a random per-browser id when there is not, and a JSON blob that
+    must never carry an essay, a transcript or an email address. Nothing here
+    needs to identify a person to answer either question.
+    """
+    __tablename__ = "usage_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event: Mapped[str] = mapped_column(String(48), index=True)
+    user_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True)
+    # A browser that has not signed up yet still has a funnel position.
+    anon_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    meta: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True)
 
 
 class BillingEvent(Base):
@@ -4238,6 +4268,19 @@ async def analyze_stream(body: AnalyzeIn,
                     break
                 except asyncio.TimeoutError:
                     yield ": keep-alive\n\n"
+            # Measured here rather than inside the grader because this is
+            # where the learner's wait actually ends: transcription, grading,
+            # caps and the save. Provider and model come off the analysis,
+            # which is the only place that knows which one served this call.
+            await record_event(
+                db, "ai_call", user_id=user.user_id, feature="writing",
+                provider=analysis.get("ai_provider"),
+                model=analysis.get("ai_model"),
+                seconds=round(waited + STREAM_PING_SECONDS, 1),
+                chars=len(body.text or ""))
+            await record_event(db, "ai_result", user_id=user.user_id,
+                               feature="writing",
+                               level=analysis.get("tcf_level"))
             yield _sse("complete", sub)
         except HTTPException as exc:
             await refund_credit(db, user)
@@ -5556,6 +5599,111 @@ def _is_reversal(event_type: str, status: str) -> bool:
 
 
 # ----------------------------------------------------------------------------
+# Usage and funnel events
+# ----------------------------------------------------------------------------
+# The funnel, in order. Only these names are accepted from a browser: an open
+# endpoint that writes whatever string it is given is a way to fill a disk.
+# Server-side callers may record anything, because they are this file.
+CLIENT_EVENTS = {
+    "landing_view", "signup_start", "pricing_view", "checkout_start",
+    "practice_start", "speaking_start", "mic_denied",
+}
+# Recorded by the server, where they cannot be forged or missed: a browser that
+# closes before the redirect still paid, and an ad blocker still cannot hide it.
+SERVER_EVENTS = {
+    "signup", "email_verified", "ai_result", "ai_call", "ai_failure",
+    "payment_success", "payment_reversed", "subscription_cancelled",
+}
+
+
+async def record_event(db: AsyncSession, event: str,
+                       user_id: Optional[str] = None,
+                       anon_id: Optional[str] = None,
+                       **meta) -> None:
+    """Write one event. Never raises.
+
+    Measurement must not be able to break the thing being measured: a failed
+    insert here would otherwise roll back the grade or the payment it was
+    recording. It is logged and dropped instead.
+    """
+    try:
+        db.add(UsageEvent(event=event[:48], user_id=user_id, anon_id=anon_id,
+                          meta=meta or {}, created_at=now_utc()))
+        await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        await db.rollback()
+        log.warning("Could not record event %s: %s", event, exc)
+
+
+class EventIn(BaseModel):
+    event: str = Field(min_length=1, max_length=48)
+    anon_id: Optional[str] = Field(default=None, max_length=64)
+    # A small bag of context - a plan id, a task number. Size-capped because
+    # this arrives from a browser.
+    meta: Optional[Dict[str, Any]] = None
+
+
+@app.post("/api/events")
+async def post_event(body: EventIn, request: Request,
+                     db: AsyncSession = Depends(get_db),
+                     _rl=Depends(event_rate_limit)):
+    """Funnel events from the browser. Signed in or not.
+
+    Returns 204 whatever happens, including for an event name that is not on
+    the allowlist: telling a caller which names are accepted invites someone to
+    enumerate them, and the browser has nothing useful to do with the answer.
+    """
+    name = body.event.strip().lower()
+    if name in CLIENT_EVENTS:
+        user_id = None
+        token = request.cookies.get("access_token")
+        if token:
+            user_id = decode_token(token, "access")
+        meta = {k: v for k, v in (body.meta or {}).items()
+                if isinstance(k, str)}
+        # Trim aggressively: this is analytics context, not a document store.
+        meta = {k: (v[:120] if isinstance(v, str) else v)
+                for k, v in list(meta.items())[:12]}
+        await record_event(db, name, user_id=user_id,
+                           anon_id=(body.anon_id or None), **meta)
+    return Response(status_code=204)
+
+
+@app.get("/api/admin/funnel")
+async def admin_funnel(days: int = Query(30, ge=1, le=365),
+                       admin: User = Depends(get_admin_user),
+                       db: AsyncSession = Depends(get_db)):
+    """Counts per event, and what the AI actually cost, over `days`.
+
+    Distinct users rather than raw hits: one person reloading the pricing page
+    six times is one person considering it, not six.
+    """
+    from sqlalchemy import text as sa_text
+
+    since = now_utc() - timedelta(days=days)
+    res = await db.execute(sa_text(
+        "SELECT event, COUNT(*) AS hits, "
+        "COUNT(DISTINCT COALESCE(user_id, anon_id)) AS people "
+        "FROM usage_events WHERE created_at >= :since "
+        "GROUP BY event ORDER BY people DESC"), {"since": since})
+    counts = [{"event": r[0], "hits": r[1], "people": r[2]}
+              for r in res.fetchall()]
+
+    res = await db.execute(sa_text(
+        "SELECT meta->>'provider' AS provider, meta->>'model' AS model, "
+        "COUNT(*) AS calls, "
+        "ROUND(AVG((meta->>'seconds')::numeric), 1) AS avg_seconds, "
+        "SUM(COALESCE((meta->>'total_tokens')::bigint, 0)) AS tokens "
+        "FROM usage_events WHERE event = 'ai_call' AND created_at >= :since "
+        "GROUP BY 1, 2 ORDER BY calls DESC"), {"since": since})
+    ai = [{"provider": r[0], "model": r[1], "calls": r[2],
+           "avg_seconds": float(r[3]) if r[3] is not None else None,
+           "tokens": int(r[4] or 0)} for r in res.fetchall()]
+
+    return {"days": days, "events": counts, "ai": ai}
+
+
+# ----------------------------------------------------------------------------
 # Invoices
 # ----------------------------------------------------------------------------
 INVOICE_BUSINESS_NAME = os.environ.get("INVOICE_BUSINESS_NAME", "prepfrancais")
@@ -5909,6 +6057,8 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     plan = BILLING_PLANS.get(row.plan_id) or BILLING_PLANS["month"]
     row.updated_at = now_utc()
 
+    was_active = row.status == "active"
+
     if _is_payment_success(event_type):
         # The charge landed: add one cycle. The period comes from our own
         # catalogue and never from the webhook - and specifically from the
@@ -5931,6 +6081,9 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         except Exception:  # noqa: BLE001
             log.exception("Invoice could not be issued for %s",
                           row.subscription_id)
+        await record_event(db, "payment_success", user_id=user.user_id,
+                           plan=row.plan_id, amount=row.amount,
+                           currency=row.currency, first_cycle=(not was_active))
         return {"ok": True, "granted": True}
 
     # Checked BEFORE cancellation: a refund event often carries a cancelled
@@ -5939,6 +6092,9 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     if _is_reversal(event_type, status):
         plan = BILLING_PLANS.get(row.plan_id) or BILLING_PLANS["month"]
         await revoke_premium_for_reversal(db, user, row, plan)
+        await record_event(db, "payment_reversed", user_id=user.user_id,
+                           plan=row.plan_id, amount=row.amount,
+                           event_type=event_type)
         row.status = "refunded"
         row.cancelled_at = row.cancelled_at or now_utc()
         await db.commit()
