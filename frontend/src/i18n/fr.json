@@ -509,6 +509,19 @@
     "words2": "120 à 150 mots",
     "words3": "120 à 180 mots"
   },
+  "inv": {
+    "date": "Date",
+    "download": "Telecharger le PDF",
+    "emailed": "Envoyee par e-mail",
+    "empty": "Aucune facture pour le moment. Elles apparaissent ici des qu'un paiement aboutit.",
+    "failed": "Vos factures n'ont pas pu etre chargees.",
+    "loginPrompt": "Connectez-vous pour voir vos factures.",
+    "number": "Facture",
+    "plan": "Formule",
+    "subtitle": "Tous vos paiements, avec un recu a telecharger.",
+    "title": "Factures",
+    "total": "Total"
+  },
   "land": {
     "adFree": "sans publicité",
     "aiEvaluation": "Évaluation IA",
@@ -769,9 +782,8 @@
     "ctaTitle": "3 corrections écrites + 3 orales offertes — sans carte bancaire",
     "duration1m": "1 mois",
     "duration1w": "semaine",
-    "duration3m": "3 mois",
-    "firstTime": "Tarif de bienvenue",
     "duration2m": "2 mois",
+    "duration3m": "3 mois",
     "duration5d": "5 jours",
     "faq1a": "Le paiement en ligne n'est pas encore ouvert. Les tarifs ci-dessous sont affichés à titre indicatif et aucune formule ne peut être achetée pour le moment. En attendant, tout le monde utilise la formule gratuite.",
     "faq1q": "Quand les formules seront-elles disponibles ?",
@@ -786,13 +798,18 @@
     "feature2": "40 tests de compréhension orale",
     "feature3": "Sujets d'expression orale liés à l'actualité",
     "feature4": "Sujets et corrections d'expression écrite",
+    "feeNote": "Les prix n'incluent pas les frais de traitement de {{pct}} %, detailles au moment du paiement.",
+    "firstTime": "Tarif de bienvenue",
     "goDashboard": "Aller au tableau de bord",
     "mostPopular": "LE PLUS CHOISI",
-    "subscribe": "S'abonner",
     "noticeBody": "Ces prix sont donnés à titre indicatif. Aucune formule n'est encore achetable : tous les comptes utilisent l'essai gratuit, soit 3 corrections écrites et 3 évaluations orales.",
     "noticeTitle": "Le paiement en ligne n'est pas encore ouvert.",
+    "planPrice": "Prix de la formule",
+    "processingFee": "Frais de traitement du paiement ({{pct}} %)",
+    "subscribe": "S'abonner",
     "subtitle": "Des formules courtes et intensives pour préparer votre date d'examen TEF/TCF Canada.",
-    "title": "Formules"
+    "title": "Formules",
+    "total": "Total"
   },
   "privacy": {
     "h": "Politique de confidentialité",

@@ -6,7 +6,7 @@ import { api, errMsg } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
-import { useBillingPlans } from '../lib/plans';
+import { CheckoutBreakdown, useBillingPlans } from '../lib/plans';
 
 const FEATURE_KEYS = ['pricing.feature1', 'pricing.feature2', 'pricing.feature3', 'pricing.feature4'];
 const FAQ_KEYS = [
@@ -20,7 +20,7 @@ export default function Pricing() {
   const { user } = useAuth();
   const t = useT();
   const navigate = useNavigate();
-  const { plans, configured, loading } = useBillingPlans();
+  const { plans, currency, configured, loading } = useBillingPlans();
   const [busy, setBusy] = useState('');
   const cta = user ? '/dashboard' : '/register';
 
@@ -104,6 +104,9 @@ export default function Pricing() {
               )}
               <p className="mt-1 text-sm font-semibold text-white/90">+ {t('pricing.bonus', { n: p.bonus })}</p>
             </div>
+            {/* The fee is shown here, above the button, because a charge the
+                customer meets after paying is a charge they did not agree to. */}
+            <CheckoutBreakdown plan={p} currency={currency} />
             <ul className="space-y-3 p-6 text-sm">
               {FEATURE_KEYS.map((k) => (
                 <li key={k} className="flex items-start gap-2">

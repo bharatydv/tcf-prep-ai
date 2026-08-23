@@ -509,6 +509,19 @@
     "words2": "120–150 words",
     "words3": "120–180 words"
   },
+  "inv": {
+    "date": "Date",
+    "download": "Download PDF",
+    "emailed": "Emailed to you",
+    "empty": "No invoices yet. They appear here as soon as a payment goes through.",
+    "failed": "Your invoices could not be loaded.",
+    "loginPrompt": "Sign in to see your invoices.",
+    "number": "Invoice",
+    "plan": "Plan",
+    "subtitle": "Every payment you have made, with a receipt to download.",
+    "title": "Invoices",
+    "total": "Total"
+  },
   "land": {
     "adFree": "ad-free",
     "aiEvaluation": "AI Evaluation",
@@ -769,9 +782,8 @@
     "ctaTitle": "3 writing + 3 speaking corrections free — no credit card",
     "duration1m": "1 month",
     "duration1w": "week",
-    "duration3m": "3 months",
-    "firstTime": "First-time price",
     "duration2m": "2 months",
+    "duration3m": "3 months",
     "duration5d": "5 days",
     "faq1a": "Online payment is not open yet. The prices below are indicative and no plan can be purchased for now. In the meantime everyone uses the free plan.",
     "faq1q": "When will the plans be available?",
@@ -786,13 +798,18 @@
     "feature2": "40 listening practice tests",
     "feature3": "Speaking topics from current affairs",
     "feature4": "Writing topics and corrections",
+    "feeNote": "Prices exclude a {{pct}}% payment processing fee, itemised at checkout before you pay.",
+    "firstTime": "First-time price",
     "goDashboard": "Go to dashboard",
     "mostPopular": "MOST POPULAR",
-    "subscribe": "Subscribe",
     "noticeBody": "These prices are shown for information only. No plan can be bought yet: every account uses the free trial, which is 3 writing and 3 speaking corrections.",
     "noticeTitle": "Online payment is not open yet.",
+    "planPrice": "Plan price",
+    "processingFee": "Payment processing fee ({{pct}}%)",
+    "subscribe": "Subscribe",
     "subtitle": "Short, intensive plans built around your TEF/TCF Canada exam date.",
-    "title": "Plans"
+    "title": "Plans",
+    "total": "Total"
   },
   "privacy": {
     "h": "Privacy policy",
