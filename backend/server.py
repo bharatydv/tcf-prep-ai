@@ -9,6 +9,7 @@ original MongoDB version — only persistence was migrated.
 """ 
 import os
 import re
+import time
 import json
 import uuid
 import asyncio
@@ -1877,7 +1878,14 @@ async def _grade_with_provider(provider: str, system_prompt: str,
     attempts = 2
     for attempt in range(attempts):
         try:
+            started = time.monotonic()
             out = await run_ai(fn, model, system_prompt, user_text)
+            # "Why is this taking so long?" is unanswerable without a number.
+            # The whole visible wait is this one call: the progress stages the
+            # browser shows are on a fixed 0.6s tick and finish long before it.
+            log.info("Graded with %s/%s in %.1fs (%d chars in, %d out)",
+                     provider, model, time.monotonic() - started,
+                     len(user_text), len(out or ""))
             _PROVIDER_LAST_ERROR.pop(provider, None)
             return out
         except Exception as exc:  # noqa: BLE001
