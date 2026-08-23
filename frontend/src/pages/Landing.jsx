@@ -29,12 +29,16 @@ function useInView(threshold = 0.18) {
   return [ref, inView];
 }
 
-function Reveal({ children, delay = 0, className = '' }) {
+/* `as` exists because this wrapper was used inside a <ul>, where a <div>
+   between the list and its items is invalid: the list stopped being announced
+   as a list at all. Anything that wraps a semantic child needs to be able to
+   become that child's legal parent. */
+function Reveal({ children, delay = 0, className = '', as: Tag = 'div' }) {
   const [ref, inView] = useInView();
   return (
-    <div ref={ref} className={`reveal ${inView ? 'in' : ''} ${className}`} style={{ transitionDelay: `${delay}ms` }}>
+    <Tag ref={ref} className={`reveal ${inView ? 'in' : ''} ${className}`} style={{ transitionDelay: `${delay}ms` }}>
       {children}
-    </div>
+    </Tag>
   );
 }
 
@@ -141,7 +145,7 @@ export default function Landing() {
 
 
   return (
-    <div className="overflow-x-clip bg-white">
+    <main className="overflow-x-clip bg-white">
       <Seo
         titleKey="seo.home.title"
         descKey="seo.home.desc"
@@ -322,10 +326,9 @@ export default function Landing() {
                     unverifiable claim, like the invented testimonials. The map
                     variable was also named `t`, shadowing the translator. */}
                 {['land.trust1', 'land.trust2', 'land.trust3', 'land.trust4'].map((key, i) => (
-                  <Reveal key={key} delay={i * 80}>
-                    <li className="flex items-center gap-3 text-sm font-medium text-gray-700">
-                      <CheckCircle size={20} weight="fill" className="shrink-0 text-primary" /> {t(key)}
-                    </li>
+                  <Reveal key={key} delay={i * 80} as="li"
+                    className="flex items-center gap-3 text-sm font-medium text-gray-700">
+                    <CheckCircle size={20} weight="fill" className="shrink-0 text-primary" /> {t(key)}
                   </Reveal>
                 ))}
               </ul>
@@ -532,7 +535,8 @@ export default function Landing() {
               <h3 className="font-heading text-2xl font-extrabold text-white sm:text-3xl">{t('land.nclcTable')}</h3>
               <p className="mt-1.5 text-xs text-violet-100/80">{t('land.nclcSub')}</p>
             </div>
-            <div className="overflow-x-auto bg-white">
+            <div className="overflow-x-auto bg-white" tabIndex={0} role="region"
+              aria-label={t('land.nclcTable')}>
               <table className="w-full min-w-[560px] text-center text-sm">
                 <thead>
                   <tr className="bg-violet-50/70 text-xs font-bold text-gray-700">
@@ -590,7 +594,7 @@ export default function Landing() {
         </Reveal>
       </section>
 
-    </div>
+    </main>
   );
 }
 

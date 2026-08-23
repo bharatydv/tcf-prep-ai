@@ -114,7 +114,7 @@ export default function ListeningHome() {
           </div>
         </div>
 
-        <p className="mx-auto mt-5 max-w-xl pb-12 text-center text-xs leading-relaxed text-gray-400">
+        <p className="mx-auto mt-5 max-w-xl pb-12 text-center text-xs leading-relaxed text-gray-500">
           {t('common.disclaimerScores')}
         </p>
       </section>

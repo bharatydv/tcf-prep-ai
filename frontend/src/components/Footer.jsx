@@ -39,7 +39,7 @@ function Column({ title, links }) {
       <ul className="mt-4 space-y-2.5 text-xs">
         {links.map(([to, label]) => (
           <li key={to}>
-            <Link to={to} className="inline-block py-0.5 transition hover:text-white">{label}</Link>
+            <Link to={to} className="inline-block py-1.5 transition hover:text-white">{label}</Link>
           </li>
         ))}
       </ul>
@@ -106,7 +106,7 @@ export default function Footer() {
             <label className="sr-only" htmlFor="newsletter-email">{t('land.emailPlaceholder')}</label>
             <input id="newsletter-email" name="email" value={email} onChange={(e) => setEmail(e.target.value)}
               type="email" autoComplete="email" placeholder={t('land.emailPlaceholder')}
-              className="w-full bg-transparent px-3.5 py-2.5 text-xs text-white placeholder-violet-300/50 outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-400"
+              className="min-h-[44px] w-full bg-transparent px-3.5 py-2.5 text-xs text-white placeholder-violet-300/50 outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-400"
               data-testid="newsletter-input" />
             <button type="submit" disabled={busy}
               className="bg-gradient-to-r from-primary to-fuchsia-600 px-4 text-white transition hover:brightness-110 disabled:opacity-60"
@@ -118,13 +118,13 @@ export default function Footer() {
 
           <p className="mt-6 font-heading text-sm font-bold text-white">{t('land.footCompany')}</p>
           <ul className="mt-3 space-y-2 text-xs">
-            <li><Link to="/contact" className="inline-block py-0.5 transition hover:text-white">{t('land.footContact')}</Link></li>
-            <li><Link to="/privacy" className="inline-block py-0.5 transition hover:text-white">{t('land.footPrivacy')}</Link></li>
-            <li><Link to="/terms" className="inline-block py-0.5 transition hover:text-white">{t('land.footTerms')}</Link></li>
+            <li><Link to="/contact" className="inline-block py-1.5 transition hover:text-white">{t('land.footContact')}</Link></li>
+            <li><Link to="/privacy" className="inline-block py-1.5 transition hover:text-white">{t('land.footPrivacy')}</Link></li>
+            <li><Link to="/terms" className="inline-block py-1.5 transition hover:text-white">{t('land.footTerms')}</Link></li>
           </ul>
         </div>
       </div>
-      <div className="border-t border-white/10 py-5 text-center text-[11px] text-violet-300/50">
+      <div className="border-t border-white/10 py-5 text-center text-[11px] text-violet-300/75">
         {t('land.copyright', { year: new Date().getFullYear() })}
       </div>
     </footer>

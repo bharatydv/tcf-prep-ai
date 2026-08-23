@@ -15,12 +15,20 @@ FROM node:20-bookworm-slim AS build
 WORKDIR /app
 
 # What that downloaded Chromium needs in order to start headless.
+# Puppeteer's own documented dependency set for Debian, in full. The
+# abbreviated list used before was missing libgtk-3-0, libXss and the gdk/pango
+# pair, and the bundled Chromium will not start without them - it exits with a
+# "error while loading shared libraries" that react-snap reports only as a
+# failed browser launch.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates fonts-liberation libasound2 libatk-bridge2.0-0 \
-        libatk1.0-0 libcairo2 libcups2 libdbus-1-3 libdrm2 libgbm1 \
-        libglib2.0-0 libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 \
-        libxcomposite1 libxdamage1 libxext6 libxfixes3 libxkbcommon0 \
-        libxrandr2 \
+        ca-certificates fonts-liberation fonts-noto-color-emoji \
+        libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 \
+        libcairo2 libcups2 libdbus-1-3 libdrm2 libgbm1 \
+        libgdk-pixbuf-2.0-0 libglib2.0-0 libgtk-3-0 \
+        libnspr4 libnss3 libpango-1.0-0 libpangocairo-1.0-0 \
+        libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 libxdamage1 \
+        libxext6 libxfixes3 libxi6 libxkbcommon0 libxrandr2 libxrender1 \
+        libxshmfence1 libxss1 libxtst6 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
@@ -60,6 +68,17 @@ RUN npm run build:prerender \
         && echo "" \
         && rm -rf build \
         && npm run build)
+
+# State the outcome in one line, so `docker compose build` cannot finish
+# ambiguously. A prerendered index.html has markup immediately inside #root;
+# a client-only build has <div id="root"></div> and nothing else.
+RUN if grep -q '<div id="root"><div' build/index.html; then \
+        echo "PRERENDER OK - index.html is $(stat -c%s build/index.html) bytes with real markup"; \
+        echo "PRERENDER OK - $(find build -name index.html | wc -l) route(s) written"; \
+    else \
+        echo "PRERENDER MISSING - index.html is $(stat -c%s build/index.html) bytes, #root is empty"; \
+        echo "PRERENDER MISSING - crawlers without JavaScript will see nothing"; \
+    fi
 
 # ---- runtime stage ---------------------------------------------------------
 # The dev server (`npm start`) serves unminified modules, no compression and no
