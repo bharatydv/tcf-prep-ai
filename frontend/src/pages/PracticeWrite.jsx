@@ -163,8 +163,6 @@ export default function PracticeWrite() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navState, user, text]);
 
-  if (stage) return <main className="px-4 py-16"><AnalysisProgress current={stage} /></main>;
-
   // What the learner is writing about: their own topic, or the selected test's consigne.
   const question = freeMode ? ownQuestion.trim() : (activePrompt?.description || '');
   const activeTopicIndex = topics.findIndex((q) => q.question_id === activeTopicId);
@@ -174,6 +172,7 @@ export default function PracticeWrite() {
 
   return (
     <main className="overflow-x-clip bg-white">
+      {stage && <AnalysisProgress current={stage} />}
       <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
         <BackLink className="!mb-6" testid="back-to-tasks"
           fallback={themeId ? `/practice/themes?tache=${tacheNum}` : '/practice/tasks'} />

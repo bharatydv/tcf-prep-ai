@@ -378,25 +378,41 @@ const STAGES = [
   ['generating', 'analysis.generating'],
 ];
 
+/* Shown over the page the learner is on, not in place of it.
+ *
+ * Every caller used to swap its whole page out for this card, so submitting an
+ * essay wiped the essay off the screen and dropped the learner somewhere that
+ * looked like a different part of the site. Their text stays where it was now
+ * and this sits on top of it; when the analysis lands, the caller navigates or
+ * renders the result exactly as before.
+ *
+ * There is deliberately no close button: the grade is already being paid for
+ * by the time this appears, and dismissing it would leave the request running
+ * with nowhere to land. The backdrop swallows clicks meant for the form behind
+ * it, which is the other half of the same guarantee. */
 export function AnalysisProgress({ current }) {
   const t = useT();
   const idx = STAGES.findIndex(([k]) => k === current);
   return (
-    <div className="card mx-auto max-w-md p-6" data-testid="analysis-progress">
-      <h3 className="mb-4 font-heading text-lg font-semibold">{t('analysis.title')}</h3>
-      <ul className="space-y-3">
-        {STAGES.map(([key, label], i) => {
-          const state = i < idx ? 'done' : i === idx ? 'active' : 'todo';
-          return (
-            <li key={key} className="flex items-center gap-3 text-sm">
-              {state === 'done' && <span className="flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-[10px] text-white">✓</span>}
-              {state === 'active' && <span className="h-5 w-5 animate-spin rounded-full border-2 border-violet-200 border-t-primary" />}
-              {state === 'todo' && <span className="h-5 w-5 rounded-full border-2 border-gray-200" />}
-              <span className={state === 'todo' ? 'text-gray-400' : state === 'active' ? 'font-semibold text-primary' : 'text-gray-700'}>{t(label)}</span>
-            </li>
-          );
-        })}
-      </ul>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/50 p-4 backdrop-blur-sm"
+      role="dialog" aria-modal="true" aria-busy="true" aria-label={t('analysis.title')}
+      data-testid="analysis-progress">
+      <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+        <h3 className="mb-4 font-heading text-lg font-semibold">{t('analysis.title')}</h3>
+        <ul className="space-y-3">
+          {STAGES.map(([key, label], i) => {
+            const state = i < idx ? 'done' : i === idx ? 'active' : 'todo';
+            return (
+              <li key={key} className="flex items-center gap-3 text-sm">
+                {state === 'done' && <span className="flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-[10px] text-white">✓</span>}
+                {state === 'active' && <span className="h-5 w-5 animate-spin rounded-full border-2 border-violet-200 border-t-primary" />}
+                {state === 'todo' && <span className="h-5 w-5 rounded-full border-2 border-gray-200" />}
+                <span className={state === 'todo' ? 'text-gray-400' : state === 'active' ? 'font-semibold text-primary' : 'text-gray-700'}>{t(label)}</span>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
     </div>
   );
 }
