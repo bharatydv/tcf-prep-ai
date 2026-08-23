@@ -26,6 +26,7 @@ export default function Paywall() {
   const t = useT();
   const { user } = useAuth();
   const { plans, configured } = useBillingPlans();
+  const feePercent = plans.find((p) => p.checkout?.fee_percent)?.checkout?.fee_percent;
   const [block, setBlock] = useState(null);
 
   useEffect(() => {
@@ -103,6 +104,14 @@ export default function Paywall() {
               </div>
             ))}
           </div>
+
+          {/* Nothing is bought from this dialog, so the fee is flagged here
+              and itemised on /pricing where the money is actually taken. */}
+          {Boolean(feePercent) && (
+            <p className="mt-2 text-[11px] leading-relaxed text-gray-500">
+              {t('pricing.feeNote', { pct: feePercent })}
+            </p>
+          )}
 
           {/* Only while payment really is closed — once Cashfree is configured
               this line would be a lie sitting above a working buy button. */}

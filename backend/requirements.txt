@@ -14,3 +14,6 @@ google-genai==2.8.0
 # transitive dependency before, so a change upstream would have broken
 # transcription with an ImportError swallowed by a blanket except.
 requests==2.34.2
+# Invoice PDFs. Pure Python with no system libraries behind it, unlike
+# weasyprint or wkhtmltopdf, so the container image needs nothing added.
+reportlab==4.2.5

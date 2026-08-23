@@ -206,6 +206,7 @@ export function Header() {
                 </span>
               )}
               <Link to="/dashboard" className="block py-2.5 text-sm font-medium">{t('nav.dashboard')}</Link>
+              <Link to="/invoices" className="block py-2.5 text-sm font-medium">{t('inv.title')}</Link>
               {user.role === 'admin' && (
                 <Link to="/admin" className="block py-2.5 text-sm font-medium">Admin</Link>
               )}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Fire, Trophy, GameController } from '@phosphor-icons/react';
+import { Receipt, Fire, Trophy, GameController } from '@phosphor-icons/react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
   BarChart, Bar, Cell, LineChart, Line,
@@ -68,7 +68,13 @@ export default function Dashboard() {
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-10">
-      <h1 className="text-3xl font-bold">{t('dash.title')}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-3xl font-bold">{t('dash.title')}</h1>
+        <Link to="/invoices" className="btn-outline !px-4 !py-2 text-sm"
+          data-testid="dashboard-invoices">
+          <Receipt size={16} /> {t('inv.title')}
+        </Link>
+      </div>
 
       {/* stat cards */}
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

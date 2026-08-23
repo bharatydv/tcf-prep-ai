@@ -34,6 +34,7 @@ const RecentTopicDetail = lazy(() =>
 const MockExam = lazy(() => import("./pages/MockExam"));
 const Admin = lazy(() => import("./pages/Admin"));
 const BillingReturn = lazy(() => import("./pages/BillingReturn"));
+const Invoices = lazy(() => import("./pages/Invoices"));
 const Combinations = lazy(() => import("./pages/Combinations"));
 const ReadingHome = lazy(() => import("./pages/ReadingHome"));
 const ReadingTests = lazy(() => import("./pages/ReadingTests"));
@@ -130,6 +131,10 @@ export default function App() {
           <Route
             path="/review"
             element={<ProtectedRoute><Review /></ProtectedRoute>}
+          />
+          <Route
+            path="/invoices"
+            element={<ProtectedRoute><Invoices /></ProtectedRoute>}
           />
           <Route
             path="/feedback/:submissionId"

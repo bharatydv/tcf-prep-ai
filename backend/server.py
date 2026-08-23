@@ -18,6 +18,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone, date
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, List, Dict, Any, Tuple
 
 import bcrypt
@@ -919,8 +920,13 @@ def clear_auth_cookies(resp: Response):
 # ----------------------------------------------------------------------------
 # Email
 # ----------------------------------------------------------------------------
-def _send_email_sync(to: str, subject: str, body: str):
-    """Send one plain-text message over SMTP, or log it when unconfigured."""
+def _send_email_sync(to: str, subject: str, body: str, attachments=None):
+    """Send one plain-text message over SMTP, or log it when unconfigured.
+
+    `attachments` is a list of (filename, mime_type, bytes) - invoices arrive
+    as a PDF the customer can keep, rather than a link they have to be logged
+    in to follow.
+    """
     if not SMTP_HOST:
         # Development convenience. In production the boot check below refuses
         # to start without SMTP, so this branch cannot silently swallow a
@@ -937,6 +943,10 @@ def _send_email_sync(to: str, subject: str, body: str):
     msg["To"] = to
     msg["Subject"] = subject
     msg.set_content(body)
+    for filename, mime, blob in (attachments or []):
+        main, _, sub = mime.partition("/")
+        msg.add_attachment(blob, maintype=main, subtype=sub or "octet-stream",
+                           filename=filename)
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as smtp:
         if SMTP_STARTTLS:
             smtp.starttls()
@@ -945,12 +955,13 @@ def _send_email_sync(to: str, subject: str, body: str):
         smtp.send_message(msg)
 
 
-async def send_email(to: str, subject: str, body: str) -> bool:
+async def send_email(to: str, subject: str, body: str,
+                     attachments=None) -> bool:
     """Send off the event loop. A failure is logged, never raised: the caller
     must answer identically whether or not delivery worked, or the endpoint
     becomes a way to test which addresses are registered."""
     try:
-        await run_ai(_send_email_sync, to, subject, body)
+        await run_ai(_send_email_sync, to, subject, body, attachments)
         return True
     except Exception as exc:  # noqa: BLE001
         log.error("Email send failed (%s): %s", subject, exc)
@@ -2604,7 +2615,15 @@ class Subscription(Base):
     plan_id: Mapped[str] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
     currency: Mapped[str] = mapped_column(String(8), default="USD")
+    # What the card is actually charged: the plan price plus the processing
+    # fee. The parts are kept beside it because an invoice has to itemise them
+    # and a webhook has to be checked against the total, and recomputing either
+    # from today's fee rate would misprice a subscription authorised last month.
     amount: Mapped[float] = mapped_column(Float, default=0.0)
+    base_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    fee_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    fee_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    tax_amount: Mapped[float] = mapped_column(Float, default=0.0)
     cf_subscription_id: Mapped[Optional[str]] = mapped_column(
         String(128), nullable=True)
     current_period_end: Mapped[Optional[datetime]] = mapped_column(
@@ -2613,6 +2632,51 @@ class Subscription(Base):
         DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Invoice(Base):
+    """One receipt per successful charge.
+
+    Written from the subscription row rather than recomputed, so a customer
+    who paid at one price and fee rate keeps a receipt showing what they were
+    actually charged even after either changes.
+
+    The number is derived from the primary key, not from a count: two payments
+    landing in the same second would otherwise both read "the last number" and
+    issue the same one, which is the sort of thing an accountant notices.
+    """
+    __tablename__ = "invoices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    invoice_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    subscription_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True)
+    plan_id: Mapped[str] = mapped_column(String(32))
+    plan_name: Mapped[str] = mapped_column(String(64))
+    currency: Mapped[str] = mapped_column(String(8), default="USD")
+    base_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    fee_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    fee_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    tax_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    tax_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    tax_label: Mapped[str] = mapped_column(String(32), default="Tax")
+    total: Mapped[float] = mapped_column(Float, default=0.0)
+    # Cashfree's payment id, so a receipt can be tied back to their dashboard.
+    payment_reference: Mapped[Optional[str]] = mapped_column(
+        String(128), nullable=True)
+    period_start: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    period_end: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    # Copied, not joined: a receipt must keep saying who it was issued to even
+    # if the account is later renamed or the address changed.
+    billed_to_name: Mapped[str] = mapped_column(String(160), default="")
+    billed_to_email: Mapped[str] = mapped_column(String(255), default="")
+    emailed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class BillingEvent(Base):
@@ -2672,6 +2736,80 @@ def _billing_first_price(name: str, default: str) -> float:
     return float(os.environ.get(f"BILLING_FIRST_{name.upper()}", default))
 
 
+# ---------------------------------------------------------------------------
+# Payment processing fee
+# ---------------------------------------------------------------------------
+# The gateway's cut, added to what the customer pays instead of being taken out
+# of the plan price. Nothing here is hardcoded per plan: the fee is a rate
+# applied to whatever the catalogue says the plan costs, so a price change
+# needs no fee change and vice versa.
+#
+# 2.99% is Cashfree's international card rate at the time of writing, which is
+# why it is a default and not a constant. Cashfree charges different rates per
+# method - UPI, domestic cards and international cards are not the same number
+# - so any method can be given its own rate with
+# PAYMENT_FEE_PERCENT_<METHOD>, e.g. PAYMENT_FEE_PERCENT_UPI=0.
+INTERNATIONAL_CARD_FEE_PERCENT = float(
+    os.environ.get("INTERNATIONAL_CARD_FEE_PERCENT", "2.99"))
+# Only card mandates are offered today, so this is what a checkout uses unless
+# it says otherwise.
+DEFAULT_PAYMENT_METHOD = os.environ.get("DEFAULT_PAYMENT_METHOD",
+                                        "international_card")
+
+# Tax is NOT the processing fee and is deliberately off by default. GST at 18%
+# applies to an Indian business selling to Indian customers; adding it to a
+# Canadian learner's card because the gateway happens to be Indian would be
+# inventing a charge. Turn it on with TAX_PERCENT only when the business
+# actually owes it, and label it correctly with TAX_LABEL.
+TAX_PERCENT = float(os.environ.get("TAX_PERCENT", "0"))
+TAX_LABEL = os.environ.get("TAX_LABEL", "Tax")
+
+_CENTS = Decimal("0.01")
+
+
+def money(value) -> Decimal:
+    """A currency amount, rounded half-up to the cent.
+
+    str() first: Decimal(0.1) is 0.1000000000000000055511151231257827, and
+    binary floats are how a total ends up a cent off what was displayed.
+    """
+    return Decimal(str(value or 0)).quantize(_CENTS, rounding=ROUND_HALF_UP)
+
+
+def fee_percent_for(method: Optional[str] = None) -> Decimal:
+    """The processing rate for one payment method."""
+    method = (method or DEFAULT_PAYMENT_METHOD).strip().lower()
+    override = os.environ.get(f"PAYMENT_FEE_PERCENT_{method.upper()}")
+    if override is not None:
+        return Decimal(str(override))
+    if method in {"international_card", "card"}:
+        return Decimal(str(INTERNATIONAL_CARD_FEE_PERCENT))
+    return Decimal(str(INTERNATIONAL_CARD_FEE_PERCENT))
+
+
+def checkout_breakdown(base_amount, method: Optional[str] = None) -> dict:
+    """What the customer is asked to pay, itemised.
+
+    The one place a total is computed. Every caller - the catalogue the pricing
+    page renders, the amount sent to Cashfree, the figure a webhook is checked
+    against, and the invoice - reads it from here, so they cannot disagree.
+    """
+    base = money(base_amount)
+    pct = fee_percent_for(method)
+    fee = money(base * pct / Decimal("100"))
+    tax = money(base * Decimal(str(TAX_PERCENT)) / Decimal("100"))
+    return {
+        "base_amount": float(base),
+        "fee_percent": float(pct),
+        "fee_amount": float(fee),
+        "tax_percent": float(TAX_PERCENT),
+        "tax_amount": float(tax),
+        "tax_label": TAX_LABEL,
+        "total": float(money(base + fee + tax)),
+        "method": (method or DEFAULT_PAYMENT_METHOD),
+    }
+
+
 # The catalogue lives here, not in the frontend: an amount the browser sends is
 # an amount the browser can change. frontend/src/lib/plans.js renders whatever
 # GET /api/billing/plans returns.
@@ -2691,7 +2829,7 @@ BILLING_PLANS = {
               "interval_type": "month", "intervals": 1, "bonus": 8},
     "quarter": {"name": "3 Months",
                 "amount": _billing_price("quarter", "220"),
-                "first_amount": _billing_first_price("quarter", "180"),
+                "first_amount": _billing_first_price("quarter", "160"),
                 "interval_type": "month", "intervals": 3, "bonus": 15},
 }
 
@@ -3512,6 +3650,20 @@ MIGRATIONS = [
     "ALTER TABLE users ALTER COLUMN free_writing_used SET DEFAULT 0",
     "ALTER TABLE users ALTER COLUMN free_speaking_used SET DEFAULT 0",
     "ALTER TABLE users ALTER COLUMN free_speaking_tache2_used SET DEFAULT 0",
+    # The processing fee, split out of the amount. Existing rows were charged
+    # the plain plan price, so their base IS their amount and their fee is nil
+    # - which is the truth about what those customers paid, and what any
+    # receipt issued for them must go on saying.
+    "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS base_amount "
+    "DOUBLE PRECISION DEFAULT 0",
+    "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS fee_percent "
+    "DOUBLE PRECISION DEFAULT 0",
+    "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS fee_amount "
+    "DOUBLE PRECISION DEFAULT 0",
+    "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS tax_amount "
+    "DOUBLE PRECISION DEFAULT 0",
+    "UPDATE subscriptions SET base_amount = amount "
+    "WHERE COALESCE(base_amount, 0) = 0",
 ]
 
 
@@ -5157,13 +5309,22 @@ async def billing_plans():
     Public, and the only source of truth for prices. The frontend used to hold
     them, which meant the amount charged came from whatever the browser sent.
     """
+    # The fee is served with the catalogue, itemised, so the pricing page shows
+    # the same three lines the customer is charged rather than computing a
+    # total of its own that could drift from the server's.
     return {
         "currency": BILLING_CURRENCY,
         "configured": billing_configured(),
+        "fee_percent": float(fee_percent_for()),
+        "tax_percent": TAX_PERCENT,
+        "tax_label": TAX_LABEL,
         "plans": [{"id": pid, "name": p["name"], "amount": p["amount"],
                    "first_amount": p.get("first_amount"),
                    "interval_type": p["interval_type"],
-                   "intervals": p["intervals"], "bonus": p["bonus"]}
+                   "intervals": p["intervals"], "bonus": p["bonus"],
+                   "checkout": checkout_breakdown(p["amount"]),
+                   "first_checkout": (checkout_breakdown(p["first_amount"])
+                                      if p.get("first_amount") else None)}
                   for pid, p in BILLING_PLANS.items()],
     }
 
@@ -5217,8 +5378,13 @@ async def billing_subscribe(body: SubscribeIn,
     # the browser can ask for is a discount anyone can take twice.
     first_time = not await has_paid_before(db, user.user_id)
     amount = plan_price(plan, first_time)
+    # The customer pays the plan price plus the gateway's cut. Computed here
+    # from the server's own catalogue - the request carries a plan id and
+    # nothing else, so there is no total for the browser to tamper with.
+    bill = checkout_breakdown(amount)
+    charged = bill["total"]
     try:
-        cf_plan = await cf_ensure_plan(plan_key, plan, amount)
+        cf_plan = await cf_ensure_plan(plan_key, plan, charged)
     except Exception:  # noqa: BLE001
         log.exception("Cashfree plan registration failed for %s", plan_key)
         raise HTTPException(
@@ -5261,13 +5427,18 @@ async def billing_subscribe(body: SubscribeIn,
     db.add(Subscription(
         subscription_id=sub_id, user_id=user.user_id,
         plan_id=body.plan_id.strip().lower(), status="pending",
-        currency=BILLING_CURRENCY, amount=amount,
+        currency=BILLING_CURRENCY, amount=charged,
+        base_amount=bill["base_amount"], fee_percent=bill["fee_percent"],
+        fee_amount=bill["fee_amount"], tax_amount=bill["tax_amount"],
         cf_subscription_id=str(_dig(data, "cf_subscription_id") or ""),
         created_at=now, updated_at=now))
     await db.commit()
     return {
         "subscription_id": sub_id,
-        "amount": amount,
+        # `amount` stays the charged total, which is what the old field always
+        # meant; the parts are beside it so a confirmation screen can itemise.
+        "amount": charged,
+        "breakdown": bill,
         "first_time": first_time,
         "auth_link": _dig(data, "authorization_link", "authorisation_link",
                           "auth_link", "subscription_link"),
@@ -5310,9 +5481,308 @@ def _is_payment_success(event_type: str) -> bool:
     return "PAYMENT" in e and "SUCCESS" in e
 
 
+def verify_paid_amount(event: dict, row: Subscription) -> Optional[float]:
+    """Compare what Cashfree says it took against what we asked it to take.
+
+    Logged, not enforced. Cashfree is the authority on what it actually
+    collected, and the amounts that legitimately differ from the plan total
+    are ordinary: the refunded authorisation charge that opens a mandate, a
+    partial refund, a currency conversion landing a cent out. Refusing premium
+    to somebody whose money has already left their account, because a figure
+    was formatted differently, is a worse failure than recording a mismatch
+    and looking at it.
+
+    Returns the amount seen, or None when the event does not carry one.
+    """
+    raw = _dig(event, "payment_amount", "order_amount", "amount",
+               "subscription_payment_amount")
+    if raw is None:
+        return None
+    try:
+        paid = float(money(raw))
+    except Exception:  # noqa: BLE001
+        log.warning("Cashfree reported an unreadable amount %r for %s",
+                    raw, row.subscription_id)
+        return None
+    expected = float(money(row.amount or 0))
+    if abs(paid - expected) > 0.01:
+        log.error("AMOUNT MISMATCH on %s: Cashfree took %.2f, the plan total "
+                  "is %.2f (base %.2f + fee %.2f). Premium still granted from "
+                  "the plan, not the amount - check this payment.",
+                  row.subscription_id, paid, expected,
+                  row.base_amount or 0.0, row.fee_amount or 0.0)
+    return paid
+
+
 def _is_cancellation(event_type: str, status: str) -> bool:
     blob = f"{event_type} {status}".upper()
     return "CANCEL" in blob
+
+
+# ----------------------------------------------------------------------------
+# Invoices
+# ----------------------------------------------------------------------------
+INVOICE_BUSINESS_NAME = os.environ.get("INVOICE_BUSINESS_NAME", "prepfrancais")
+# Pipe-separated, one line per segment: "Studio 4 | Bengaluru | India".
+INVOICE_BUSINESS_ADDRESS = os.environ.get("INVOICE_BUSINESS_ADDRESS", "")
+INVOICE_SUPPORT_EMAIL = os.environ.get("INVOICE_SUPPORT_EMAIL", "")
+INVOICE_NUMBER_PREFIX = os.environ.get("INVOICE_NUMBER_PREFIX", "PF")
+# Printed under the totals when the business has to say something about tax:
+# a GSTIN, an "export of services" note, a reverse-charge line. Left empty
+# rather than guessed, because a wrong tax statement on a receipt is worse
+# than no statement at all.
+INVOICE_TAX_NOTE = os.environ.get("INVOICE_TAX_NOTE", "")
+
+_CURRENCY_SYMBOL = {"USD": "$", "CAD": "$", "EUR": "€", "GBP": "£"}
+
+
+def fmt_money(amount, currency: str = "USD") -> str:
+    """`$82.39`, or `INR 6,800.00` for a currency the PDF font cannot draw."""
+    symbol = _CURRENCY_SYMBOL.get((currency or "").upper())
+    if symbol:
+        return f"{symbol}{money(amount):,.2f}"
+    return f"{(currency or '').upper()} {money(amount):,.2f}"
+
+
+def render_invoice_pdf(inv: Invoice) -> bytes:
+    """The invoice as a one-page PDF.
+
+    Drawn rather than templated: the document is a header, a party block and
+    four lines of arithmetic, and a template engine plus an HTML-to-PDF
+    converter would be more moving parts than the thing they produce.
+    """
+    from io import BytesIO
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas as pdfcanvas
+
+    buf = BytesIO()
+    c = pdfcanvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+    left, right = 20 * mm, width - 20 * mm
+    y = height - 25 * mm
+
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(left, y, INVOICE_BUSINESS_NAME)
+    c.setFont("Helvetica-Bold", 16)
+    c.drawRightString(right, y, "INVOICE")
+    y -= 7 * mm
+
+    c.setFont("Helvetica", 9)
+    for line in (INVOICE_BUSINESS_ADDRESS or "").split("|"):
+        if line.strip():
+            c.drawString(left, y, line.strip())
+            y -= 4.5 * mm
+    if INVOICE_SUPPORT_EMAIL:
+        c.drawString(left, y, INVOICE_SUPPORT_EMAIL)
+        y -= 4.5 * mm
+
+    c.setFont("Helvetica", 10)
+    issued = inv.issued_at or now_utc()
+    c.drawRightString(right, height - 32 * mm, f"No. {inv.number}")
+    c.drawRightString(right, height - 37 * mm, issued.strftime("%d %B %Y"))
+
+    y = min(y, height - 45 * mm) - 6 * mm
+    c.setStrokeColorRGB(0.85, 0.85, 0.9)
+    c.line(left, y, right, y)
+    y -= 9 * mm
+
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(left, y, "Billed to")
+    y -= 5 * mm
+    c.setFont("Helvetica", 10)
+    if inv.billed_to_name:
+        c.drawString(left, y, inv.billed_to_name)
+        y -= 5 * mm
+    c.drawString(left, y, inv.billed_to_email or "")
+    y -= 12 * mm
+
+    # ---- the arithmetic, itemised ----
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(left, y, "Description")
+    c.drawRightString(right, y, "Amount")
+    y -= 3 * mm
+    c.line(left, y, right, y)
+    y -= 7 * mm
+
+    def row(label: str, amount, bold: bool = False, muted: bool = False):
+        nonlocal y
+        c.setFont("Helvetica-Bold" if bold else "Helvetica", 11 if bold else 10)
+        if muted:
+            c.setFillColorRGB(0.35, 0.35, 0.4)
+        c.drawString(left, y, label)
+        c.drawRightString(right, y, fmt_money(amount, inv.currency))
+        c.setFillColorRGB(0, 0, 0)
+        y -= 6.5 * mm
+
+    period = ""
+    if inv.period_end:
+        period = f" - access until {inv.period_end.strftime('%d %b %Y')}"
+    row(f"{inv.plan_name} plan{period}", inv.base_amount)
+    # Named in full on purpose: the customer is entitled to see that this is
+    # the gateway's charge and not a price rise.
+    row(f"Payment processing fee ({inv.fee_percent:g}%)", inv.fee_amount,
+        muted=True)
+    if inv.tax_amount:
+        row(f"{inv.tax_label} ({inv.tax_percent:g}%)", inv.tax_amount,
+            muted=True)
+
+    y -= 1 * mm
+    c.line(left, y, right, y)
+    y -= 8 * mm
+    row("Total paid", inv.total, bold=True)
+
+    y -= 6 * mm
+    c.setFont("Helvetica", 8.5)
+    c.setFillColorRGB(0.4, 0.4, 0.45)
+    if inv.payment_reference:
+        c.drawString(left, y, f"Payment reference: {inv.payment_reference}")
+        y -= 4.5 * mm
+    if INVOICE_TAX_NOTE:
+        c.drawString(left, y, INVOICE_TAX_NOTE)
+        y -= 4.5 * mm
+    c.drawString(left, y, "Paid by card via Cashfree. This is a receipt for a "
+                          "payment already taken.")
+
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+def invoice_filename(inv: Invoice) -> str:
+    return f"invoice-{inv.number}.pdf"
+
+
+def invoice_email_body(inv: Invoice) -> str:
+    lines = [
+        (f"Bonjour {inv.billed_to_name or ''}").strip() + ",",
+        "",
+        f"Merci pour votre paiement. Votre facture {inv.number} est jointe "
+        f"a ce message.",
+        "",
+        f"Formule : {inv.plan_name}",
+        f"Prix de la formule : {fmt_money(inv.base_amount, inv.currency)}",
+        f"Frais de traitement du paiement ({inv.fee_percent:g}%) : "
+        f"{fmt_money(inv.fee_amount, inv.currency)}",
+    ]
+    if inv.tax_amount:
+        lines.append(f"{inv.tax_label} ({inv.tax_percent:g}%) : "
+                     f"{fmt_money(inv.tax_amount, inv.currency)}")
+    lines += [
+        f"Total : {fmt_money(inv.total, inv.currency)}",
+        "",
+        f"Vos factures restent disponibles dans votre compte : "
+        f"{PUBLIC_URL}/invoices",
+        "",
+        INVOICE_BUSINESS_NAME,
+    ]
+    return NEWLINE.join(lines)
+
+
+def public_invoice(inv: Invoice) -> dict:
+    return {
+        "invoice_id": inv.invoice_id,
+        "number": inv.number,
+        "plan_id": inv.plan_id,
+        "plan_name": inv.plan_name,
+        "currency": inv.currency,
+        "base_amount": inv.base_amount,
+        "fee_percent": inv.fee_percent,
+        "fee_amount": inv.fee_amount,
+        "tax_percent": inv.tax_percent,
+        "tax_amount": inv.tax_amount,
+        "tax_label": inv.tax_label,
+        "total": inv.total,
+        "payment_reference": inv.payment_reference,
+        "period_end": inv.period_end.isoformat() if inv.period_end else None,
+        "issued_at": inv.issued_at.isoformat() if inv.issued_at else None,
+        "download_url": f"/api/billing/invoices/{inv.invoice_id}/pdf",
+    }
+
+
+async def issue_invoice(db: AsyncSession, user: User, row: Subscription,
+                        payment_reference: Optional[str] = None):
+    """Write the receipt for one successful charge, and email it.
+
+    The figures come off the subscription row, not from today's catalogue and
+    today's fee rate: a customer who authorised at one price must keep a
+    receipt showing what they were actually charged.
+    """
+    if payment_reference:
+        # One receipt per payment. The webhook is already idempotent on its
+        # event key, but Cashfree can report the same charge under more than
+        # one event type, and two invoices for one payment is a support ticket.
+        seen = await db.execute(select(Invoice).where(
+            Invoice.payment_reference == payment_reference))
+        if seen.scalar_one_or_none():
+            return None
+
+    plan = BILLING_PLANS.get(row.plan_id) or {}
+    base = row.base_amount if row.base_amount else row.amount
+    fee = row.fee_amount or 0.0
+    tax = row.tax_amount or 0.0
+    total = row.amount or float(money(base + fee + tax))
+    inv = Invoice(
+        invoice_id=new_id("inv"), number="",
+        user_id=user.user_id, subscription_id=row.subscription_id,
+        plan_id=row.plan_id, plan_name=plan.get("name", row.plan_id),
+        currency=row.currency or BILLING_CURRENCY,
+        base_amount=base, fee_percent=row.fee_percent or 0.0, fee_amount=fee,
+        tax_percent=TAX_PERCENT, tax_amount=tax, tax_label=TAX_LABEL,
+        total=total, payment_reference=payment_reference,
+        period_start=now_utc(), period_end=user.premium_until,
+        billed_to_name=user.name or "", billed_to_email=user.email,
+        issued_at=now_utc())
+    db.add(inv)
+    # The number is derived from the primary key rather than from a count, so
+    # two payments landing in the same second cannot be issued the same one.
+    await db.flush()
+    inv.number = f"{INVOICE_NUMBER_PREFIX}-{inv.issued_at.year}-{inv.id:06d}"
+    await db.commit()
+
+    try:
+        pdf = await run_ai(render_invoice_pdf, inv)
+        sent = await send_email(
+            inv.billed_to_email,
+            f"{INVOICE_BUSINESS_NAME} - facture {inv.number}",
+            invoice_email_body(inv),
+            [(invoice_filename(inv), "application/pdf", pdf)])
+        if sent:
+            inv.emailed_at = now_utc()
+            await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        # A receipt that could not be emailed is still a receipt: it is saved,
+        # downloadable from the account, and must not fail the webhook that
+        # granted the premium the customer paid for.
+        log.error("Invoice %s could not be emailed: %s", inv.number, exc)
+    return inv
+
+
+@app.get("/api/billing/invoices")
+async def list_invoices(user: User = Depends(get_current_user),
+                        db: AsyncSession = Depends(get_db)):
+    """Every receipt issued to this account, newest first."""
+    res = await db.execute(
+        select(Invoice).where(Invoice.user_id == user.user_id)
+        .order_by(Invoice.issued_at.desc()).limit(200))
+    return {"invoices": [public_invoice(i) for i in res.scalars().all()]}
+
+
+@app.get("/api/billing/invoices/{invoice_id}/pdf")
+async def download_invoice(invoice_id: str,
+                           user: User = Depends(get_current_user),
+                           db: AsyncSession = Depends(get_db)):
+    """The PDF. Scoped to the owner - an invoice id is not an access token."""
+    res = await db.execute(select(Invoice).where(
+        Invoice.invoice_id == invoice_id, Invoice.user_id == user.user_id))
+    inv = res.scalar_one_or_none()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Facture introuvable")
+    pdf = await run_ai(render_invoice_pdf, inv)
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition":
+                 f'attachment; filename="{invoice_filename(inv)}"'})
 
 
 @app.post("/api/billing/webhook")
@@ -5377,15 +5847,27 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     row.updated_at = now_utc()
 
     if _is_payment_success(event_type):
-        # The charge landed: add one cycle. The amount is read from our own
-        # catalogue, never from the webhook, so a forged or replayed body
-        # cannot buy a longer period than the plan sells.
+        # The charge landed: add one cycle. The period comes from our own
+        # catalogue and never from the webhook - and specifically from the
+        # PLAN, not from the amount, so the processing fee riding along with
+        # the payment can never be mistaken for a bigger purchase.
+        verify_paid_amount(event, row)
         await grant_premium(db, user, plan_period(plan), bonus=plan["bonus"])
         row.status = "active"
         row.current_period_end = user.premium_until
         await db.commit()
         log.info("Premium extended to %s for %s (plan %s)",
                  user.premium_until, user.user_id, row.plan_id)
+        # After the grant and its commit: a receipt is worth having, but not
+        # at the price of the premium the customer has already paid for.
+        try:
+            inv = await issue_invoice(db, user, row,
+                                      payment_reference=str(marker) or None)
+            if inv is not None:
+                log.info("Issued invoice %s for %s", inv.number, user.user_id)
+        except Exception:  # noqa: BLE001
+            log.exception("Invoice could not be issued for %s",
+                          row.subscription_id)
         return {"ok": True, "granted": True}
 
     if _is_cancellation(event_type, status):
