@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
 import { CheckoutBreakdown, useBillingPlans } from '../lib/plans';
+import { usePrompt } from '../components/shared';
 import { track } from '../lib/api';
 
 const FEATURE_KEYS = ['pricing.feature1', 'pricing.feature2', 'pricing.feature3', 'pricing.feature4'];
@@ -18,11 +19,12 @@ const FAQ_KEYS = [
 ];
 
 export default function Pricing() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const t = useT();
   const navigate = useNavigate();
   const { plans, currency, configured, loading } = useBillingPlans();
   const [busy, setBusy] = useState('');
+  const [prompt, promptDialog] = usePrompt();
 
   // Reaching the pricing page is the step before checkout, and the gap
   // between the two is the most useful number in the funnel.
@@ -32,23 +34,69 @@ export default function Pricing() {
   /* Opens the mandate at Cashfree and hands the browser over to it. Nothing is
      granted here — the signed webhook does that — so there is no success path
      to fake if this call is tampered with. */
+  /* The gateway will not open a mandate without a phone number, so the
+     account needs one before checkout can proceed.
+   *
+   * Asked for here, at the moment of purchase, rather than at registration.
+   * Only people who are actually buying are asked, nobody is stopped from
+   * signing up and using the free trial over a field the trial never needs,
+   * and everyone who registered before this existed can still buy. */
+  const askForPhone = async () => {
+    const phone = await prompt({
+      title: t('billing.phoneTitle'),
+      message: t('billing.phoneWhy'),
+      placeholder: '+1 514 555 0123',
+      type: 'tel',
+      inputMode: 'tel',
+      autoComplete: 'tel',
+      confirmLabel: t('billing.phoneSave'),
+    });
+    if (!phone) return false;
+    try {
+      await api.post('/api/auth/phone/send', { phone });
+      await refreshUser();
+      return true;
+    } catch (err) {
+      toast.error(errMsg(err, t('billing.phoneFailed')));
+      return false;
+    }
+  };
+
+  const startCheckout = async (planId) => {
+    const { data } = await api.post('/api/billing/subscribe', { plan_id: planId });
+    if (data?.auth_link) {
+      window.location.assign(data.auth_link);
+      return true;
+    }
+    // A subscription with no authorisation link cannot be paid, and sending
+    // the learner nowhere silently is how "I paid and nothing happened"
+    // reports start.
+    toast.error(t('billing.noLink'));
+    return false;
+  };
+
   const subscribe = async (planId) => {
     if (!user) return navigate('/register');
     if (busy) return;
     setBusy(planId);
     track('checkout_start', { plan: planId });
     try {
-      const { data } = await api.post('/api/billing/subscribe', { plan_id: planId });
-      if (data?.auth_link) {
-        window.location.assign(data.auth_link);
-        return;
-      }
-      // A subscription with no authorisation link cannot be paid, and sending
-      // the learner nowhere silently is how "I paid and nothing happened"
-      // reports start.
-      toast.error(t('billing.noLink'));
+      await startCheckout(planId);
     } catch (err) {
-      toast.error(errMsg(err, t('billing.failed')));
+      // The server names the missing phone in a 400. Collect it and carry on
+      // rather than making the learner find a settings page mid-purchase.
+      const detail = String(err?.response?.data?.detail || '');
+      const needsPhone = err?.response?.status === 400
+        && /num\u00e9ro de t\u00e9l\u00e9phone|phone/i.test(detail);
+      if (needsPhone && await askForPhone()) {
+        try {
+          await startCheckout(planId);
+        } catch (retryErr) {
+          toast.error(errMsg(retryErr, t('billing.failed')));
+        }
+      } else if (!needsPhone) {
+        toast.error(errMsg(err, t('billing.failed')));
+      }
     } finally {
       setBusy('');
     }
@@ -67,6 +115,7 @@ export default function Pricing() {
           collapsed FAQ item underneath them. Now driven by whether the server
           actually holds payment credentials, rather than a hardcoded flag that
           someone has to remember to flip. */}
+      {promptDialog}
       {!loading && !configured && (
         <div className="mx-auto mt-6 max-w-2xl rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-center"
           data-testid="pricing-unavailable-notice">

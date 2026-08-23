@@ -204,6 +204,10 @@
     "noLink": "The payment provider did not return a payment link. Please try again.",
     "pendingBody": "Your bank has not confirmed the charge yet. Premium unlocks automatically as soon as it does — there is nothing more for you to do.",
     "pendingTitle": "Still waiting on your bank",
+    "phoneFailed": "That number could not be saved. Check the format and try again.",
+    "phoneSave": "Save and continue",
+    "phoneTitle": "One more thing",
+    "phoneWhy": "Your card issuer needs a phone number to authorise a subscription. It is used for this payment only.",
     "redirecting": "Redirecting…",
     "toDashboard": "Go to my dashboard"
   },
