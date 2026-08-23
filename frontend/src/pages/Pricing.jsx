@@ -92,7 +92,10 @@ export default function Pricing() {
                 {p.wasPrice && (
                   <span className="ml-2 align-middle text-lg text-white/60 line-through">{p.wasPrice}</span>
                 )}
-                <span className="text-white/80"> / {t(p.durationKey)}</span>
+                {/* A plan id with no style entry has no duration key, and
+                    t() throws on an undefined one — the server's own plan name
+                    is the truthful label to fall back to. */}
+                <span className="text-white/80"> / {p.durationKey ? t(p.durationKey) : p.name}</span>
               </p>
               {p.wasPrice && (
                 <p className="mt-1 inline-block rounded-full bg-white/20 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">

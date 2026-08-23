@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
 import { useI18n } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
+import { useBillingPlans } from '../lib/plans';
 
 /* ------------------------------------------------ scroll-reveal helpers ---- */
 function useInView(threshold = 0.18) {
@@ -117,13 +118,11 @@ export default function Landing() {
     });
   };
 
-  /* Durations and features are the same offer the pricing page lists, so they
-     read from the pricing.* keys rather than a second copy that can drift. */
-  const plans = [
-    { name: 'Bronze', price: '14.99', period: t('pricing.duration5d'), popular: false },
-    { name: 'Silver', price: '29.99', period: t('pricing.duration1m'), popular: true },
-    { name: 'Gold', price: '49.99', period: t('pricing.duration2m'), popular: false },
-  ];
+  /* The same catalogue the pricing page and the paywall render, straight from
+     GET /api/billing/plans. This section used to carry its own Bronze/Silver/
+     Gold cards at prices that existed nowhere else, so the first page a visitor
+     saw quoted one figure and checkout charged another. */
+  const { plans } = useBillingPlans();
   const planFeatures = ['pricing.feature1', 'pricing.feature2', 'pricing.feature3', 'pricing.feature4'];
 
   const nclc = [
@@ -481,21 +480,35 @@ export default function Landing() {
         </Reveal>
         <div className="mx-auto mt-10 grid max-w-5xl items-stretch gap-6 md:grid-cols-3">
           {plans.map((p, i) => (
-            <Reveal key={p.name} delay={i * 100} className={p.popular ? 'md:-my-4 z-10' : ''}>
+            <Reveal key={p.id} delay={i * 100} className={p.popular ? 'md:-my-4 z-10' : ''}>
               <div className={`tilt-card relative flex h-full flex-col overflow-hidden rounded-3xl bg-white text-center ${p.popular ? 'shadow-2xl shadow-violet-300/60 ring-2 ring-primary md:scale-[1.04]' : 'border border-violet-100 shadow-soft'}`}>
                 {p.popular && (
                   <span className="absolute left-1/2 top-3 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-amber-300 px-3 py-0.5 text-[9px] font-extrabold uppercase tracking-wider text-amber-900 shadow">★ {t('pricing.mostPopular')}</span>
                 )}
                 <div className={`px-6 pb-5 pt-8 font-heading text-2xl font-bold ${p.popular ? 'bg-gradient-to-br from-primary to-fuchsia-600 text-white' : 'bg-gray-100 text-gray-500'}`}>{p.name}</div>
                 <div className="flex flex-1 flex-col px-7 py-7">
-                  <p className="font-heading text-4xl font-extrabold text-gray-900">${p.price.split('.')[0]}<span className="text-xl">.{p.price.split('.')[1]}</span></p>
-                  <p className="mt-1 text-xs font-semibold text-gray-400">/ {p.period}</p>
+                  {/* The price arrives already formatted for its currency, so it
+                      is printed whole rather than split on a decimal point that
+                      is not a decimal point in every locale. */}
+                  <p className="font-heading text-4xl font-extrabold text-gray-900">{p.price}</p>
+                  {/* Only set when the introductory rate really applies, so no
+                      card strikes through the price printed beside it. */}
+                  {p.wasPrice && (
+                    <p className="mt-1 text-sm font-semibold text-gray-400">
+                      <span className="line-through">{p.wasPrice}</span>
+                      <span className="ml-2 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-primary">{t('pricing.firstTime')}</span>
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs font-semibold text-gray-400">/ {p.durationKey ? t(p.durationKey) : p.name}</p>
                   <ul className="mt-6 flex-1 space-y-3 text-left text-[13px] font-semibold text-gray-700">
+                    <li className="flex items-center gap-2.5"><CheckCircle size={17} weight="fill" className="shrink-0 text-primary" /> {t('pricing.bonus', { n: p.bonus })}</li>
                     {planFeatures.map((f) => (
                       <li key={f} className="flex items-center gap-2.5"><CheckCircle size={17} weight="fill" className="shrink-0 text-primary" /> {t(f)}</li>
                     ))}
                   </ul>
-                  <Link to={trialTo} data-testid={`plan-${p.name.toLowerCase()}`}
+                  {/* Still the trial CTA, not a checkout: the landing page sells
+                      the offer, /pricing takes the money. */}
+                  <Link to={trialTo} data-testid={`plan-${p.id}`}
                     className={`mt-7 ${p.popular ? 'btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600 w-full justify-center' : 'btn-outline w-full justify-center'}`}>
                     {t('land.getStarted')}
                   </Link>
