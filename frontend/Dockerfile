@@ -70,14 +70,19 @@ RUN npm run build:prerender \
         && npm run build)
 
 # State the outcome in one line, so `docker compose build` cannot finish
-# ambiguously. A prerendered index.html has markup immediately inside #root;
-# a client-only build has <div id="root"></div> and nothing else.
-RUN if grep -q '<div id="root"><div' build/index.html; then \
-        echo "PRERENDER OK - index.html is $(stat -c%s build/index.html) bytes with real markup"; \
-        echo "PRERENDER OK - $(find build -name index.html | wc -l) route(s) written"; \
-    else \
+# ambiguously.
+#
+# The test is what must be ABSENT, not what happens to be present. The first
+# prerendered element is whatever the homepage begins with, and an earlier
+# version of this check looked for <div id="root"><div - which reported
+# failure on a perfectly good 79KB build the day that first element became
+# <header>. An un-prerendered shell always contains the empty root exactly.
+RUN if grep -q '<div id="root"></div>' build/index.html; then \
         echo "PRERENDER MISSING - index.html is $(stat -c%s build/index.html) bytes, #root is empty"; \
         echo "PRERENDER MISSING - crawlers without JavaScript will see nothing"; \
+    else \
+        echo "PRERENDER OK - index.html is $(stat -c%s build/index.html) bytes with real markup"; \
+        echo "PRERENDER OK - $(find build -name index.html | wc -l) route(s) written"; \
     fi
 
 # ---- runtime stage ---------------------------------------------------------
