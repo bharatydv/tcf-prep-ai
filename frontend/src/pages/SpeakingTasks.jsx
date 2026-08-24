@@ -351,7 +351,7 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
     setResult(analysis);
     await refreshUser();
     if (!analysis?.transcript) toast.error(t('st.noSpeechConv'));
-    else toast.success(`Analyse terminée — niveau ${analysis.tcf_level}`);
+    else toast.success(t('speak.doneToast', { level: analysis.tcf_level }));
   };
 
   // Handed the finished take by the modal; the analysis path below is unchanged.
@@ -396,17 +396,28 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
         filename: audioMeta?.filename || 'answer.webm',
         mimeType: audioMeta?.mimeType || audioBlob.type,
       });
+      // Which tâche this is decides how the server grades it, and this page
+      // was the only recording surface that did not say. Without it the
+      // official word floors are skipped entirely, the grader is not told
+      // which tâche it is looking at, and a tâche 2 recording does not claim
+      // the single free roleplay — so the trial's one-per-account ceiling
+      // simply did not apply to answers started from here.
+      if (tacheNum) form.append('task_type', String(tacheNum));
       const { data } = await api.post('/api/speaking/analyze', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setResult(data);
       await refreshUser();
       if (!data.transcript) toast.error(t('st.noSpeech'));
-      else toast.success(`Analyse terminée — niveau ${data.tcf_level}`);
+      else toast.success(t('speak.doneToast', { level: data.tcf_level }));
     } catch (err) {
       const status = err?.response?.status;
       if (status === 402) { /* the paywall took it */ }
-      else toast.error("L'analyse a échoué. Réessayez.");
+      // 422 is the server saying it heard nothing AND gave the credit back.
+      // Reporting it as a failure made a refunded credit look like a lost one.
+      else if (status === 422) toast.error(t('speak.noSpeechRefunded'));
+      else toast.error(t('speak.analyseFailed'));
+      await refreshUser();
     } finally {
       setAnalyzing(false);
     }

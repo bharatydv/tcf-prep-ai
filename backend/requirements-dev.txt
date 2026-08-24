@@ -5,3 +5,11 @@
 #   pip install -r requirements.txt -r requirements-dev.txt
 #   pytest
 pytest==8.3.4
+# Required, not optional: pytest.ini sets `asyncio_mode = auto`, and without
+# this plugin that is an unknown ini option and every `async def` test is
+# skipped or errors out. It was missing here while being installed by hand in
+# the local venv, so the suite passed locally and would have reported green in
+# CI while silently running none of the async webhook-lifecycle tests — the
+# ones that prove a refund removes exactly one cycle and that a manual grant
+# survives a gateway event.
+pytest-asyncio==0.24.0

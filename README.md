@@ -42,7 +42,8 @@ Every cap is returned in `caps_applied` and shown to the learner, so a lowered l
 - **Dashboard** — score trend, error breakdown, 365-day heatmap, weak-point tips; all bucketed in the learner's timezone
 - **Recent Topics** — curated real consignes with model answers. Free users get 3, spent only on an explicit "Afficher le corrigé" click
 - **Mock exams** — reading & listening MCQs, graded on the server and recorded in the learner's history
-- **Freemium** — a one-time trial of 3 AI writing corrections and 3 speaking evaluations, of which at most one may be the tâche 2 roleplay. It never refills. Running out returns HTTP 402 with the allowance that was spent, which the frontend renders as a plan chooser over the page rather than an error. **No payment processing yet**: the pricing page says so plainly and its buttons are disabled
+- **Freemium** — a one-time trial of 3 AI writing corrections and 3 speaking evaluations, of which at most one may be the tâche 2 roleplay. It never refills. Running out returns HTTP 402 with the allowance that was spent, which the frontend renders as a plan chooser over the page rather than an error
+- **Payments** — Cashfree card mandates for three recurring plans, with an introductory rate for an account that has never paid, itemised processing fee, PDF invoices by email, and refund/chargeback handling that takes back exactly the cycle that was reversed. See [Billing](#billing)
 - **Account recovery** — password reset and email confirmation over SMTP, with single-use hashed link tokens; logging out and changing a password both revoke every existing session
 - **Admin panel** — users, submissions, analytics, AI-provider selection, and full CRUD for prompts, exam questions, recent topics, blog posts and simulator prompts
 
@@ -125,10 +126,14 @@ the body-size limit and the forwarded-header handling live.
 
 ## Deployment notes
 
-- **`TRUSTED_PROXIES`** must name the proxy in front of the API (or `*` behind a
-  managed load balancer). `X-Forwarded-For` is ignored otherwise, because
-  trusting it unconditionally lets an anonymous caller rotate the header and
-  walk past the login rate limit.
+- **`TRUSTED_PROXIES`** must name the proxy in front of the API, or be `*` when
+  the API is only reachable through one — which is the case for this compose
+  stack, so compose sets it. Trusting `X-Forwarded-For` unconditionally lets an
+  anonymous caller rotate the header and walk past the login rate limit; but
+  leaving this **empty behind a proxy is worse**, because then every anonymous
+  caller is metered under the proxy's own address and they all share one
+  bucket — ten failed logins from anybody 429s the entire site. In production
+  an empty value logs a loud error at boot.
 - **`SMTP_HOST`** is needed for password reset and email verification. Without
   it the links are written to the log; in production `/auth/forgot-password`
   answers 503 rather than pretending a message was sent.
@@ -138,8 +143,56 @@ the body-size limit and the forwarded-header handling live.
 - **`AI_HTTP_TIMEOUT`** (default 60s) is passed to every provider client. Left
   unset, a stalled socket held a worker thread for the life of the process.
 
+## Billing
+
+Card mandates through **Cashfree**. Card details never reach this server:
+`POST /api/billing/subscribe` opens a mandate and returns Cashfree's
+authorisation link, the learner authorises there, and the **signed webhook is
+the only thing that grants premium** — a POST from a browser can be forged, an
+HMAC-signed webhook cannot.
+
+| Plan | Standing | First-time | Grants |
+|---|---|---|---|
+| `week` | $20 | $15 | 1 week + 3 XP |
+| `month` | $80 | $60 | 30 days + 8 XP |
+| `quarter` | $220 | $160 | 90 days + 15 XP |
+
+Prices come from `BILLING_PRICE_*` / `BILLING_FIRST_*` and are served by
+`GET /api/billing/plans` — never sent by the browser. The introductory rate is
+decided from the database (`has_paid_before`), not from the request, and holds
+for the life of that subscription: a Cashfree plan is immutable, so the price
+is part of its id.
+
+**The processing fee is added to the customer's total, not taken out of the
+plan price.** `checkout_breakdown()` is the single place a total is computed —
+the pricing page, the amount sent to Cashfree, the figure the webhook is
+checked against and the invoice all read it, so they cannot disagree.
+`TAX_PERCENT` is deliberately 0 by default; turn it on only where the business
+actually owes it.
+
+Every successful charge writes a numbered invoice and emails it as a PDF.
+Refunds, chargebacks and disputes remove exactly one cycle — an account that
+paid for three and had one reversed keeps the two it still owns.
+
+Required to turn checkout on: `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY`,
+`CASHFREE_WEBHOOK_SECRET`, `BILLING_CURRENCY`. Leave `CASHFREE_APP_ID` empty and
+`/api/billing/plans` reports `configured: false` and the buy buttons stay
+disabled with an explanation rather than failing at the moment of purchase.
+
+Two tools exercise the money paths without charging anyone:
+
+```bash
+python tools/cashfree_probe.py          # sandbox: can this account hold a
+                                        # USD plan and enrol a foreign card?
+python tools/webhook_replay.py --api http://127.0.0.1:15000
+                                        # grant, duplicate delivery, refund —
+                                        # against a real stack, no gateway
+```
+
+If payments land at Cashfree but accounts stay on the free trial, check
+`CASHFREE_WEBHOOK_SECRET` first: a wrong value rejects every webhook with 401.
+
 ## Future work (out of scope by design)
-- Payment processing — the pricing page is display-only and says so
 - Google OAuth sign-in
 - Locale in the URL (`/fr/...`, `/en/...`) so both languages can be indexed
   separately; today the choice lives in localStorage and both share one URL

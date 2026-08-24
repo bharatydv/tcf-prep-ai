@@ -107,7 +107,10 @@
     "transcribeProvider": "Transcription (audio → texte)",
     "unsaved": "Modifications non enregistrées",
     "update": "Mettre à jour",
-    "writingGrader": "Analyse de l'écrit"
+    "writingGrader": "Analyse de l'écrit",
+    "showing": "Affichage de {{from}} à {{to}} sur {{total}}",
+    "prev": "Précédent",
+    "next": "Suivant"
   },
   "analysis": {
     "conjugation": "Contrôle des conjugaisons",
@@ -349,6 +352,8 @@
     "cancel": "Annuler",
     "closeAria": "Fermer",
     "consigne": "Consigne",
+    "speakerYou": "Vous",
+    "speakerAgent": "Agent",
     "errAnalysis": "L'analyse a échoué.",
     "errNoReply": "L'interlocuteur IA n'a pas répondu.",
     "errTranscription": "La transcription a échoué.",
@@ -1356,5 +1361,10 @@
     "topicsList": "Sujets du thème",
     "writeFirst": "Écrivez quelque chose d’abord !",
     "yourQuestion": "Votre question"
+  },
+  "notFound": {
+    "title": "Cette page n'existe pas",
+    "body": "Le lien est peut-être périmé, ou l'adresse mal saisie. Voici où se trouve le reste.",
+    "home": "Retour à l'accueil"
   }
 }

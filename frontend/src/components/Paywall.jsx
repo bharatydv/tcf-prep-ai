@@ -105,8 +105,15 @@ function PaywallDialog({ block, onClose }) {
                 <span className={`h-8 w-8 shrink-0 rounded-xl bg-gradient-to-br ${plan.grad}`} />
                 <div className="min-w-0 flex-1">
                   <p className="font-heading text-sm font-bold text-gray-900">{plan.name}</p>
+                  {/* A plan id the server offers but PLAN_STYLE has no entry
+                      for has no durationKey, and t() calls key.split() on it —
+                      so adding a fourth plan would have white-screened this
+                      dialog for every learner who ran out of credits. The
+                      server's own plan name is the truthful fallback. Pricing
+                      already guards it the same way. */}
                   <p className="text-[11px] text-gray-500">
-                    {t(plan.durationKey)} · {t('pricing.bonus', { n: plan.bonus })}
+                    {plan.durationKey ? t(plan.durationKey) : plan.name}
+                    {' · '}{t('pricing.bonus', { n: plan.bonus })}
                   </p>
                 </div>
                 <span className="shrink-0 text-right">

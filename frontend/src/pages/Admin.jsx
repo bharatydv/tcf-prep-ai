@@ -256,14 +256,53 @@ const REASON_KEY = {
   bad_model: 'admin.reasonBadModel',
 };
 
+/* Page controls for a list the server pages.
+ *
+ * /api/admin/users has taken limit and offset and returned `total` from the
+ * start — the client just never sent them, so the panel showed the first 200
+ * accounts and said nothing about the rest. Support looked someone up, did not
+ * find them, and concluded they had never registered. */
+const PAGE_SIZE = 100;
+
+function Pager({ offset, limit, total, onOffset }) {
+  const t = useT();
+  const from = total === 0 ? 0 : offset + 1;
+  const to = Math.min(offset + limit, total);
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-5 py-3 text-sm">
+      <span className="tabular-nums text-gray-500">
+        {t('admin.showing', { from, to, total })}
+      </span>
+      <span className="flex gap-2">
+        <button type="button" disabled={offset === 0}
+          onClick={() => onOffset(Math.max(0, offset - limit))}
+          className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
+          data-testid="admin-prev">{t('admin.prev')}</button>
+        <button type="button" disabled={to >= total}
+          onClick={() => onOffset(offset + limit)}
+          className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
+          data-testid="admin-next">{t('admin.next')}</button>
+      </span>
+    </div>
+  );
+}
+
 /* ---------------------------------------------------------------- Users ---- */
 function Users() {
   const t = useT();
   const [users, setUsers] = useState(null);
-  useEffect(() => { api.get('/api/admin/users').then((r) => setUsers(r.data.users)).catch((e) => toast.error(errMsg(e))); }, []);
+  const [offset, setOffset] = useState(0);
+  const [total, setTotal] = useState(0);
+  useEffect(() => {
+    setUsers(null);
+    api.get('/api/admin/users', { params: { limit: PAGE_SIZE, offset } })
+      .then((r) => { setUsers(r.data.users); setTotal(r.data.total ?? r.data.users.length); })
+      .catch((e) => toast.error(errMsg(e)));
+  }, [offset]);
   if (!users) return <Spinner />;
   return (
-    <section className="card overflow-x-auto">
+    <section className="card overflow-hidden">
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
           <tr>{['admin.thName', 'admin.thEmail', 'admin.thRole', 'admin.thPlan', 'admin.thUsed', 'admin.thStreak', 'admin.thJoined'].map((k) => <th key={k} className="px-5 py-3">{t(k)}</th>)}</tr>
@@ -282,6 +321,8 @@ function Users() {
           ))}
         </tbody>
       </table>
+      </div>
+      <Pager offset={offset} limit={PAGE_SIZE} total={total} onOffset={setOffset} />
     </section>
   );
 }
@@ -290,10 +331,18 @@ function Users() {
 function Submissions() {
   const t = useT();
   const [subs, setSubs] = useState(null);
-  useEffect(() => { api.get('/api/admin/submissions').then((r) => setSubs(r.data.submissions)).catch((e) => toast.error(errMsg(e))); }, []);
+  const [offset, setOffset] = useState(0);
+  const [total, setTotal] = useState(0);
+  useEffect(() => {
+    setSubs(null);
+    api.get('/api/admin/submissions', { params: { limit: PAGE_SIZE, offset } })
+      .then((r) => { setSubs(r.data.submissions); setTotal(r.data.total ?? r.data.submissions.length); })
+      .catch((e) => toast.error(errMsg(e)));
+  }, [offset]);
   if (!subs) return <Spinner />;
   return (
-    <section className="card overflow-x-auto">
+    <section className="card overflow-hidden">
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
           <tr>{['admin.thDate', 'admin.thUser', 'admin.thSource', 'admin.thLevel', 'admin.thScore', 'admin.thErrors', 'admin.thExcerpt'].map((k) => <th key={k} className="px-5 py-3">{t(k)}</th>)}</tr>
@@ -312,6 +361,8 @@ function Submissions() {
           ))}
         </tbody>
       </table>
+      </div>
+      <Pager offset={offset} limit={PAGE_SIZE} total={total} onOffset={setOffset} />
     </section>
   );
 }

@@ -114,6 +114,14 @@ PHONE_CODE_MAX_ATTEMPTS = 5
 # "*" when the platform guarantees the header (a managed load balancer).
 TRUSTED_PROXIES = {p.strip() for p in
                    os.environ.get("TRUSTED_PROXIES", "").split(",") if p.strip()}
+# Leaving it unset is not the safe default it looks like. Every deployment
+# shape in this repo puts nginx in front of the API, so with no trusted proxy
+# `request.client.host` is the proxy's address for EVERY caller and all
+# anonymous traffic lands in one bucket: ten failed logins from anybody locks
+# the whole site out of /auth/login for five minutes. The warning below is
+# loud because the symptom - "nobody can sign in" - looks nothing like its
+# cause.
+TRUSTED_PROXIES_SET = bool(TRUSTED_PROXIES)
 
 # Passwords that are not the built-in default but might as well be. This check
 # used to compare against one exact string, and a production deployment sat on
@@ -279,6 +287,17 @@ if IS_PROD and not SMTP_HOST:
     log.error("SMTP_HOST is not set. Password reset and email verification "
               "cannot deliver anything; /api/auth/forgot-password will answer "
               "503 until it is configured.")
+
+if IS_PROD and not TRUSTED_PROXIES_SET:
+    # Not fatal either, but the failure it causes is an outage rather than a
+    # missing feature, so it says exactly what to set.
+    log.error("TRUSTED_PROXIES is not set. X-Forwarded-For will be ignored, so "
+              "every anonymous caller is metered under the proxy's own address "
+              "and they all share ONE rate-limit bucket - ten failed logins "
+              "from anyone will 429 the entire site. Set it to the address of "
+              "the proxy in front of this API, or to '*' when the API is only "
+              "reachable through one (this compose stack publishes the backend "
+              "on 127.0.0.1 only, so '*' is correct there).")
 
 # ----------------------------------------------------------------------------
 # AI worker pool
@@ -1323,15 +1342,7 @@ async def enforce_free_conversation_limit(db: AsyncSession, user: User) -> User:
     user column, so this needs no migration on an existing database."""
     if is_premium(user):
         return user
-    now = now_utc()
-    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    used = await db.scalar(
-        select(func.count()).select_from(Submission).where(
-            Submission.user_id == user.user_id,
-            Submission.source == "conversation",
-            Submission.created_at >= month_start,
-        ))
-    if (used or 0) >= FREE_CONVERSATION_LIMIT:
+    if await free_conversations_left(db, user) <= 0:
         raise HTTPException(status_code=402, detail={
             "code": "conversation_limit",
             "kind": "conversation",
@@ -1340,6 +1351,50 @@ async def enforce_free_conversation_limit(db: AsyncSession, user: User) -> User:
             "trial": trial_state(user),
         })
     return user
+
+
+async def free_conversations_left(db: AsyncSession, user: User) -> int:
+    """Open-ended conversations still available to a free account this month."""
+    now = now_utc()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    used = await db.scalar(
+        select(func.count()).select_from(Submission).where(
+            Submission.user_id == user.user_id,
+            Submission.source == "conversation",
+            Submission.created_at >= month_start,
+        ))
+    return max(0, FREE_CONVERSATION_LIMIT - (used or 0))
+
+
+async def enforce_turn_budget(db: AsyncSession, user: User) -> None:
+    """Refuse a live speaking turn once nothing is left that could pay to grade it.
+
+    A turn — one roleplay reply, or one transcription of what the candidate
+    just said — is a provider call, and the roleplay is the most expensive
+    thing this product gives away. Yet nothing metered it: the credit is only
+    claimed when the conversation is GRADED, and closing the modal never
+    grades it. A free account could therefore run turns all day, up to the
+    120-per-5-minutes rate limit, and never spend a thing.
+
+    Metering each turn against the trial would be wrong in the other
+    direction — a tâche 2 roleplay is legitimately 15-30 turns for ONE credit.
+    So the gate is on the allowance that would settle the conversation: while
+    the learner still holds a speaking attempt or a free conversation, turns
+    are free within it; once both are gone there is nothing left to grade
+    into, and the turns stop too.
+    """
+    if is_premium(user):
+        return
+    if (user.free_speaking_used or 0) < FREE_SPEAKING_LIMIT:
+        return
+    if await free_conversations_left(db, user) > 0:
+        return
+    raise HTTPException(status_code=402, detail={
+        "code": "trial_exhausted",
+        "kind": "speaking",
+        "msg": _TRIAL_MSG["speaking"],
+        "trial": trial_state(user),
+    })
 
 
 async def consume_credit(db: AsyncSession, user_id: str):
@@ -3013,9 +3068,13 @@ def _cf_request_sync(method: str, path: str, payload: Optional[dict] = None) -> 
 
 
 async def cf_request(method: str, path: str, payload: Optional[dict] = None) -> dict:
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None, functools.partial(_cf_request_sync, method, path, payload))
+    # On the explicit pool, not asyncio's default one. `run_in_executor(None,
+    # ...)` uses min(32, cpu + 4) threads — six on a 2-vCPU box, the exact
+    # ceiling AI_MAX_CONCURRENCY exists to escape. A checkout makes two or
+    # three of these calls (cf_ensure_plan does a GET and maybe a POST), each
+    # allowed 30s, so a handful of simultaneous purchases could exhaust it.
+    return await run_ai(
+        functools.partial(_cf_request_sync, method, path, payload))
 
 
 def verify_cashfree_signature(raw_body: bytes, signature: str,
@@ -3853,6 +3912,15 @@ async def run_migrations():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # The exam sets are static content with a validator that was written and
+    # then never called, so a malformed paper — a tâche 3 missing a document,
+    # or carrying the same text twice, which leaves nothing to compare — would
+    # have reached a candidate as a broken exercise. Checked at boot like the
+    # reading bank, but only logged: unlike the reading seed there is nothing
+    # to withhold, and refusing to start over a content typo would be worse
+    # than serving it.
+    for problem in exam_sets.validate():
+        log.error("Exam set invalid: %s", problem)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await run_migrations()
@@ -4343,6 +4411,12 @@ async def get_prompt(prompt_id: str, db: AsyncSession = Depends(get_db)):
 STAGES = ["parsing", "grammar", "spelling", "conjugation", "style", "generating"]
 STREAM_PING_SECONDS = 10.0
 STREAM_MAX_WAIT_SECONDS = 180.0
+# The ceiling for the non-streaming grading endpoints. They have no keep-alive
+# to hold a proxy open, so they must give up before one does: nginx here allows
+# 300s, and a host proxy in front of it often allows only 60s. Whatever the
+# proxy decides, an abandoned request leaves the reserved credit spent and the
+# refund path unrun, so the timeout has to be ours.
+GRADE_MAX_WAIT_SECONDS = float(os.environ.get("GRADE_MAX_WAIT_SECONDS", "150"))
 
 
 def _sse(event: str, data: Any) -> str:
@@ -4356,79 +4430,99 @@ async def analyze_stream(body: AnalyzeIn,
                          _rl=Depends(ai_rate_limit)):
     # The credit is claimed up front so two parallel tabs cannot both slip past
     # the limit, and refunded below if the text could not actually be graded.
+    # This one runs on the request-scoped `db`, which is legitimately open here
+    # — it is everything inside gen() that must not. See the note there.
     user = await reserve_credit(db, user)
     source = body.source if body.source in {"practice", "paste"} else "practice"
 
     async def gen():
-        try:
-            task = asyncio.create_task(
-                analyze_text_with_ai(body.text, body.topic or body.label, db=db,
-                                     task_type=body.task_type))
-            for stage in STAGES:
-                yield _sse("stage", {"stage": stage})
-                await asyncio.sleep(0.6)
-            # The stages take ~4s; the model can take far longer. Nginx and the
-            # GCP load balancer drop an upstream that goes silent (default
-            # proxy_read_timeout 60s), which would strand the client on the
-            # spinner, so ping while we wait.
-            waited = 0.0
-            while True:
-                try:
-                    analysis = await asyncio.wait_for(
-                        asyncio.shield(task), timeout=STREAM_PING_SECONDS)
-                    break
-                except asyncio.TimeoutError:
-                    waited += STREAM_PING_SECONDS
-                    if waited >= STREAM_MAX_WAIT_SECONDS:
-                        task.cancel()
-                        log.warning("Grading exceeded %ss - giving up",
-                                    STREAM_MAX_WAIT_SECONDS)
-                        await refund_credit(db, user)
-                        yield _sse("error", {"detail": AI_TIMEOUT_DETAIL,
-                                             "status": 504})
-                        return
-                    yield ": keep-alive\n\n"
-            if analysis.get("ai_unavailable"):
-                # Don't persist an empty correction or charge for it.
-                await refund_credit(db, user)
-                yield _sse("error", {"detail": ai_error_detail(analysis),
-                                     "status": 503})
-                return
-            # persist_submission can take a moment; keep the socket warm so a
-            # proxy does not drop a connection whose work is already done.
-            save = asyncio.create_task(persist_submission(
-                db, user, body.text, body.prompt_id, analysis, source=source,
-                consume=False))
-            while True:
-                try:
-                    sub = await asyncio.wait_for(asyncio.shield(save),
-                                                 timeout=STREAM_PING_SECONDS)
-                    break
-                except asyncio.TimeoutError:
-                    yield ": keep-alive\n\n"
-            # Measured here rather than inside the grader because this is
-            # where the learner's wait actually ends: transcription, grading,
-            # caps and the save. Provider and model come off the analysis,
-            # which is the only place that knows which one served this call.
-            await record_event(
-                db, "ai_call", user_id=user.user_id, feature="writing",
-                provider=analysis.get("ai_provider"),
-                model=analysis.get("ai_model"),
-                seconds=round(waited + STREAM_PING_SECONDS, 1),
-                chars=len(body.text or ""))
-            await record_event(db, "ai_result", user_id=user.user_id,
-                               feature="writing",
-                               level=analysis.get("tcf_level"))
-            yield _sse("complete", sub)
-        except HTTPException as exc:
-            await refund_credit(db, user)
-            yield _sse("error", {"detail": exc.detail,
-                                 "status": exc.status_code})
-        except Exception:  # noqa: BLE001
-            log.exception("Stream analysis failed")
-            await refund_credit(db, user)
-            yield _sse("error",
-                       {"detail": "AI analysis temporarily unavailable"})
+        # The generator opens and owns its OWN session rather than using `db`.
+        #
+        # FastAPI tears a `Depends(...yield)` dependency down when the endpoint
+        # function returns — which, for a StreamingResponse, is BEFORE a single
+        # byte of the body is produced. 0.115 (what requirements.txt pins) does
+        # exactly that; newer versions moved the teardown after the send, so
+        # which behaviour you get depends silently on the installed version.
+        # Every line below therefore ran against a session get_db had closed.
+        #
+        # SQLAlchemy hides the mistake rather than raising: a closed
+        # AsyncSession quietly re-opens on the next statement and checks a
+        # fresh connection out of the pool — and nothing ever checks it back
+        # in, because the `async with` that would have has already exited. That
+        # is one leaked connection per streamed grade, on the busiest AI path
+        # in the product, until the pool is exhausted and every request in the
+        # application blocks on pool_timeout. Owning the session here makes the
+        # lifetime ours and correct on any version.
+        async with SessionLocal() as sdb:
+            try:
+                task = asyncio.create_task(
+                    analyze_text_with_ai(body.text, body.topic or body.label,
+                                         db=sdb, task_type=body.task_type))
+                for stage in STAGES:
+                    yield _sse("stage", {"stage": stage})
+                    await asyncio.sleep(0.6)
+                # The stages take ~4s; the model can take far longer. Nginx and
+                # the GCP load balancer drop an upstream that goes silent
+                # (default proxy_read_timeout 60s), which would strand the
+                # client on the spinner, so ping while we wait.
+                waited = 0.0
+                while True:
+                    try:
+                        analysis = await asyncio.wait_for(
+                            asyncio.shield(task), timeout=STREAM_PING_SECONDS)
+                        break
+                    except asyncio.TimeoutError:
+                        waited += STREAM_PING_SECONDS
+                        if waited >= STREAM_MAX_WAIT_SECONDS:
+                            task.cancel()
+                            log.warning("Grading exceeded %ss - giving up",
+                                        STREAM_MAX_WAIT_SECONDS)
+                            await refund_credit(sdb, user)
+                            yield _sse("error", {"detail": AI_TIMEOUT_DETAIL,
+                                                 "status": 504})
+                            return
+                        yield ": keep-alive\n\n"
+                if analysis.get("ai_unavailable"):
+                    # Don't persist an empty correction or charge for it.
+                    await refund_credit(sdb, user)
+                    yield _sse("error", {"detail": ai_error_detail(analysis),
+                                         "status": 503})
+                    return
+                # persist_submission can take a moment; keep the socket warm so
+                # a proxy does not drop a connection whose work is already done.
+                save = asyncio.create_task(persist_submission(
+                    sdb, user, body.text, body.prompt_id, analysis,
+                    source=source, consume=False))
+                while True:
+                    try:
+                        sub = await asyncio.wait_for(asyncio.shield(save),
+                                                     timeout=STREAM_PING_SECONDS)
+                        break
+                    except asyncio.TimeoutError:
+                        yield ": keep-alive\n\n"
+                # Measured here rather than inside the grader because this is
+                # where the learner's wait actually ends: transcription,
+                # grading, caps and the save. Provider and model come off the
+                # analysis, the only place that knows which one served it.
+                await record_event(
+                    sdb, "ai_call", user_id=user.user_id, feature="writing",
+                    provider=analysis.get("ai_provider"),
+                    model=analysis.get("ai_model"),
+                    seconds=round(waited + STREAM_PING_SECONDS, 1),
+                    chars=len(body.text or ""))
+                await record_event(sdb, "ai_result", user_id=user.user_id,
+                                   feature="writing",
+                                   level=analysis.get("tcf_level"))
+                yield _sse("complete", sub)
+            except HTTPException as exc:
+                await refund_credit(sdb, user)
+                yield _sse("error", {"detail": exc.detail,
+                                     "status": exc.status_code})
+            except Exception:  # noqa: BLE001
+                log.exception("Stream analysis failed")
+                await refund_credit(sdb, user)
+                yield _sse("error",
+                           {"detail": "AI analysis temporarily unavailable"})
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",
@@ -4442,8 +4536,17 @@ async def create_submission(body: AnalyzeIn,
                             _rl=Depends(ai_rate_limit)):
     user = await reserve_credit(db, user)
     source = body.source if body.source in {"practice", "paste"} else "practice"
-    analysis = await analyze_text_with_ai(body.text, body.topic or body.label,
-                                          db=db, task_type=body.task_type)
+    # Bounded, and refunded on expiry. Without a ceiling this outlived whichever
+    # proxy is in front and the learner lost both the correction and the credit,
+    # because a request the proxy abandoned never reaches the refund below.
+    try:
+        analysis = await asyncio.wait_for(
+            analyze_text_with_ai(body.text, body.topic or body.label,
+                                 db=db, task_type=body.task_type),
+            timeout=GRADE_MAX_WAIT_SECONDS)
+    except asyncio.TimeoutError:
+        await refund_credit(db, user)
+        raise HTTPException(status_code=504, detail=AI_TIMEOUT_DETAIL)
     if analysis.get("ai_unavailable"):
         await refund_credit(db, user)
         raise HTTPException(status_code=503, detail=ai_error_detail(analysis))
@@ -4531,7 +4634,10 @@ async def simulator_start(set_number: Optional[int] = None,
     return tasks
 
 
-WORD_GUIDE = {1: (60, 120), 2: (120, 150), 3: (120, 180)}
+# WORD_GUIDE is defined once, near WRITING_TASKS, and derived from it. A second
+# literal copy used to sit here and silently won — the same shape as the
+# SubscribeIn collision that stopped every purchase for weeks — and being a
+# literal it was the copy that could NOT follow a change to WRITING_TASKS.
 
 
 @app.post("/api/simulator/submit")
@@ -4544,23 +4650,48 @@ async def simulator_submit(body: SimulatorSubmitIn,
     tasks_out = {}
     scores = []
     levels = []
-    graded_any = False
+
+    # The three tâches are graded CONCURRENTLY and under one deadline.
+    #
+    # They used to run one after another with no ceiling at all: three provider
+    # calls, each allowed AI_HTTP_TIMEOUT plus a retry, is a worst case near six
+    # minutes — past nginx's 300s here and far past the 60s a host proxy
+    # typically allows. When the proxy gave up, the credit reserved above stayed
+    # spent and the candidate lost a full 60-minute sitting with no result and
+    # no refund. The tâches are independent and the AI pool is sized for 32, so
+    # running them together turns the worst case into one call's worth of wait.
+    written = [(i, task) for i, task in
+               ((1, body.task1), (2, body.task2), (3, body.task3))
+               if task.text.strip()]
+    if not written:
+        await refund_credit(db, user)
+        raise HTTPException(
+            status_code=400,
+            detail="Aucune tâche n'a été rédigée : rien à corriger.")
+    try:
+        graded = await asyncio.wait_for(
+            asyncio.gather(*(
+                # task_type applies the official word range for this tâche.
+                analyze_text_with_ai(task.text, task.prompt, db=db, task_type=i)
+                for i, task in written)),
+            timeout=GRADE_MAX_WAIT_SECONDS)
+    except asyncio.TimeoutError:
+        await refund_credit(db, user)
+        raise HTTPException(status_code=504, detail=AI_TIMEOUT_DETAIL)
+    by_task = dict(zip((i for i, _ in written), graded))
+
     for i, task in ((1, body.task1), (2, body.task2), (3, body.task3)):
-        if task.text.strip():
-            # task_type applies the official word range for this tâche.
-            analysis = await analyze_text_with_ai(task.text, task.prompt, db=db,
-                                                  task_type=i)
-            if analysis.get("ai_unavailable"):
-                # The grader is down. Charging for an ungraded exam and telling
-                # the candidate they are A1 would be worse than failing loudly.
-                await refund_credit(db, user)
-                raise HTTPException(status_code=503,
-                                    detail=ai_error_detail(analysis))
-            graded_any = True
-        else:
+        analysis = by_task.get(i)
+        if analysis is None:
             # Left blank: a real examiner scores an unattempted tâche at zero.
             analysis = {**dict(FALLBACK_ANALYSIS), "ai_unavailable": False,
                         "not_attempted": True}
+        elif analysis.get("ai_unavailable"):
+            # The grader is down. Charging for an ungraded exam and telling
+            # the candidate they are A1 would be worse than failing loudly.
+            await refund_credit(db, user)
+            raise HTTPException(status_code=503,
+                                detail=ai_error_detail(analysis))
         tasks_out[f"task{i}"] = {
             "prompt": task.prompt, "text": task.text,
             "analysis": public_analysis(analysis),
@@ -4571,11 +4702,8 @@ async def simulator_submit(body: SimulatorSubmitIn,
         levels.append(analysis["tcf_level"])
         await record_mistakes(db, user.user_id, "simulator", attempt_id,
                               analysis)
-    if not graded_any:
-        await refund_credit(db, user)
-        raise HTTPException(
-            status_code=400,
-            detail="Aucune tâche n'a été rédigée : rien à corriger.")
+    # "nothing was written" is now refused above, before a single provider call
+    # is paid for, rather than after all three had already run.
     combined = round(sum(scores) / 3, 1)
     tcf_level = CEFR_LEVELS[
         min(round(sum(CEFR_LEVELS.index(l) for l in levels) / 3), 5)]
@@ -5355,7 +5483,9 @@ async def speaking_turn_transcribe(audio: UploadFile = File(...),
                                    _rl=Depends(turn_rate_limit)):
     """Transcribe a single conversational turn. Used by browsers without live
     speech recognition; costs no credit because the graded unit is the whole
-    conversation, not the turn."""
+    conversation, not the turn — but it does need an allowance that conversation
+    could eventually be graded into. See enforce_turn_budget."""
+    await enforce_turn_budget(db, user)
     audio_bytes = await read_audio_upload(audio)
     if not audio_bytes:
         raise HTTPException(status_code=400, detail="Empty audio upload")
@@ -5375,7 +5505,13 @@ async def speaking_converse(body: ConverseIn,
                             user: User = Depends(get_current_user),
                             db: AsyncSession = Depends(get_db),
                             _rl=Depends(turn_rate_limit)):
-    """One in-character reply from the roleplay partner."""
+    """One in-character reply from the roleplay partner.
+
+    Costs no credit — the graded unit is the whole conversation — but is gated
+    on there still being an allowance to grade it into, or a free account could
+    run the most expensive feature here indefinitely without ever spending one.
+    """
+    await enforce_turn_budget(db, user)
     history = [t.model_dump() for t in body.history]
     reply = await interaction_reply(body.consigne, history, db=db, mode=body.mode)
     if not reply:
@@ -5402,8 +5538,15 @@ async def speaking_converse_grade(body: ConverseGradeIn,
     # The mode was validated on the way in and then thrown away, so a tâche 1
     # interview reached the tâche 2 examiner. Carry it through.
     task_type = {"tache1": 1, "tache2": 2}.get(body.mode)
-    analysis = await grade_interaction(body.consigne, history, db=db,
-                                       task_type=task_type)
+    try:
+        analysis = await asyncio.wait_for(
+            grade_interaction(body.consigne, history, db=db,
+                              task_type=task_type),
+            timeout=GRADE_MAX_WAIT_SECONDS)
+    except asyncio.TimeoutError:
+        if not free_mode:
+            await refund_credit(db, user, "speaking", tache2=is_tache2)
+        raise HTTPException(status_code=504, detail=AI_TIMEOUT_DETAIL)
     if analysis.get("ai_unavailable"):
         if not free_mode:
             await refund_credit(db, user, "speaking", tache2=is_tache2)
@@ -5486,15 +5629,35 @@ async def reveal_model_answer(topic_id: str,
     unlocked = list(user.model_answer_topic_ids or [])
     premium = is_premium(user)
     if not premium and topic_id not in unlocked:
-        if len(unlocked) >= FREE_MODEL_ANSWER_LIMIT:
+        # Claimed in ONE statement, with the ceiling in the WHERE clause, for
+        # the same reason reserve_credit does it that way: reading the count,
+        # deciding, and then writing leaves a window in which two tabs both
+        # see two unlocks and both append, handing out more than the three the
+        # paywall promises. The array append and the counter move together, so
+        # the row can never disagree with itself either.
+        res = await db.execute(
+            sa_update(User)
+            .where(User.user_id == user.user_id,
+                   func.coalesce(
+                       func.array_length(User.model_answer_topic_ids, 1), 0)
+                   < FREE_MODEL_ANSWER_LIMIT,
+                   ~User.model_answer_topic_ids.any(topic_id))
+            .values(
+                model_answer_topic_ids=(
+                    User.model_answer_topic_ids + func.cast(
+                        [topic_id], ARRAY(String))),
+                model_answers_read=func.coalesce(User.model_answers_read, 0) + 1)
+            .returning(User.model_answer_topic_ids))
+        claimed = res.scalar_one_or_none()
+        if claimed is None:
+            await db.rollback()
             raise HTTPException(
                 status_code=402,
                 detail=(f"Vous avez utilisé vos {FREE_MODEL_ANSWER_LIMIT} corrigés "
                         "modèles gratuits. Passez à la version Pro pour tous les voir."))
-        user.model_answer_topic_ids = unlocked + [topic_id]
-        user.model_answers_read = (user.model_answers_read or 0) + 1
         await db.commit()
-        unlocked = user.model_answer_topic_ids
+        await db.refresh(user)
+        unlocked = list(claimed)
     return {"model_answer": t_obj.model_answer,
             "model_answers_remaining": (None if premium
                                         else max(0, FREE_MODEL_ANSWER_LIMIT - len(unlocked)))}
@@ -5797,11 +5960,23 @@ async def post_event(body: EventIn, request: Request,
         token = request.cookies.get("access_token")
         if token:
             user_id = decode_token(token, "access")
-        meta = {k: v for k, v in (body.meta or {}).items()
-                if isinstance(k, str)}
         # Trim aggressively: this is analytics context, not a document store.
-        meta = {k: (v[:120] if isinstance(v, str) else v)
-                for k, v in list(meta.items())[:12]}
+        #
+        # Every value is coerced to a string BEFORE it is cut. Trimming only
+        # the ones that already were strings left the hole this guard exists to
+        # close: a list or a nested object passed through whole, and the body
+        # limit is nginx's 26 MB. Numbers and booleans keep their JSON type
+        # because the funnel query casts them; everything else becomes text.
+        meta = {}
+        for k, v in list((body.meta or {}).items())[:12]:
+            if not isinstance(k, str):
+                continue
+            if isinstance(v, bool) or isinstance(v, (int, float)):
+                meta[k[:48]] = v
+            elif v is None:
+                meta[k[:48]] = None
+            else:
+                meta[k[:48]] = str(v)[:120]
         await record_event(db, name, user_id=user_id,
                            anon_id=(body.anon_id or None), **meta)
     return Response(status_code=204)
@@ -6466,10 +6641,21 @@ async def admin_users(admin: User = Depends(get_admin_user),
 
 @app.get("/api/admin/submissions")
 async def admin_submissions(admin: User = Depends(get_admin_user),
+                            limit: int = Query(100, ge=1, le=500),
+                            offset: int = Query(0, ge=0),
                             db: AsyncSession = Depends(get_db)):
+    """Newest first, paged like /api/admin/users.
+
+    This returned a bare 200 rows with no way to reach the 201st and nothing
+    saying more existed, so the panel quietly became a window onto the most
+    recent activity only.
+    """
+    total = await db.scalar(select(func.count()).select_from(Submission))
     res = await db.execute(
-        select(Submission).order_by(Submission.created_at.desc()).limit(200))
-    return {"submissions": [_row_to_dict(s) for s in res.scalars().all()]}
+        select(Submission).order_by(Submission.created_at.desc())
+        .limit(limit).offset(offset))
+    return {"submissions": [_row_to_dict(s) for s in res.scalars().all()],
+            "total": total or 0, "limit": limit, "offset": offset}
 
 
 @app.get("/api/admin/analytics")
@@ -6517,7 +6703,7 @@ async def admin_analytics(admin: User = Depends(get_admin_user),
 async def admin_create_prompt(body: PromptIn,
                               admin: User = Depends(get_admin_user),
                               db: AsyncSession = Depends(get_db)):
-    p = Prompt(prompt_id=new_id("prompt"), **body.dict(),
+    p = Prompt(prompt_id=new_id("prompt"), **body.model_dump(),
                is_active=True, created_at=now_utc())
     db.add(p)
     await db.commit()
@@ -6533,7 +6719,7 @@ async def admin_update_prompt(prompt_id: str, body: PromptIn,
     p = res.scalar_one_or_none()
     if not p:
         raise HTTPException(status_code=404, detail="Prompt not found")
-    for k, v in body.dict().items():
+    for k, v in body.model_dump().items():
         setattr(p, k, v)
     await db.commit()
     return _row_to_dict(p)
@@ -6557,7 +6743,7 @@ async def admin_delete_prompt(prompt_id: str,
 async def admin_create_question(body: ExamQuestionIn,
                                 admin: User = Depends(get_admin_user),
                                 db: AsyncSession = Depends(get_db)):
-    q = ExamQuestion(question_id=new_id("q"), **body.dict(),
+    q = ExamQuestion(question_id=new_id("q"), **body.model_dump(),
                      created_at=now_utc(), is_active=True)
     db.add(q)
     await db.commit()
@@ -6568,7 +6754,7 @@ async def admin_create_question(body: ExamQuestionIn,
 async def admin_update_question(question_id: str, body: ExamQuestionUpdate,
                                 admin: User = Depends(get_admin_user),
                                 db: AsyncSession = Depends(get_db)):
-    updates = {k: v for k, v in body.dict().items() if v is not None}
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
     res = await db.execute(
@@ -6608,7 +6794,7 @@ async def admin_list_questions(admin: User = Depends(get_admin_user),
 async def admin_create_topic(body: RecentTopicIn,
                              admin: User = Depends(get_admin_user),
                              db: AsyncSession = Depends(get_db)):
-    t = RecentTopic(topic_id=new_id("topic"), **body.dict(),
+    t = RecentTopic(topic_id=new_id("topic"), **body.model_dump(),
                     created_at=now_utc(), is_active=True)
     db.add(t)
     await db.commit()
@@ -6624,7 +6810,7 @@ async def admin_update_topic(topic_id: str, body: RecentTopicIn,
     t = res.scalar_one_or_none()
     if not t:
         raise HTTPException(status_code=404, detail="Topic not found")
-    for k, v in body.dict().items():
+    for k, v in body.model_dump().items():
         setattr(t, k, v)
     await db.commit()
     return _row_to_dict(t)
@@ -6666,7 +6852,7 @@ async def admin_sim_prompts(admin: User = Depends(get_admin_user),
 async def admin_create_sim_prompt(body: SimPromptIn,
                                   admin: User = Depends(get_admin_user),
                                   db: AsyncSession = Depends(get_db)):
-    p = SimulatorPrompt(sim_prompt_id=new_id("simp"), **body.dict(),
+    p = SimulatorPrompt(sim_prompt_id=new_id("simp"), **body.model_dump(),
                         is_active=True, created_at=now_utc())
     db.add(p)
     await db.commit()
@@ -6684,7 +6870,7 @@ async def admin_update_sim_prompt(sim_prompt_id: str, body: SimPromptIn,
     if not p:
         raise HTTPException(status_code=404,
                             detail="Simulator prompt not found")
-    for k, v in body.dict().items():
+    for k, v in body.model_dump().items():
         setattr(p, k, v)
     await db.commit()
     return _row_to_dict(p)
@@ -6869,7 +7055,7 @@ async def admin_update_blog(post_id: str, body: BlogPostUpdate,
     p = res.scalar_one_or_none()
     if not p:
         raise HTTPException(status_code=404, detail="Post not found")
-    updates = {k: v for k, v in body.dict().items() if v is not None}
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
     # Handle slug/title changes carefully so slugs stay unique.
     new_slug = updates.pop("slug", None)
     if new_slug is not None:
@@ -7053,7 +7239,7 @@ async def admin_list_themes(admin: User = Depends(get_admin_user),
 async def admin_create_theme(body: ThemeIn,
                              admin: User = Depends(get_admin_user),
                              db: AsyncSession = Depends(get_db)):
-    t = Theme(theme_id=new_id("theme"), **body.dict(),
+    t = Theme(theme_id=new_id("theme"), **body.model_dump(),
               is_active=True, created_at=now_utc())
     db.add(t)
     await db.commit()
@@ -7068,7 +7254,7 @@ async def admin_update_theme(theme_id: str, body: ThemeUpdate,
     t = res.scalar_one_or_none()
     if not t:
         raise HTTPException(status_code=404, detail="Theme not found")
-    for k, v in body.dict().items():
+    for k, v in body.model_dump().items():
         if v is not None:
             setattr(t, k, v)
     await db.commit()
@@ -7105,7 +7291,7 @@ async def admin_list_theme_questions(theme_id: Optional[str] = None,
 async def admin_create_theme_question(body: ThemeQuestionIn,
                                       admin: User = Depends(get_admin_user),
                                       db: AsyncSession = Depends(get_db)):
-    q = ThemeQuestion(question_id=new_id("tq"), **body.dict(),
+    q = ThemeQuestion(question_id=new_id("tq"), **body.model_dump(),
                       is_active=True, created_at=now_utc())
     db.add(q)
     await db.commit()
@@ -7122,7 +7308,7 @@ async def admin_update_theme_question(question_id: str,
     q = res.scalar_one_or_none()
     if not q:
         raise HTTPException(status_code=404, detail="Question not found")
-    for k, v in body.dict().items():
+    for k, v in body.model_dump().items():
         if v is not None:
             setattr(q, k, v)
     await db.commit()

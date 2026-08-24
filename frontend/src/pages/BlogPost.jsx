@@ -8,10 +8,89 @@ import { Seo, SITE_URL } from '../lib/seo';
 
 /* Very small, safe markdown -> HTML for headings, bold, links, lists, paragraphs.
    If you write posts in HTML already, it passes through fine. */
+/* An allowlist, applied to the HTML branch below.
+ *
+ * That branch used to return the stored markup verbatim into
+ * dangerouslySetInnerHTML. Posts are admin-authored and the CSP is strict
+ * enough that an injected <script>, an onerror= handler and a javascript: URL
+ * are all blocked — but the CSP was then the ONLY thing standing between an
+ * admin account and stored XSS on every public article, and one future
+ * 'unsafe-inline' added for an unrelated reason would have removed it silently.
+ *
+ * Parsing happens in an inert document, so nothing runs and no image is
+ * fetched while we inspect it. */
+const ALLOWED_TAGS = new Set([
+  'P', 'BR', 'HR', 'H2', 'H3', 'H4', 'UL', 'OL', 'LI', 'BLOCKQUOTE',
+  'STRONG', 'B', 'EM', 'I', 'CODE', 'PRE', 'A', 'IMG', 'FIGURE', 'FIGCAPTION',
+  'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD', 'SPAN', 'DIV',
+]);
+const ALLOWED_ATTRS = { A: ['href', 'title'], IMG: ['src', 'alt', 'title'] };
+// Removed WITH their contents. Everything else that is not allowed is
+// unwrapped instead, so stripping a <section> does not take the paragraph
+// inside it — but the text inside a <script> is not text anyone wants to read.
+const DROP_TAGS = new Set([
+  'SCRIPT', 'STYLE', 'IFRAME', 'FRAME', 'FRAMESET', 'OBJECT', 'EMBED',
+  'APPLET', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'MATH', 'FORM', 'INPUT',
+  'BUTTON', 'SELECT', 'TEXTAREA', 'LINK', 'META', 'BASE',
+]);
+const SAFE_URL = /^(https?:|mailto:|\/|#)/i;
+
+function sanitizeHtml(html) {
+  if (typeof window === 'undefined' || !window.DOMParser) return '';
+  const doc = new DOMParser().parseFromString(
+    `<div id="__root">${html}</div>`, 'text/html');
+  const root = doc.getElementById('__root');
+  if (!root) return '';
+
+  /* Walks by index and deliberately does NOT advance after a removal or an
+     unwrap: whatever now sits at that position has to be inspected in turn.
+     Iterating a snapshot of the children instead let anything nested inside a
+     disallowed element escape — `<section><img onerror=…>` unwrapped the
+     section, moved the img up, and never looked at it again. */
+  const walk = (node) => {
+    let i = 0;
+    while (i < node.childNodes.length) {
+      const el = node.childNodes[i];
+      if (el.nodeType === 8) { el.remove(); continue; }   // comment
+      if (el.nodeType !== 1) { i += 1; continue; }        // text
+      // Upper-cased, because tagName only comes back upper-case for HTML
+      // elements: inside foreign content an <svg> reports 'svg' and the
+      // <script> nested in it reports 'script', so a case-sensitive check
+      // matched neither and unwrapped them both instead of dropping them.
+      const tag = el.tagName.toUpperCase();
+      if (DROP_TAGS.has(tag)) { el.remove(); continue; }
+      if (!ALLOWED_TAGS.has(tag)) {
+        el.replaceWith(...el.childNodes);
+        continue;
+      }
+      const keep = ALLOWED_ATTRS[tag] || [];
+      [...el.attributes].forEach(({ name, value }) => {
+        const attr = name.toLowerCase();
+        // Everything not explicitly allowed goes, which covers every on*
+        // handler and style= without having to enumerate them.
+        if (!keep.includes(attr)) { el.removeAttribute(name); return; }
+        // An allowed href or src still has to point somewhere safe:
+        // javascript: and data: are the two that turn a link into a script.
+        if ((attr === 'href' || attr === 'src') && !SAFE_URL.test(value.trim())) {
+          el.removeAttribute(name);
+        }
+      });
+      if (tag === 'A' && el.getAttribute('href')) {
+        el.setAttribute('target', '_blank');
+        el.setAttribute('rel', 'noopener noreferrer');
+      }
+      walk(el);
+      i += 1;
+    }
+  };
+  walk(root);
+  return root.innerHTML;
+}
+
 function renderContent(src) {
   if (!src) return '';
   const looksHtml = /<\/?[a-z][\s\S]*>/i.test(src);
-  if (looksHtml) return src;
+  if (looksHtml) return sanitizeHtml(src);
   const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const lines = src.split(/\r?\n/);
   let html = '';
@@ -124,7 +203,7 @@ export default function BlogPost() {
           {/* The hero image of the article: eager, high priority, and given a
               ratio so nothing below it shifts when it lands. */}
           <img src={post.cover_image} alt={post.title}
-            width="1200" height="630" decoding="async" fetchpriority="high"
+            width="1200" height="630" decoding="async" fetchPriority="high"
             style={{ aspectRatio: '1200 / 630' }}
             className="mt-8 w-full rounded-3xl object-cover shadow-xl shadow-violet-200/40" />
         </div>

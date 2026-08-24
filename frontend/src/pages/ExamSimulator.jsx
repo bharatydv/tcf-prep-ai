@@ -64,9 +64,16 @@ export default function ExamSimulator() {
       if (!saved?.endsAt) return;
       const left = Math.round((saved.endsAt - Date.now()) / 1000);
       if (left <= 0) { localStorage.removeItem(DRAFT_KEY); return; }
+      // A draft with no set number cannot be resumed: the paper is fetched by
+      // set, so restoring straight into 'exam' left the timer running over a
+      // null `tasks` while the render showed the set chooser — and when the
+      // hour expired, the auto-submit dereferenced it and the page died
+      // silently inside setInterval. Drafts written before numbered sets
+      // existed all look like this.
+      if (!saved.setNumber) { localStorage.removeItem(DRAFT_KEY); return; }
       setTexts(saved.texts || { 1: '', 2: '', 3: '' });
       setCurrent(saved.current || 1);
-      if (saved.setNumber) setSetNumber(saved.setNumber);
+      setSetNumber(saved.setNumber);
       setSeconds(left);
       setPhase('exam');
       toast.info(t('sim.resumed'));
@@ -74,14 +81,37 @@ export default function ExamSimulator() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /* The sitting's deadline, anchored once when the exam starts — from the full
+     hour on a fresh run, or from the restored remainder after a reload. It is
+     set here rather than inside the timer effect so that everything below can
+     rely on it existing for the whole of the exam phase. */
   useEffect(() => {
-    if (phase !== 'exam') return;
+    if (phase !== 'exam') { deadlineRef.current = null; return; }
+    if (deadlineRef.current == null) {
+      deadlineRef.current = Date.now() + seconds * 1000;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
+
+  /* Saved on change, not on every tick.
+   *
+   * `seconds` used to be a dependency here, so the effect re-ran once a second
+   * and serialised all three texts about 3,600 times per sitting — synchronous
+   * main-thread writes, which on a modest phone is typing latency in the one
+   * screen where it matters. The deadline is absolute, so nothing about it
+   * needs re-saving as the clock moves. */
+  useEffect(() => {
+    if (phase !== 'exam' || deadlineRef.current == null) return;
     localStorage.setItem(DRAFT_KEY, JSON.stringify({
-      texts, current, setNumber, endsAt: Date.now() + seconds * 1000,
+      texts, current, setNumber, endsAt: deadlineRef.current,
     }));
-  }, [phase, texts, current, seconds, setNumber]);
+  }, [phase, texts, current, setNumber]);
 
   const submit = useCallback(async (timeUsed) => {
+    // The paper is what gets graded; without it there is nothing to submit.
+    // Reachable from the expiry path, which fires from a timer that does not
+    // know whether the fetch has landed.
+    if (!tasks) return;
     setPhase('submitting');
     try {
       const { data } = await api.post('/api/simulator/submit', {
@@ -104,8 +134,8 @@ export default function ExamSimulator() {
 
   useEffect(() => {
     if (phase !== 'exam') return undefined;
-    // Anchored once when the exam phase begins, from whatever is left — the
-    // full hour on a fresh start, the restored remainder after a reload.
+    // The deadline is anchored by the effect above, which runs first. Kept as a
+    // fallback for the render in which both fire together.
     if (deadlineRef.current == null) deadlineRef.current = Date.now() + secondsRef.current * 1000;
 
     const read = () => {
@@ -155,7 +185,6 @@ export default function ExamSimulator() {
     warned.current = { 10: false, 2: false, expired: false };
     setTexts({ 1: '', 2: '', 3: '' });
     setCurrent(1);
-    warned.current = { 10: false, 2: false };
     localStorage.removeItem(DRAFT_KEY);
     navigate('/practice');
   };

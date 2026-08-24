@@ -55,7 +55,8 @@ const Terms = lazy(() => import("./pages/Legal").then((m) => ({ default: m.Terms
 const Contact = lazy(() => import("./pages/Legal").then((m) => ({ default: m.Contact })));
 const ForgotPassword = lazy(() => import("./pages/PasswordReset").then((m) => ({ default: m.ForgotPassword })));
 const ResetPassword = lazy(() => import("./pages/PasswordReset").then((m) => ({ default: m.ResetPassword })));
-const VerifyEmail = lazy(() => import("./pages/VerifyEmail")); 
+const VerifyEmail = lazy(() => import("./pages/VerifyEmail"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 export default function App() {
   return (
@@ -162,7 +163,11 @@ export default function App() {
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/verify-email" element={<VerifyEmail />} />
           <Route path="/account/verify" element={<VerifyAccount />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          {/* A real 404, not a redirect home. Sending every unmatched URL to
+              the landing page made broken internal links invisible — the four
+              dead routes fixed above all looked exactly like homepage visits —
+              and gave search engines a dozen soft 404s to index. */}
+          <Route path="*" element={<NotFound />} />
         </Routes>
         </Suspense>
         {/* Was defined inside Landing, so 31 of 32 routes ended with no

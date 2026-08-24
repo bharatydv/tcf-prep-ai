@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Microphone, PenNib, GraduationCap, CheckCircle,
@@ -117,6 +117,21 @@ export default function Landing() {
   // The top of the funnel. Everything else is measured against this number.
   useEffect(() => { track('landing_view'); }, []);
 
+  /* Memoised: jsonLd is a dependency of useSeo's effect, so a fresh object
+     literal on every render tore the ld+json script out of <head> and rebuilt
+     it — along with every meta tag — each time this page re-rendered. */
+  const faqSchema = useMemo(() => ({
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    inLanguage: lang === 'fr' ? 'fr-CA' : 'en',
+    url: `${SITE_URL}/`,
+    mainEntity: FAQ_NUMBERS.map((n) => ({
+      '@type': 'Question',
+      name: t(`land.faq${n}q`),
+      acceptedAnswer: { '@type': 'Answer', text: t(`land.faq${n}a`) },
+    })),
+  }), [t, lang]);
+
   const startSimulator = () => {
     if (!user) { toast.info(t('land.registerToast')); return navigate('/register'); }
     // Land on the writing task overview with the own-question panel already
@@ -150,17 +165,7 @@ export default function Landing() {
         titleKey="seo.home.title"
         descKey="seo.home.desc"
         path="/"
-        jsonLd={{
-          '@context': 'https://schema.org',
-          '@type': 'FAQPage',
-          inLanguage: lang === 'fr' ? 'fr-CA' : 'en',
-          url: `${SITE_URL}/`,
-          mainEntity: FAQ_NUMBERS.map((n) => ({
-            '@type': 'Question',
-            name: t(`land.faq${n}q`),
-            acceptedAnswer: { '@type': 'Answer', text: t(`land.faq${n}a`) },
-          })),
-        }}
+        jsonLd={faqSchema}
       />
       {/* ============================================================ HERO */}
       <section className="relative bg-gradient-to-br from-violet-100 via-fuchsia-50 to-violet-200">

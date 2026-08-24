@@ -13,8 +13,16 @@ const SESSION_HINT = 'mf_session';
 /* Remembers that the last probe found nobody signed in, so a returning
    anonymous visitor skips it too. It is the reason a session that predates the
    hint cookie is not locked out: with neither marker present we still probe
-   once, and /auth/me sets the hint cookie on the way back. */
-const ANON_MARKER = 'prepfrancais.anon';
+   once, and /auth/me sets the hint cookie on the way back.
+
+   NOT 'prepfrancais.anon' — that key belongs to the analytics id in lib/api.js,
+   and the two collided in both directions. Once track() had stored its UUID,
+   the '1' comparison below never matched and every anonymous visitor paid for
+   the /auth/me → 401 → /auth/refresh → 401 pair this marker exists to skip;
+   and logging out stamped '1' over the analytics id, so every signed-out
+   browser reported the same anon_id and the funnel counted them as one person,
+   while logging in deleted the id and made a returning browser look brand new. */
+const ANON_MARKER = 'prepfrancais.anonSession';
 
 function hasSessionHint() {
   if (typeof document === 'undefined') return false;
