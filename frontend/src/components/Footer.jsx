@@ -85,6 +85,10 @@ export default function Footer() {
         ]} />
 
         <Column title={t('land.footResources')} links={[
+          /* The pillar of the /tcf-canada family. Every page in it links to
+             its siblings, but the family needs one link from the site-wide
+             footer or a crawler only ever reaches it from the sitemap. */
+          ['/tcf-canada', t('tcfCanada.hub.crumb')],
           ['/tef-tcf-writing-guide', t('land.footGuide')],
           ['/blog', t('land.footBlog')],
           ['/recent-topics', t('land.footRecent')],

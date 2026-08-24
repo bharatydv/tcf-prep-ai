@@ -71,7 +71,22 @@
       "/register",
       "/privacy",
       "/terms",
-      "/contact"
+      "/contact",
+      "/tcf-canada",
+      "/tcf-canada-practice",
+      "/tcf-canada-mock-test",
+      "/tcf-canada-exam-simulator",
+      "/tcf-canada-nclc-7",
+      "/tcf-canada-speaking",
+      "/tcf-canada-writing",
+      "/tcf-canada-listening",
+      "/tcf-canada-reading",
+      "/tcf-canada-speaking-task-1",
+      "/tcf-canada-speaking-task-2",
+      "/tcf-canada-speaking-task-3",
+      "/tcf-canada-writing-task-1",
+      "/tcf-canada-writing-task-2",
+      "/tcf-canada-writing-task-3"
     ],
     "inlineCss": false,
     "puppeteerArgs": [
