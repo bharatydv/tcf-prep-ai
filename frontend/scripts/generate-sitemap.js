@@ -33,6 +33,25 @@ const STATIC = [
   ['/resources', 0.7, 'monthly'],
   ['/combinations', 0.6, 'monthly'],
   ['/pricing', 0.8, 'monthly'],
+  /* The TCF Canada landing family. Source of truth for the routes is
+     src/pages/tcfCanada/slugs.js — this script is CommonJS and cannot
+     import it, so the list is repeated here and in reactSnap.include. */
+  ['/tcf-canada', 0.9, 'monthly'],
+  ['/tcf-canada-practice', 0.8, 'monthly'],
+  ['/tcf-canada-mock-test', 0.8, 'monthly'],
+  ['/tcf-canada-exam-simulator', 0.8, 'monthly'],
+  ['/tcf-canada-nclc-7', 0.8, 'monthly'],
+  ['/tcf-canada-speaking', 0.8, 'monthly'],
+  ['/tcf-canada-writing', 0.8, 'monthly'],
+  ['/tcf-canada-listening', 0.7, 'monthly'],
+  ['/tcf-canada-reading', 0.7, 'monthly'],
+  ['/tcf-canada-speaking-task-1', 0.7, 'monthly'],
+  ['/tcf-canada-speaking-task-2', 0.7, 'monthly'],
+  ['/tcf-canada-speaking-task-3', 0.7, 'monthly'],
+  ['/tcf-canada-writing-task-1', 0.7, 'monthly'],
+  ['/tcf-canada-writing-task-2', 0.7, 'monthly'],
+  ['/tcf-canada-writing-task-3', 0.7, 'monthly'],
+
   ['/register', 0.6, 'yearly'],
   ['/login', 0.4, 'yearly'],
   ['/privacy', 0.3, 'yearly'],

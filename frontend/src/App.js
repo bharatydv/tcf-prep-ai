@@ -7,6 +7,10 @@ import { Header, ProtectedRoute, ScrollToTop, RouteFallback } from "./components
 import Footer from "./components/Footer";
 import VerifyBanner from "./components/VerifyBanner";
 import Paywall from "./components/Paywall";
+/* Strings only. The page configs and their icons live in tcfCanada/pages.js,
+   which the lazy chunk below pulls in — importing them here would put fifteen
+   marketing pages' worth of data in the bundle the landing page waits on. */
+import { TCF_CANADA_SLUGS } from "./pages/tcfCanada/slugs";
 
 /* Landing, Login and Register are the entry points for a first-time visitor,
    so they stay in the main chunk — code-splitting them would only add a round
@@ -57,6 +61,8 @@ const ForgotPassword = lazy(() => import("./pages/PasswordReset").then((m) => ({
 const ResetPassword = lazy(() => import("./pages/PasswordReset").then((m) => ({ default: m.ResetPassword })));
 const VerifyEmail = lazy(() => import("./pages/VerifyEmail"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+/* One component, fifteen search-intent routes (/tcf-canada and friends). */
+const TcfCanada = lazy(() => import("./pages/TcfCanada"));
 
 export default function App() {
   return (
@@ -146,6 +152,12 @@ export default function App() {
             path="/admin"
             element={<ProtectedRoute adminOnly><Admin /></ProtectedRoute>}
           />
+          {/* The TCF Canada landing family. Declared from a list so a new page
+              is one line in tcfCanada/slugs.js plus its config and copy, and
+              so the router can never fall out of step with the sitemap. */}
+          {TCF_CANADA_SLUGS.map((slug) => (
+            <Route key={slug} path={`/${slug}`} element={<TcfCanada slug={slug} />} />
+          ))}
           <Route path="/blog" element={<Blog />} />
           <Route path="/blog/:slug" element={<BlogPost />} />
           <Route path="/admin/blog" element={<ProtectedRoute adminOnly><BlogAdmin /></ProtectedRoute>} />
