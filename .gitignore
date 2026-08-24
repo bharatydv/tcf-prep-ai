@@ -21,5 +21,19 @@ venv/
 *.save
 *.save.*
 
+# Database dumps. docker-compose mounts ./backups into the backup container, so
+# on the deploy VM this directory fills with pg_dumps of production — every
+# learner's e-mail and password hash, everything they have ever written or said,
+# their phone numbers, and the subscriptions and invoices tables.
+#
+# It was untracked but NOT ignored, which is the same trap the .env.bak rule
+# above exists to close: one `git add -A` run on the VM and the entire database
+# is a public commit. Ignore the directory AND the file shapes, because a dump
+# copied somewhere else for a restore test is exactly as sensitive.
+backups/
+*.sql.gz
+*.sql
+*.dump
+
 # Local compose overrides stay on the machine that needs them.
 docker-compose.override.yml
