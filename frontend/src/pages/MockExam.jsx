@@ -69,12 +69,20 @@ export default function MockExam() {
       </main>
     );
   }
-  if (!questions) return <main className="flex min-h-[60vh] items-center justify-center"><div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" /></main>;
-
+  /* BEFORE the loading guard, not after.
+   *
+   * The fetch effect returns early while NOT_READY, so `questions` stays null
+   * forever — and the guard below caught that first and rendered a spinner that
+   * could never resolve. This branch was unreachable, so every visitor to
+   * /exam/* got an infinite spinner instead of the explanation written for
+   * them, on a page linked from the header nav, the footer, a landing card and
+   * both Listening buttons. */
   if (NOT_READY) {
     return <ComingSoon icon={<Headphones size={30} weight="fill" />}
       title={t('mock.soonTitle')} body={t('mock.soonBody')} />;
   }
+
+  if (!questions) return <main className="flex min-h-[60vh] items-center justify-center"><div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" /></main>;
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10">

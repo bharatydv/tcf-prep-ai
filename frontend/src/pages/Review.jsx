@@ -7,7 +7,28 @@ import { BackLink, useConfirm } from '../components/shared';
 import { useT } from '../i18n';
 import { useSeo } from '../lib/seo';
 
-function shuffle(a) { return [...a].sort(() => Math.random() - 0.5); }
+/* Fisher–Yates, not `sort(() => Math.random() - 0.5)`.
+ *
+ * A comparator that returns a random sign is not a shuffle: sort assumes a
+ * consistent ordering, and given an inconsistent one it produces a
+ * systematically skewed permutation. Measured on the three options an MCQ
+ * actually builds, the correct answer landed first 43.7% of the time and
+ * second only 18.8%, against 33.3% for each if it were uniform — so answering
+ * "the first one" every time scored 44% without reading anything.
+ *
+ * This is the same problem reading_bank/_balance.py exists to solve for the
+ * question bank, for the reason its docstring gives: a candidate who noticed
+ * could score above their real level by guessing, which makes the measure
+ * useless. The review MCQ is where mastery is decided and XP is awarded, so it
+ * needs the same guarantee. Fisher–Yates is uniform by construction. */
+function shuffle(a) {
+  const out = [...a];
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
 
 /* The category sprint is two minutes, as the mode chooser says. */
 const SPRINT_SECONDS = 120;
@@ -147,7 +168,7 @@ export default function Review() {
         </div>
         <div className="mt-6 flex justify-center gap-3">
           <button className="btn-primary" onClick={() => { setMode(null); setSummary(null); load(); }}>{t('rev.continue')}</button>
-          <Link to="/dashboard" className="btn-outline">Tableau de bord</Link>
+          <Link to="/dashboard" className="btn-outline">{t('common.dashboard')}</Link>
         </div>
       </main>
     );

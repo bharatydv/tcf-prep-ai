@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   CheckCircle, XCircle, ClockCountdown, CaretLeft, CaretRight, Quotes,
   ArrowClockwise, ListChecks, Lightning,
@@ -28,7 +28,8 @@ const clock = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s 
 export default function ReadingTest() {
   const [confirm, confirmDialog] = useConfirm();
   const { testNumber } = useParams();
-  const isTest = useLocation().pathname.startsWith('/reading/test');
+  const location = useLocation();
+  const isTest = location.pathname.startsWith('/reading/test');
   const { user } = useAuth();
   const t = useT();
   const navigate = useNavigate();
@@ -91,7 +92,9 @@ export default function ReadingTest() {
   // as the invigilator would — a learner who runs out of time still gets a
   // score rather than losing the whole attempt.
   useEffect(() => {
-    if (!isTest || result || loading) return undefined;
+    // `user` is part of the guard: without it the clock ran behind the
+    // sign-in prompt below and auto-submitted into a 401 at zero.
+    if (!isTest || !user || result || loading) return undefined;
     if (deadlineRef.current == null) deadlineRef.current = Date.now() + TEST_SECONDS * 1000;
 
     const read = () => {
@@ -109,7 +112,7 @@ export default function ReadingTest() {
       clearInterval(id);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [isTest, result, loading, submit]);
+  }, [isTest, user, result, loading, submit]);
 
   const q = questions[index];
   const correction = q ? corrections[q.reading_question_id] : null;
@@ -142,6 +145,14 @@ export default function ReadingTest() {
 
   const restart = () => {
     submittedRef.current = false;
+    // The deadline HAS to be cleared with the rest of it. Clearing `result`
+    // re-runs the timer effect, which keeps whatever deadline is already in the
+    // ref — and after a hand-in that deadline has passed, so the effect read
+    // zero seconds remaining and immediately submitted the empty paper again.
+    // Pressing Retake filed a fresh 0/40 into the learner's history before they
+    // had answered anything. Every other timer in the app nulls its deadline on
+    // leaving the phase; this one did not.
+    deadlineRef.current = null;
     setAnswers({}); setCorrections({}); setResult(null);
     setIndex(0); setLeft(TEST_SECONDS);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -154,6 +165,45 @@ export default function ReadingTest() {
       </main>
     );
   }
+
+  /* Timed mode needs an account, and it has to be said BEFORE the clock starts.
+   *
+   * The paper itself is public and practice mode stays open to everyone — but
+   * handing one in is authenticated. handIn() checked for a session; the
+   * automatic hand-in at zero called submit() directly and did not, so a
+   * signed-out visitor could sit the full hour and lose every answer to a 401
+   * at the end. Asking here costs a click; asking at minute sixty costs the
+   * hour. */
+  if (isTest && !user) {
+    return (
+      <main className="mx-auto flex min-h-[62vh] max-w-xl items-center px-4 py-12 sm:px-6">
+        <div className="w-full overflow-hidden rounded-3xl border border-violet-100 bg-white text-center shadow-soft">
+          <div className="h-1.5 w-full bg-gradient-to-r from-primary to-fuchsia-500" />
+          <div className="px-6 py-10">
+            <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-100 text-primary">
+              <ClockCountdown size={26} weight="fill" />
+            </span>
+            <h1 className="mt-4 font-heading text-xl font-extrabold text-gray-900">
+              {t('readTest.signInTitle')}
+            </h1>
+            <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-gray-600">
+              {t('readTest.signInBody')}
+            </p>
+            <div className="mt-6 flex flex-wrap justify-center gap-2.5">
+              <Link to="/login" state={{ from: location }}
+                className="btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600">
+                {t('auth.loginButton')}
+              </Link>
+              <Link to={`/reading/practice/${testNumber}`} className="btn-outline">
+                {t('readTest.orPractise')}
+              </Link>
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   if (!q) return null;
 
   /* Navigator swatch: grey before answering, then green/red once a question has

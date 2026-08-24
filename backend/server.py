@@ -237,17 +237,26 @@ _provider_cache_ts: float = 0.0     # last refresh time
 _PROVIDER_CACHE_TTL = 10.0          # seconds
 
 
-async def get_provider(db: AsyncSession, key: str) -> str:
+async def get_provider(key: str) -> str:
     """Return the active provider for a task key, DB setting first then .env.
 
     Cached briefly so we don't hit the DB on every grade call, but still pick
     up Admin-panel changes within ~10 seconds.
 
-    The refresh runs on its own short-lived session and commits immediately.
-    Reading through the caller's session left a transaction open — SELECT
-    starts one and nothing here ended it — so on a cache miss the request held
-    a connection *idle in transaction* for the whole 5-30 second AI call, and
-    enough concurrent misses exhausted the pool for the entire application.
+    Takes NO session, deliberately, and this is load-bearing. The refresh runs
+    on its own short-lived session and commits immediately: reading through the
+    caller's session left a transaction open — SELECT starts one and nothing
+    here ended it — so on a cache miss the request held a connection *idle in
+    transaction* for the whole 5-30 second AI call, and enough concurrent
+    misses exhausted the pool for the entire application.
+
+    It used to accept a `db` argument and ignore it, which read like an
+    oversight inviting someone to "fix" it by using the session. That would now
+    be a live bug rather than a tidy-up: simulator_submit grades its three
+    tâches concurrently and passes all three the SAME session, which is only
+    safe while nothing downstream performs I/O on it. An AsyncSession used from
+    two coroutines at once fails with "another operation is in progress".
+    The parameter is gone so the trap cannot be walked into.
     """
     global _provider_cache, _provider_cache_ts
     import time as _t
@@ -1240,6 +1249,13 @@ turn_rate_limit = rate_limit("turn", limit=120, window_seconds=300)
 # Funnel events are unauthenticated and cheap, but an open write endpoint
 # still needs a ceiling. Generous enough that a real session never trips it.
 event_rate_limit = rate_limit("event", limit=60, window_seconds=300)
+# Marking one reading question is deliberately open to signed-out visitors —
+# practice is the free surface. But the ids are derived from test and position
+# (rq_01_01 … rq_10_40), so 400 requests walk the entire answer key and every
+# explanation out of the product. This does not make that impossible and is not
+# meant to: it costs nothing to a learner practising a paper (40 questions, plus
+# re-reads) and turns a few seconds of scraping into a quarter of an hour.
+reading_check_rate_limit = rate_limit("readcheck", limit=120, window_seconds=300)
 
 
 # ----------------------------------------------------------------------------
@@ -2187,7 +2203,7 @@ async def analyze_text_with_ai(text: str, topic: Optional[str] = None, db=None,
         header += (f"This is TCF Canada {spec['name']}, which requires "
                    f"{spec['min_words']}-{spec['max_words']} words.\n\n")
     prompt = f"{header}Text to grade:\n{text}"
-    provider = (await get_provider(db, "writing_grader_provider")) if db is not None else WRITING_GRADER_PROVIDER
+    provider = (await get_provider("writing_grader_provider")) if db is not None else WRITING_GRADER_PROVIDER
 
     # The caps run inside the parse step on purpose: they are part of turning a
     # reply into a grade, so a retry that produces a readable reply gets them
@@ -2229,7 +2245,7 @@ async def generate_distractor(error_text: str, correction: str,
               f"a learner might choose (same length/style). Return ONLY the "
               f"alternative text, nothing else.")
     try:
-        provider = (await get_provider(db, "writing_grader_provider")
+        provider = (await get_provider("writing_grader_provider")
                     if db is not None else WRITING_GRADER_PROVIDER)
         raw = await _grade_with_provider(
             provider, "You generate plausible incorrect French answer options.",
@@ -2477,7 +2493,7 @@ async def interaction_reply(consigne: str, history: list, db=None,
     """
     prompt = (_render_dialogue(history, consigne) +
               "\n\nDonne maintenant la prochaine réplique de l'Agent, et rien d'autre.")
-    provider = (await get_provider(db, "speaking_grader_provider")) if db is not None else SPEAKING_GRADER_PROVIDER
+    provider = (await get_provider("speaking_grader_provider")) if db is not None else SPEAKING_GRADER_PROVIDER
     system = INTERACTION_AGENT_SYSTEM + (INTERACTION_AGENT_TACHE2_EXTRA if mode == "tache2" else "")
     raw = await _grade_with_provider(provider, system, prompt)
     if not raw:
@@ -2518,7 +2534,7 @@ async def grade_interaction(consigne: str, history: list, db=None,
                                       "again and ask the agent your first "
                                       "question."),
                 "suggestions": [], "missed_questions": []}
-    provider = (await get_provider(db, "speaking_grader_provider")) if db is not None else SPEAKING_GRADER_PROVIDER
+    provider = (await get_provider("speaking_grader_provider")) if db is not None else SPEAKING_GRADER_PROVIDER
     grader = (INTERVIEW_GRADER_SYSTEM if task_type == 1
               else INTERACTION_GRADER_SYSTEM)
     raw = await _grade_with_provider(provider, grader,
@@ -2663,7 +2679,7 @@ async def transcribe_audio(audio_bytes: bytes, filename: str, db=None,
     a credit MUST treat an empty transcript as a failure and refund it: an
     empty string was previously graded as if it were an answer.
     """
-    provider = (await get_provider(db, "transcribe_provider")) if db is not None else TRANSCRIBE_PROVIDER
+    provider = (await get_provider("transcribe_provider")) if db is not None else TRANSCRIBE_PROVIDER
     if provider == "gemini":
         fn, key = _transcribe_gemini, GEMINI_API_KEY
     elif provider == "groq":
@@ -2723,7 +2739,7 @@ async def analyze_speaking_with_ai(transcript: str, question: str, db=None,
                    f"speaks for {spec['speak_seconds'] // 60} min "
                    f"{spec['speak_seconds'] % 60:02d} s.\n\n")
     prompt = f"{header}TRANSCRIPT of the candidate's spoken answer:\n{transcript}"
-    provider = (await get_provider(db, "speaking_grader_provider")) if db is not None else SPEAKING_GRADER_PROVIDER
+    provider = (await get_provider("speaking_grader_provider")) if db is not None else SPEAKING_GRADER_PROVIDER
     raw = await _grade_with_provider(provider, SPEAKING_GRADER_SYSTEM, prompt)
     if raw is None:
         return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
@@ -3361,8 +3377,19 @@ class ExamSubmitIn(BaseModel):
 class ReviewResult(BaseModel):
     mistake_id: str
     # What the learner picked. The server compares it with the stored
-    # correction rather than trusting a client-sent `correct` flag, which made
-    # XP, badges and streaks forgeable from the console.
+    # correction rather than trusting a client-sent `correct` flag.
+    #
+    # That closes the easy hole, not the whole one, and the comment here used to
+    # claim otherwise. /api/review/queue has to return each mistake's
+    # `correction` — it is one of the MCQ options — so a script can always send
+    # the right answer, and the flashcard path below is a bare self-rating with
+    # nothing to check it against. XP, badges and streaks are therefore still
+    # forgeable by anyone willing to read the response they were just sent.
+    #
+    # Left as-is on purpose: they are cosmetic, and the only spaced-repetition
+    # schedule a forger corrupts is their own. Making them tamper-proof means
+    # not shipping the correction until after the answer, which costs a round
+    # trip on every card to protect a number that does not matter.
     answer: Optional[str] = Field(default=None, max_length=600)
     # Self-assessment on a flashcard, where there is nothing to compare.
     self_rated_correct: Optional[bool] = None
@@ -5011,11 +5038,26 @@ async def review_submit(body: ReviewSubmitIn,
     mastered_now: List[str] = []
     new_badges: List[str] = []
     graded: List[dict] = []
-    for r in body.results:
+
+    # One SELECT for the whole session, one COMMIT at the end.
+    #
+    # This used to issue a SELECT *and a COMMIT* per answer inside the loop: a
+    # twenty-question sprint was about forty round trips and twenty separate
+    # transactions, all inside the request the learner is waiting on at the end
+    # of every review. It is the same shape record_mistakes was rewritten to
+    # remove, for the reason its comment gives — that fix just never reached
+    # here, and this is the more frequently hit endpoint of the two.
+    wanted = [r.mistake_id for r in body.results]
+    by_id = {}
+    if wanted:
         res = await db.execute(
-            select(Mistake).where(Mistake.mistake_id == r.mistake_id,
-                                  Mistake.user_id == user.user_id))
-        m = res.scalar_one_or_none()
+            select(Mistake).where(Mistake.user_id == user.user_id,
+                                  Mistake.mistake_id.in_(wanted)))
+        by_id = {m.mistake_id: m for m in res.scalars().all()}
+
+    now = now_utc()
+    for r in body.results:
+        m = by_id.get(r.mistake_id)
         if not m:
             continue
         # MCQ and sprint send the picked answer, which the server checks against
@@ -5038,26 +5080,38 @@ async def review_submit(body: ReviewSubmitIn,
                 m.status = "reviewing"
             m.srs_consecutive_got_it = streak_ok
             m.srs_interval_index = idx
-            m.srs_due_at = now_utc() + timedelta(days=SRS_LADDER[idx])
+            m.srs_due_at = now + timedelta(days=SRS_LADDER[idx])
         else:
             m.srs_consecutive_got_it = 0
             m.srs_interval_index = 0
-            m.srs_due_at = now_utc() + timedelta(days=SRS_LADDER[0])
+            m.srs_due_at = now + timedelta(days=SRS_LADDER[0])
             m.status = "reviewing"
-        await db.commit()
         if m.status == "mastered" and (m.times_repeated or 1) >= 3:
             new_badges.append("Comeback — fixed a mistake repeated 3+ times")
+    # The SRS changes above are still pending; they are written by the single
+    # commit at the end of this handler, together with the XP and the badges.
+    await db.flush()
 
     user_doc = await get_user_by_id(db, user.user_id)
     badges = set(user_doc.badges or [])
     slayer = "Conjugaison Slayer — 25 conjugation mistakes mastered"
-    n_conj = await db.scalar(
-        select(func.count()).select_from(Mistake).where(
-            Mistake.user_id == user.user_id,
-            Mistake.category == "conjugation",
-            Mistake.status == "mastered"))
-    if (n_conj or 0) >= 25 and slayer not in badges:
+
+    # Per-category totals in ONE grouped query rather than two counts per
+    # category. Counts the flushed state above, so a mistake mastered a moment
+    # ago clears its category in the same session that finished it.
+    tally = {}
+    rows = await db.execute(
+        select(Mistake.category,
+               func.count(),
+               func.count().filter(Mistake.status == "mastered"))
+        .where(Mistake.user_id == user.user_id)
+        .group_by(Mistake.category))
+    for category, total, mastered in rows.all():
+        tally[category] = (int(total or 0), int(mastered or 0))
+
+    if tally.get("conjugation", (0, 0))[1] >= 25 and slayer not in badges:
         new_badges.append(slayer)
+
     # Clearing a category pays once. Re-checking every session meant the bonus
     # was granted again on every submission for the rest of the account's life.
     awarded = set(user_doc.awarded_bonuses or [])
@@ -5065,14 +5119,8 @@ async def review_submit(body: ReviewSubmitIn,
         token = f"category_clear:{cat}"
         if token in awarded:
             continue
-        remaining = await db.scalar(
-            select(func.count()).select_from(Mistake).where(
-                Mistake.user_id == user.user_id, Mistake.category == cat,
-                Mistake.status != "mastered"))
-        had_any = await db.scalar(
-            select(func.count()).select_from(Mistake).where(
-                Mistake.user_id == user.user_id, Mistake.category == cat))
-        if had_any and not remaining:
+        had_any, mastered = tally.get(cat, (0, 0))
+        if had_any and mastered == had_any:
             xp += XP_CATEGORY_CLEAR_BONUS
             awarded.add(token)
     badges.update(new_badges)
@@ -5099,18 +5147,22 @@ async def review_submit(body: ReviewSubmitIn,
 @app.get("/api/review/mastery")
 async def review_mastery(user: User = Depends(get_current_user),
                          db: AsyncSession = Depends(get_db)):
-    out = {}
-    for cat in VALID_CATEGORIES:
-        if cat == "improvement":
-            continue
-        total = await db.scalar(
-            select(func.count()).select_from(Mistake).where(
-                Mistake.user_id == user.user_id, Mistake.category == cat))
-        mastered = await db.scalar(
-            select(func.count()).select_from(Mistake).where(
-                Mistake.user_id == user.user_id, Mistake.category == cat,
-                Mistake.status == "mastered"))
-        out[cat] = {"total": total or 0, "mastered": mastered or 0}
+    # Two counts per category was ten queries for one grouped read. Every other
+    # aggregate in this file was moved into Postgres during the earlier
+    # performance pass; mistakes_summary two screens away already does exactly
+    # this with a single GROUP BY.
+    out = {cat: {"total": 0, "mastered": 0}
+           for cat in VALID_CATEGORIES if cat != "improvement"}
+    rows = await db.execute(
+        select(Mistake.category,
+               func.count(),
+               func.count().filter(Mistake.status == "mastered"))
+        .where(Mistake.user_id == user.user_id)
+        .group_by(Mistake.category))
+    for category, total, mastered in rows.all():
+        if category in out:
+            out[category] = {"total": int(total or 0),
+                             "mastered": int(mastered or 0)}
     return out
 
 
@@ -5319,11 +5371,14 @@ async def reading_test_questions(test_number: int,
 
 @app.post("/api/reading/questions/{reading_question_id}/check")
 async def reading_check_one(reading_question_id: str, body: ReadingCheckIn,
-                            db: AsyncSession = Depends(get_db)):
+                            db: AsyncSession = Depends(get_db),
+                            _rl=Depends(reading_check_rate_limit)):
     """Practice mode: mark a single question and explain it straight away.
 
     Deliberately open to signed-out visitors — practice is the free surface, and
-    the answer key still never leaves the server unasked.
+    the answer key still never leaves the server unasked. Rate-limited all the
+    same: question ids are predictable, so this is the one endpoint from which
+    the whole 400-question key could be enumerated. See the limiter's comment.
     """
     res = await db.execute(
         select(ReadingQuestion).where(
@@ -6464,7 +6519,7 @@ async def admin_get_ai_providers(admin: User = Depends(get_admin_user),
     which providers have an API key present in the environment."""
     current = {}
     for key in PROVIDER_OPTIONS:
-        current[key] = await get_provider(db, key)
+        current[key] = await get_provider(key)
     keys_present = {
         p: _provider_key_present(p)
         for opts in PROVIDER_OPTIONS.values() for p in opts
@@ -7194,15 +7249,27 @@ async def list_themes(task_type: Optional[int] = None,
     stmt = stmt.order_by(Theme.sort_order.asc(), Theme.name.asc())
     res = await db.execute(stmt)
     themes = res.scalars().all()
+
+    # One grouped query, not one COUNT per theme.
+    #
+    # This is a public endpoint that four pages call on mount, and it was
+    # issuing a count for every theme it had just loaded — seventeen queries to
+    # answer one question. Grouping gives the same numbers in one.
+    counts = {}
+    if task_type in (1, 2, 3) and themes:
+        rows = await db.execute(
+            select(ThemeQuestion.theme_id, func.count())
+            .where(ThemeQuestion.theme_id.in_([t.theme_id for t in themes]),
+                   ThemeQuestion.task_type == task_type,
+                   ThemeQuestion.is_active == True)  # noqa: E712
+            .group_by(ThemeQuestion.theme_id))
+        counts = {tid: int(n or 0) for tid, n in rows.all()}
+
     out = []
     for t in themes:
         d = _row_to_dict(t)
         if task_type in (1, 2, 3):
-            count = await db.scalar(
-                select(func.count()).select_from(ThemeQuestion).where(
-                    ThemeQuestion.theme_id == t.theme_id,
-                    ThemeQuestion.task_type == task_type,
-                    ThemeQuestion.is_active == True))  # noqa: E712
+            count = counts.get(t.theme_id, 0)
             if not count:
                 continue
             d["question_count"] = count

@@ -862,7 +862,10 @@
     "submitFailed": "Your paper could not be submitted. Please try again.",
     "testN": "Test {{n}}",
     "vocabulary": "Vocabulary",
-    "wrongLabel": "Wrong"
+    "wrongLabel": "Wrong",
+    "signInTitle": "Sign in to sit the timed test",
+    "signInBody": "The 60-minute paper is graded and saved to your history, so it needs an account. Practice mode is open to everyone and marks each question as you answer it.",
+    "orPractise": "Practise this paper instead"
   },
   "readTests": {
     "badgeInstant": "Untimed · marked as you go",

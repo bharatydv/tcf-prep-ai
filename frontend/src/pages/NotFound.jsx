@@ -8,6 +8,11 @@
  * visit to the homepage.
  *
  * noindex, and it offers the four places people are actually trying to reach.
+ *
+ * The HTTP status is still 200: nginx serves the SPA shell for anything it
+ * cannot match on disk, and it has no way to know which paths this router
+ * recognises. The noindex tag is what actually keeps these out of an index —
+ * worth knowing rather than assuming the status line changed too.
  */
 import { Link, useLocation } from 'react-router-dom';
 import { Compass } from '@phosphor-icons/react';
