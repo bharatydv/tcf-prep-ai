@@ -549,7 +549,22 @@ export function AnalysisProgress({ current }) {
 }
 
 /* ------------------------------------------------ Streaming SSE helper ---- */
-export async function streamAnalysis(backendUrl, payload, { onStage, onComplete, onError, t = (k) => k }) {
+/* `t` is expected from every caller. The fallback below is English copy, NOT
+   the identity function it used to be: with `(k) => k`, a caller that forgot to
+   pass the translator showed the learner a toast reading literally
+   "analysis.incomplete". Two of the three callers had forgotten, and it only
+   surfaced on a dropped connection or a proxy timeout — the moment a person is
+   least able to guess what happened. */
+const STREAM_FALLBACK_COPY = {
+  'analysis.failed': 'Analysis failed. Please try again.',
+  'analysis.interrupted': 'The connection dropped during analysis. Please try again.',
+  'analysis.incomplete': 'Analysis stopped before finishing. Please try again.',
+};
+
+export async function streamAnalysis(backendUrl, payload, {
+  onStage, onComplete, onError,
+  t = (k) => STREAM_FALLBACK_COPY[k] || k,
+}) {
   const res = await fetch(`${backendUrl}/api/analyze/stream`, {
     method: 'POST',
     credentials: 'include',

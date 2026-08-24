@@ -26,10 +26,11 @@ export default function CheckWriting() {
     if (stage) return;
     setStage('parsing');
     await streamAnalysis(BACKEND_URL, { text, source: 'paste', label: label || null }, {
+      t,
       onStage: setStage,
       onComplete: async (sub) => {
         await refreshUser();
-        toast.success(`Analyse terminée — niveau ${sub.tcf_level}`);
+        toast.success(t('write.doneToast', { level: sub.tcf_level }));
         navigate(`/feedback/${sub.submission_id}`);
       },
       onError: (detail, status) => {

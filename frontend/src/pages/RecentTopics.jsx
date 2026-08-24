@@ -118,6 +118,7 @@ export function RecentTopicDetail() {
     if (stage) return;
     setStage('parsing');
     await streamAnalysis(BACKEND_URL, { text, source: 'practice', label: topic.title }, {
+      t,
       onStage: setStage,
       onComplete: async (sub) => {
         await refreshUser();

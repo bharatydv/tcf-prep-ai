@@ -862,7 +862,10 @@
     "submitFailed": "Votre copie n'a pas pu être envoyée. Veuillez réessayer.",
     "testN": "Test {{n}}",
     "vocabulary": "Vocabulaire",
-    "wrongLabel": "Faux"
+    "wrongLabel": "Faux",
+    "signInTitle": "Connectez-vous pour passer le test chronométré",
+    "signInBody": "L'épreuve de 60 minutes est corrigée et enregistrée dans votre historique : elle demande un compte. Le mode entraînement est ouvert à tous et corrige chaque question au fur et à mesure.",
+    "orPractise": "S'entraîner sur cette épreuve"
   },
   "readTests": {
     "badgeInstant": "Sans chronomètre · corrigé au fur et à mesure",
