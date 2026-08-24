@@ -26,10 +26,16 @@ const SHELL = path.join(BUILD, 'app-shell.html');
 
 // Anything behind ProtectedRoute, plus the token-driven pages, whose content
 // depends entirely on the signed-in user or a URL parameter.
+// 'exam-simulator' is NOT here any more: App.js maps it to the public
+// SpeakingExam page, so pruning it was removing a page crawlers should see.
+// The writing simulator kept its own protected path, practice/simulator.
 const NOT_PRERENDERABLE = [
-  'dashboard', 'review', 'check-writing', 'exam-simulator', 'admin',
+  'dashboard', 'review', 'check-writing', 'admin', 'invoices',
   'forgot-password', 'reset-password', 'verify-email',
   path.join('practice', 'simulator'),
+  path.join('admin', 'blog'),
+  path.join('billing', 'return'),
+  path.join('account', 'verify'),
 ];
 
 function save() {

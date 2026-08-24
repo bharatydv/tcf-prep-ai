@@ -32,10 +32,16 @@ fi
 mv "$OUT.part" "$OUT"
 echo "backup: wrote $(basename "$OUT") (${SIZE} bytes)"
 
-# Prune by count as well as age, so a burst of runs cannot fill the disk and
-# a long quiet period cannot delete the only copy that exists.
-find "$DIR" -name "${PGDATABASE}-*.sql.gz" -type f -mtime "+${KEEP_DAYS}" -print -delete \
-    | sed 's/^/backup: pruned /' || true
+# Prune by age, but never below a floor.
+#
+# The floor is what stops age-pruning from being dangerous on its own: a stack
+# that has not run for KEEP_DAYS comes back to find every dump expired and
+# deletes the only copies that exist, which is precisely when they matter. So
+# the newest BACKUP_KEEP_MIN are always kept, however old they are.
+KEEP_MIN="${BACKUP_KEEP_MIN:-3}"
+find "$DIR" -name "${PGDATABASE}-*.sql.gz" -type f -mtime "+${KEEP_DAYS}" -print \
+    | sort -r | tail -n +$((KEEP_MIN + 1)) \
+    | while IFS= read -r old; do rm -f "$old" && echo "backup: pruned $(basename "$old")"; done
 
 REMAINING=$(find "$DIR" -name "${PGDATABASE}-*.sql.gz" -type f | wc -l)
 echo "backup: ${REMAINING} dump(s) retained in ${DIR}"

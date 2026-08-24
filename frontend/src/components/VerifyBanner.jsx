@@ -5,7 +5,7 @@
  * protects. Accounts created before verification existed are unverified too,
  * so this must never stand between anyone and their work.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { EnvelopeSimple, X } from '@phosphor-icons/react';
 import { toast } from 'sonner';
@@ -13,15 +13,28 @@ import { api, errMsg } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 
-const DISMISSED_KEY = 'prepfrancais.verifyDismissed';
+/* Keyed per account, not per browser.
+ *
+ * A single shared key meant one person dismissing this hid it from everyone
+ * who signed in on that machine afterwards — so the next account never saw
+ * the prompt to confirm their address at all. Shared laptops and internet
+ * cafés are ordinary for this audience. */
+const dismissKey = (userId) => `prepfrancais.verifyDismissed.${userId}`;
 
 export default function VerifyBanner() {
   const { user } = useAuth();
   const t = useT();
-  const [dismissed, setDismissed] = useState(() => {
-    try { return localStorage.getItem(DISMISSED_KEY) === '1'; } catch { return false; }
-  });
+  const [dismissed, setDismissed] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // Re-read whenever the account changes, including on the first load once the
+  // session has been restored.
+  useEffect(() => {
+    if (!user?.user_id) { setDismissed(false); return; }
+    try {
+      setDismissed(localStorage.getItem(dismissKey(user.user_id)) === '1');
+    } catch { setDismissed(false); }
+  }, [user?.user_id]);
 
   // Either channel confirms the account. `verified` is the server's answer to
   // that; the email flag alone is the fallback for a bundle that predates it.
@@ -30,7 +43,7 @@ export default function VerifyBanner() {
 
   const dismiss = () => {
     setDismissed(true);
-    try { localStorage.setItem(DISMISSED_KEY, '1'); } catch { /* private mode */ }
+    try { localStorage.setItem(dismissKey(user.user_id), '1'); } catch { /* private mode */ }
   };
 
   const resend = async () => {

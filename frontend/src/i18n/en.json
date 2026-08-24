@@ -107,7 +107,10 @@
     "transcribeProvider": "Transcription (audio → text)",
     "unsaved": "Unsaved changes",
     "update": "Update",
-    "writingGrader": "Writing analysis"
+    "writingGrader": "Writing analysis",
+    "showing": "Showing {{from}}–{{to}} of {{total}}",
+    "prev": "Previous",
+    "next": "Next"
   },
   "analysis": {
     "conjugation": "Checking conjugation",
@@ -204,6 +207,10 @@
     "noLink": "The payment provider did not return a payment link. Please try again.",
     "pendingBody": "Your bank has not confirmed the charge yet. Premium unlocks automatically as soon as it does — there is nothing more for you to do.",
     "pendingTitle": "Still waiting on your bank",
+    "phoneFailed": "That number could not be saved. Check the format and try again.",
+    "phoneSave": "Save and continue",
+    "phoneTitle": "One more thing",
+    "phoneWhy": "Your card issuer needs a phone number to authorise a subscription. It is used for this payment only.",
     "redirecting": "Redirecting…",
     "toDashboard": "Go to my dashboard"
   },
@@ -345,6 +352,8 @@
     "cancel": "Cancel",
     "closeAria": "Close",
     "consigne": "Prompt",
+    "speakerYou": "You",
+    "speakerAgent": "Agent",
     "errAnalysis": "The analysis failed.",
     "errNoReply": "The AI partner did not reply.",
     "errTranscription": "Transcription failed.",
@@ -1352,5 +1361,10 @@
     "topicsList": "Theme topics",
     "writeFirst": "Write something first.",
     "yourQuestion": "Your question"
+  },
+  "notFound": {
+    "title": "This page does not exist",
+    "body": "The link may be out of date, or the address mistyped. Here is where everything else lives.",
+    "home": "Back to the home page"
   }
 }

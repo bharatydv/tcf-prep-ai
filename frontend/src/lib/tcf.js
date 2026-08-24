@@ -12,6 +12,15 @@ export const WRITING_TASKS = {
 
 export const WRITING_TOTAL_SECONDS = 60 * 60;
 
+/* The one-time free trial: 3 writing corrections + 3 speaking evaluations,
+ * mirroring FREE_WRITING_LIMIT + FREE_SPEAKING_LIMIT in backend/server.py.
+ *
+ * Only ever a fallback — every response carries `free_trial_total`, which is
+ * authoritative. It lived as a private `const FREE_LIMIT = 6` in four separate
+ * pages, and a fifth copy in shared.jsx said 5, so a stale bundle could tell
+ * one learner they had 5 attempts and another 6 on the next screen. */
+export const FREE_TRIAL_TOTAL = 6;
+
 /* Free writing sits outside the three tâches, so it has no official range.
  * Its ceiling is tâche 3's — the exam never asks for more than 180 words — so
  * past 180 the editor warns, and at 200 it stops accepting input entirely. */

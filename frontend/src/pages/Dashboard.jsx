@@ -78,14 +78,20 @@ export default function Dashboard() {
 
       {/* stat cards */}
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* The icon is a component, not an element: building the elements
+            inside the array literal made them array children in React's eyes
+            (hence the missing-key warning) and re-created all four on every
+            render. Rendered below, each one is an ordinary child of its card. */}
         {[
-          [t('dash.statSubmissions'), stats.total_submissions, null],
-          [t('dash.statAverage'), stats.average_score, null],
-          [t('dash.statStreak'), stats.current_streak, <Fire size={20} weight="fill" className="text-orange-500" />],
-          [t('dash.statBest'), stats.longest_streak, <Trophy size={20} weight="fill" className="text-amber-500" />],
-        ].map(([label, value, icon]) => (
+          [t('dash.statSubmissions'), stats.total_submissions, null, null],
+          [t('dash.statAverage'), stats.average_score, null, null],
+          [t('dash.statStreak'), stats.current_streak, Fire, 'text-orange-500'],
+          [t('dash.statBest'), stats.longest_streak, Trophy, 'text-amber-500'],
+        ].map(([label, value, Icon, tone]) => (
           <div key={label} className="card p-5">
-            <p className="flex items-center gap-2 text-sm text-gray-500">{icon}{label}</p>
+            <p className="flex items-center gap-2 text-sm text-gray-500">
+              {Icon ? <Icon size={20} weight="fill" className={tone} /> : null}{label}
+            </p>
             <p className="mt-1 font-heading text-3xl font-bold">{value}</p>
           </div>
         ))}

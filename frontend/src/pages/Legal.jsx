@@ -9,6 +9,7 @@
  * the dictionaries, so the French version is a translation rather than a
  * separate legal text that can drift from it.
  */
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { EnvelopeSimple, ShieldCheck, Scales, ChatCircleText } from '@phosphor-icons/react';
 import { useT } from '../i18n';
@@ -87,28 +88,31 @@ export function Contact() {
     ['contact.gradingH', 'contact.gradingP'],
     ['contact.partnerH', 'contact.partnerP'],
   ];
+  /* Memoised: jsonLd is a dependency of useSeo's effect, and a new object
+     literal every render rebuilt the ld+json script and every meta tag. */
+  const contactSchema = useMemo(() => ({
+    '@context': 'https://schema.org',
+    '@type': 'ContactPage',
+    name: t('contact.h'),
+    mainEntity: {
+      '@type': 'Organization',
+      name: 'prepfrancais',
+      email: SUPPORT_EMAIL,
+      contactPoint: {
+        '@type': 'ContactPoint',
+        contactType: 'customer support',
+        email: SUPPORT_EMAIL,
+        availableLanguage: ['French', 'English'],
+      },
+    },
+  }), [t]);
   return (
     <>
       <Seo
         titleKey="seo.contact.title"
         descKey="seo.contact.desc"
         path="/contact"
-        jsonLd={{
-          '@context': 'https://schema.org',
-          '@type': 'ContactPage',
-          name: t('contact.h'),
-          mainEntity: {
-            '@type': 'Organization',
-            name: 'prepfrancais',
-            email: SUPPORT_EMAIL,
-            contactPoint: {
-              '@type': 'ContactPoint',
-              contactType: 'customer support',
-              email: SUPPORT_EMAIL,
-              availableLanguage: ['French', 'English'],
-            },
-          },
-        }}
+        jsonLd={contactSchema}
       />
       <Shell icon={<ChatCircleText size={26} weight="duotone" />}
         title={t('contact.h')} intro={t('contact.intro')}>

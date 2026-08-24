@@ -121,17 +121,10 @@ export function announcePaywall(detail) {
   }
 }
 
-// Turn FastAPI error shapes into a readable message
-export function errorMessage(err, fallback = "Something went wrong") {
-  const detail = err?.response?.data?.detail;
-  if (!detail) return err?.message || fallback;
-  if (typeof detail === "string") return detail;
-  if (Array.isArray(detail)) {
-    return detail.map((d) => d?.msg || JSON.stringify(d)).join("; ");
-  }
-  if (typeof detail === "object") return detail.msg || JSON.stringify(detail);
-  return fallback;
-}
+/* errorMessage() used to sit here beside errMsg() below, doing the same job on
+   the same shapes and imported by nothing. Two functions for one FastAPI error
+   is one too many, and the one that survives is the one every page already
+   calls. */
 
 export const CATEGORIES = {
   prepositions: { label: "Prépositions", color: "#FEF08A" },
@@ -142,49 +135,14 @@ export const CATEGORIES = {
   improvement: { label: "Améliorations C1", color: "#BBF7D0" },
 };
 
-export const catLabel = (key) => CATEGORIES[key]?.label || key;
 export const catColor = (key) => CATEGORIES[key]?.color || "#E5E7EB";
 
-// POST + read an SSE stream
-export async function streamAnalyze(payload, { onStage, onComplete, onError }) {
-  // Use /analyze/stream because baseURL already includes /api
-  const resp = await fetch(`${baseURL}/analyze/stream`, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  
-  if (!resp.ok && resp.headers.get("content-type")?.includes("json")) {
-    const data = await resp.json();
-    onError?.(typeof data.detail === "string" ? data.detail : "Request failed", resp.status);
-    return;
-  }
-  
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const events = buffer.split("\n\n");
-    buffer = events.pop();
-    for (const chunk of events) {
-      let event = "message";
-      let data = "";
-      for (const line of chunk.split("\n")) {
-        if (line.startsWith("event: ")) event = line.slice(7).trim();
-        if (line.startsWith("data: ")) data += line.slice(6);
-      }
-      if (!data) continue;
-      const parsed = JSON.parse(data);
-      if (event === "stage") onStage?.(parsed.stage);
-      else if (event === "complete") onComplete?.(parsed);
-      else if (event === "error") onError?.(parsed.detail, parsed.status);
-    }
-  }
-}
+/* The SSE reader lives in components/shared.jsx as streamAnalysis(), which is
+   what every writing surface imports. A second copy used to sit here, unused
+   and subtly worse: it never called announcePaywall, so a spent trial would
+   have surfaced through it as a bare error string instead of the plan chooser,
+   and it had no guard for a stream that closes with no result event. One of
+   them was going to get imported by mistake. */
 
 export const errMsg = (err, defaultMsg) => {
   // A detail is not always a sentence: the paywall sends an object, and

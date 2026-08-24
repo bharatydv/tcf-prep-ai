@@ -45,6 +45,14 @@ services:
       # file-watching reloader running behind nginx. Override in .env only for
       # a local compose stack.
       ENV: ${ENV:-production}
+      # The backend is published on 127.0.0.1 only (see `ports` below) and the
+      # frontend nginx reaches it over the compose network, so every request
+      # arrives through a proxy we run and X-Forwarded-For can be trusted.
+      # Left unset, the API meters every anonymous caller under the proxy's own
+      # address - one shared bucket for the whole internet, where ten failed
+      # logins 429 everybody. Override in .env if you put something else in
+      # front of it.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-*}
     depends_on:
       db:
         condition: service_healthy

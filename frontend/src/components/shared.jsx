@@ -3,7 +3,7 @@ import { Link, NavLink, Navigate, useLocation, useNavigate } from 'react-router-
 import { Fire, SignOut, List, X, SquaresFour, ArrowLeft } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 import { ACCENTS, CATEGORY_META, announcePaywall, paywallDetail } from '../lib/api';
-import { FREE_WRITING, WRITING_TASKS, countWords, freeWordStatus, wordStatus } from '../lib/tcf';
+import { FREE_TRIAL_TOTAL, FREE_WRITING, WRITING_TASKS, countWords, freeWordStatus, wordStatus } from '../lib/tcf';
 import { LANGUAGES, useI18n, useT } from '../i18n';
 
 /* --------------------------------------------------------- ComingSoon ---- */
@@ -321,7 +321,7 @@ export function CreditsBadge({ className = '' }) {
     <span className={`pill ${tone} ${className}`} data-testid="credits-badge">
       {left === 0
         ? t('credits.none')
-        : t('credits.remaining', { n: left, total: user.free_monthly_limit ?? 5 })}
+        : t('credits.remaining', { n: left, total: user.free_monthly_limit ?? FREE_TRIAL_TOTAL })}
     </span>
   );
 }
@@ -392,6 +392,66 @@ export function WordCountBar({ text, taskType, free = false, className = '' }) {
  *
  * Escape and a click on the backdrop both answer false, matching what people
  * already expect a dialog to do with those two gestures. */
+/* useConfirm's sibling, for the one question that needs an answer typed
+ * rather than chosen.
+ *
+ * Same shape: `await prompt(...)` resolves to the string, or null if the
+ * learner backs out. Kept beside useConfirm because the dialog, the focus
+ * handling and the Escape behaviour are the same problem. */
+export function usePrompt() {
+  const t = useT();
+  const [req, setReq] = useState(null);
+  const [value, setValue] = useState('');
+
+  const prompt = (opts = {}) => new Promise((resolve) => {
+    setValue(opts.initial || '');
+    setReq({ ...opts, resolve });
+  });
+
+  useEffect(() => {
+    if (!req) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') { req.resolve(null); setReq(null); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [req]);
+
+  const answer = (v) => { req.resolve(v); setReq(null); };
+
+  const dialog = !req ? null : (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-gray-900/50 p-4 backdrop-blur-sm"
+      role="dialog" aria-modal="true" data-testid="prompt-dialog"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) answer(null); }}>
+      <form className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl"
+        onSubmit={(e) => { e.preventDefault(); if (value.trim()) answer(value.trim()); }}>
+        {req.title && (
+          <h3 className="font-heading text-lg font-bold text-gray-900">{req.title}</h3>
+        )}
+        <p className="mt-1 text-sm leading-relaxed text-gray-600">{req.message}</p>
+        <label className="sr-only" htmlFor="prompt-input">{req.label || req.title}</label>
+        <input id="prompt-input" className="input mt-4" autoFocus
+          type={req.type || 'text'} inputMode={req.inputMode}
+          placeholder={req.placeholder || ''} value={value}
+          autoComplete={req.autoComplete}
+          onChange={(e) => setValue(e.target.value)}
+          data-testid="prompt-input" />
+        <div className="mt-5 flex gap-3">
+          <button type="button" onClick={() => answer(null)}
+            className="btn-outline flex-1" data-testid="prompt-cancel">
+            {t('common.cancel')}
+          </button>
+          <button type="submit" disabled={!value.trim()}
+            className="btn-primary flex-1 disabled:opacity-60" data-testid="prompt-ok">
+            {req.confirmLabel || t('common.confirm')}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+
+  return [prompt, dialog];
+}
+
+
 export function useConfirm() {
   const t = useT();
   const [req, setReq] = useState(null);
@@ -586,17 +646,28 @@ export function ErrorHighlightedText({ text, errors }) {
 }
 
 /* ------------------------------------------------------------ Heatmap ---- */
+/* The server buckets each day in the LEARNER's timezone — that is the whole
+   point of /api/dashboard/heatmap and of the timezone column behind it — so the
+   keys it returns are local calendar days. Building them here with
+   toISOString() read them back as UTC: for a candidate in Montréal practising
+   after 8pm, "today" serialises as tomorrow's UTC date, which is not a key the
+   server sent, and the square they had just earned rendered grey. */
+const dayKey = (d) => `${d.getFullYear()}-${
+  String(d.getMonth() + 1).padStart(2, '0')}-${
+  String(d.getDate()).padStart(2, '0')}`;
+
 export function Heatmap({ data }) {
   const days = [];
   const today = new Date();
   for (let i = 364; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10);
-    days.push({ key, count: data?.[key] || 0 });
+    days.push({ key: dayKey(d), count: data?.[dayKey(d)] || 0, date: d });
   }
-  // pad so columns are full weeks starting Sunday
-  const firstDow = new Date(days[0].key).getDay();
+  // pad so columns are full weeks starting Sunday. Read off the Date itself,
+  // not off a re-parsed 'YYYY-MM-DD' string — that parses as UTC midnight and
+  // names the wrong weekday west of Greenwich.
+  const firstDow = days[0].date.getDay();
   const padded = Array(firstDow).fill(null).concat(days);
   const weeks = [];
   for (let i = 0; i < padded.length; i += 7) weeks.push(padded.slice(i, i + 7));

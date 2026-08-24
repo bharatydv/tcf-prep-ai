@@ -397,7 +397,7 @@ export default function ConversationModal({
     setChecking(true);
     try {
       const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
-      probe.getTracks().forEach((t) => t.stop());
+      probe.getTracks().forEach((track) => track.stop());
     } catch (err) {
       setChecking(false);
       return toast.error(t('conv.micDenied'));
@@ -613,17 +613,21 @@ export default function ConversationModal({
               {turns.length === 0 && status === 'thinking' && (
                 <p className="py-8 text-center text-xs text-gray-400">{t('conv.agentThinking')}</p>
               )}
-              {turns.map((t, i) => (
-                <div key={i} className={`flex ${t.role === 'candidate' ? 'justify-end' : 'justify-start'}`}>
+              {/* `turn`, not `t` — the loop variable used to shadow the
+                  translator, which is why the two speaker labels below were
+                  hardcoded French in an otherwise translated modal: t() was
+                  unreachable inside this block. */}
+              {turns.map((turn, i) => (
+                <div key={i} className={`flex ${turn.role === 'candidate' ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
-                    t.role === 'candidate'
+                    turn.role === 'candidate'
                       ? 'rounded-br-sm bg-gradient-to-br from-primary to-fuchsia-600 text-white'
                       : 'rounded-bl-sm border border-violet-100 bg-white text-gray-800'}`}>
                     <p className={`mb-0.5 text-[9px] font-bold uppercase tracking-wide ${
-                      t.role === 'candidate' ? 'text-white/70' : 'text-primary'}`}>
-                      {t.role === 'candidate' ? 'Vous' : 'Agent'}
+                      turn.role === 'candidate' ? 'text-white/70' : 'text-primary'}`}>
+                      {turn.role === 'candidate' ? t('conv.speakerYou') : t('conv.speakerAgent')}
                     </p>
-                    {t.text}
+                    {turn.text}
                   </div>
                 </div>
               ))}

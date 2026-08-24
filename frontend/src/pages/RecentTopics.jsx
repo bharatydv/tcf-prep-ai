@@ -6,7 +6,7 @@ import { api, errMsg, BACKEND_URL } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { AccentToolbar, AnalysisProgress, BackLink, streamAnalysis, useConfirm } from '../components/shared';
 import { useT } from '../i18n';
-import { Seo } from '../lib/seo';
+import { Seo, useSeo } from '../lib/seo';
 
 const TASK_LABELS = { 1: 'topics.task1', 2: 'topics.task2', 3: 'topics.task3' };
 
@@ -76,6 +76,14 @@ export function RecentTopicDetail() {
   const navigate = useNavigate();
   const [topic, setTopic] = useState(null);
   const [error, setError] = useState('');
+  /* useSeo, not <Seo>, because every branch below returns early — signed out,
+     errored, still loading — and an element form would only have rendered on
+     the success path. This page had no metadata at all: no title of its own and
+     no canonical, so it inherited whatever the previously visited route left in
+     the head. It is also noindex: the model answer is the product, and the page
+     needs an account to show anything, so it has no business in an index. */
+  useSeo({ titleKey: 'seo.topics.title', descKey: 'seo.topics.desc',
+           path: `/recent-topics/${topicId}`, noindex: true });
   const [writing, setWriting] = useState(false);
   const [text, setText] = useState('');
   const [stage, setStage] = useState(null);

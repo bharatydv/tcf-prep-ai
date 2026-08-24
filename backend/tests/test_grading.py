@@ -130,3 +130,43 @@ class TestLeakage:
     def test_provider_errors_are_scrubbed_of_anything_key_shaped(self):
         scrubbed = m._scrub_secrets("failed with key sk-abcdef0123456789xyz")
         assert "sk-abcdef0123456789xyz" not in scrubbed
+
+
+class TestStreamingSessionLifetime:
+    """The SSE grading endpoint must not touch the request-scoped session.
+
+    FastAPI tears a `Depends(...yield)` dependency down when the endpoint
+    function RETURNS. For a StreamingResponse that is before the body has
+    produced a single byte, so a generator using `db` runs against a session
+    get_db has already closed — and SQLAlchemy does not raise, it silently
+    re-opens and checks out a pool connection nothing will ever check back in.
+    One leak per streamed grade, on the busiest AI path in the product.
+
+    Which way round it behaves depends on the installed FastAPI: 0.115 (what
+    requirements.txt pins) tears down first, later versions tear down last.
+    That is exactly why this is asserted rather than trusted.
+    """
+
+    def _generator_source(self):
+        import inspect
+        import re
+        src = inspect.getsource(m.analyze_stream)
+        body = src[src.index("async def gen():"):]
+        # Comments explain the hazard by name, so compare executable lines only.
+        return "\n".join(l for l in body.splitlines()
+                         if not l.strip().startswith("#"))
+
+    def test_the_generator_opens_its_own_session(self):
+        assert "async with SessionLocal() as sdb:" in self._generator_source()
+
+    def test_the_generator_never_uses_the_request_session(self):
+        import re
+        code = self._generator_source()
+        # `db` PASSED or dereferenced — `f(db,`, `f(db)`, `db.execute`. The
+        # keyword name in `db=sdb` is not a use of it, and `sdb` is the
+        # generator's own session, so neither matches.
+        leaks = [ln.strip() for ln in code.splitlines()
+                 if re.search(r"(?<![A-Za-z_])db\s*[,).]", ln)]
+        assert not leaks, (
+            "analyze_stream's generator still references the request-scoped "
+            f"session, which is closed before the stream runs: {leaks}")

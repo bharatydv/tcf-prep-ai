@@ -66,10 +66,14 @@ async function dynamicRoutes() {
     const { posts = [] } = await fetchJson(`${API}/api/blog`);
     posts.forEach((p) => p.slug && out.push(urlEntry(`/blog/${p.slug}`, 0.8, 'monthly', p.updated_at || p.created_at)));
   } catch (e) { console.warn('[sitemap] blog posts skipped:', e.message); }
-  try {
-    const { topics = [] } = await fetchJson(`${API}/api/recent-topics`);
-    topics.forEach((t) => t.topic_id && out.push(urlEntry(`/recent-topics/${t.topic_id}`, 0.7, 'monthly', t.created_at)));
-  } catch (e) { console.warn('[sitemap] recent topics skipped:', e.message); }
+  /* Topic DETAIL pages are deliberately not listed.
+   *
+   * They used to be, at priority 0.7 each. /api/recent-topics/{id} requires a
+   * session, so the page answers a signed-out visitor — and every crawler —
+   * with "please log in": a soft 404 submitted for indexing. The listing page
+   * /recent-topics is public and is in STATIC above, which is the right thing
+   * to point a crawler at. If these pages are ever made to render their
+   * consigne to a signed-out visitor, put them back. */
   return out;
 }
 
