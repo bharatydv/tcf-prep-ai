@@ -31,6 +31,10 @@ export default function Landing() {
   const [simTopic, setSimTopic] = useState('');
   const [simAnswer, setSimAnswer] = useState('');
   const trialTo = user ? '/dashboard' : '/register';
+  // A plan card is purchase intent, not trial intent, so it opens checkout.
+  // /pricing sends a signed-out visitor to /register on its own, so this
+  // does not need the user check trialTo makes.
+  const planTo = '/pricing';
 
   // The top of the funnel. Everything else is measured against this number.
   useEffect(() => { track('landing_view'); }, []);
@@ -436,9 +440,10 @@ export default function Landing() {
                       <li key={f} className="flex items-center gap-2.5"><CheckCircle size={17} weight="fill" className="shrink-0 text-primary" /> {t(f)}</li>
                     ))}
                   </ul>
-                  {/* Still the trial CTA, not a checkout: the landing page sells
-                      the offer, /pricing takes the money. */}
-                  <Link to={trialTo} data-testid={`plan-${p.id}`}
+                  {/* Straight to /pricing: someone who clicked a specific plan
+                      is asking to buy, and bouncing them to the dashboard lost
+                      that intent. /pricing is still where the money is taken. */}
+                  <Link to={planTo} data-testid={`plan-${p.id}`}
                     className={`mt-7 ${p.popular ? 'btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600 w-full justify-center' : 'btn-outline w-full justify-center'}`}>
                     {t('land.getStarted')}
                   </Link>
