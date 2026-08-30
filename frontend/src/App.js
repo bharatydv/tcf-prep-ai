@@ -44,6 +44,8 @@ const ReadingHome = lazy(() => import("./pages/ReadingHome"));
 const ReadingTests = lazy(() => import("./pages/ReadingTests"));
 const ReadingTest = lazy(() => import("./pages/ReadingTest"));
 const ListeningHome = lazy(() => import("./pages/ListeningHome"));
+const ListeningTests = lazy(() => import("./pages/ListeningTests"));
+const ListeningTest = lazy(() => import("./pages/ListeningTest"));
 const Blog = lazy(() => import("./pages/Blog"));
 const BlogPost = lazy(() => import("./pages/BlogPost"));
 const BlogAdmin = lazy(() => import("./pages/BlogAdmin"));
@@ -112,11 +114,14 @@ export default function App() {
           <Route path="/reading/practice/:testNumber" element={<ReadingTest />} />
           <Route path="/reading/test/:testNumber" element={<ReadingTest />} />
           <Route path="/listening" element={<ListeningHome />} />
-          {/* ListeningHome linked to these two, but neither route existed, so
-              both buttons fell through the catch-all to the landing page. The
-              listening exam is the oral-comprehension mock. */}
-          <Route path="/listening/practice" element={<Navigate to="/exam/oral-comprehension" replace />} />
-          <Route path="/listening/test" element={<Navigate to="/exam/oral-comprehension" replace />} />
+          {/* These two used to redirect to the oral-comprehension mock, which
+              was a stopgap: the mock had no audio and read a transcript aloud
+              in print. They now reach the real papers, in the same
+              practice/test pair the reading section uses. */}
+          <Route path="/listening/practice" element={<ListeningTests />} />
+          <Route path="/listening/test" element={<ListeningTests />} />
+          <Route path="/listening/practice/:testNumber" element={<ListeningTest />} />
+          <Route path="/listening/test/:testNumber" element={<ListeningTest />} />
           {/* "Exam simulator" now means the SPEAKING exam. The writing
               simulator keeps its own path so the writing Test Mode still
               reaches a writing paper. */}

@@ -14,6 +14,7 @@ import json
 import uuid
 import asyncio
 import logging
+import mimetypes
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -32,6 +33,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response, HTTPException, Depends, Query, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 
 from sqlalchemy import (
@@ -47,6 +49,7 @@ from sqlalchemy.orm import (
 )
 
 import reading_bank
+import listening_bank
 import exam_sets
 
 load_dotenv()
@@ -76,6 +79,28 @@ FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 # is the canonical site when several origins are allowed.
 PUBLIC_URL = os.environ.get(
     "PUBLIC_URL", FRONTEND_URL.split(",")[0].strip()).rstrip("/")
+
+# Where the listening audio is served from. The database stores relative paths
+# ("listening/test01/q01.mp3") and never an absolute URL, so the host can change
+# without a re-seed.
+#
+# Set it to the public bucket in production — the audio is 1.8 GB across 1,560
+# files and object storage with free egress (Cloudflare R2) costs nothing at
+# this size, whereas serving it off the application VM pays egress per play for
+# the one kind of file every learner streams end to end.
+#
+# Left unset it falls back to /media on this API, served by the static mount
+# below from backend/media. That is the development path, and it is also what
+# keeps a fresh checkout working before any bucket exists.
+MEDIA_BASE_URL = os.environ.get("MEDIA_BASE_URL", "").rstrip("/")
+MEDIA_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "media")
+
+
+def media_url(path: str) -> str:
+    """Absolute URL for a stored media path, or "" when there is none."""
+    if not path:
+        return ""
+    return f"{MEDIA_BASE_URL}/{path}" if MEDIA_BASE_URL else f"/media/{path}"
 
 # Account recovery. Reset links are deliberately short-lived; verification
 # links can be longer because they grant nothing on their own.
@@ -642,6 +667,7 @@ class ReadingQuestion(Base):
     band: Mapped[str] = mapped_column(String(40), default="")
     doc_type: Mapped[str] = mapped_column(String(120), default="")
     text: Mapped[str] = mapped_column(Text)
+    text_en: Mapped[str] = mapped_column(Text, default="")
     question_fr: Mapped[str] = mapped_column(Text)
     question_en: Mapped[str] = mapped_column(Text, default="")
     # [{id, text, text_en, explanation}] — the explanation is withheld from the
@@ -651,6 +677,63 @@ class ReadingQuestion(Base):
     key_line_fr: Mapped[str] = mapped_column(Text, default="")
     key_line_en: Mapped[str] = mapped_column(Text, default="")
     vocabulary: Mapped[Any] = mapped_column(JSONB, default=list)
+    # One-line verdict, and the worked reasoning behind it. Both are part of the
+    # correction, never of the question.
+    explanation: Mapped[str] = mapped_column(Text, default="")
+    breakdown: Mapped[str] = mapped_column(Text, default="")
+    # How many of the forty papers this question sits in — the export reuses a
+    # question across papers, and a high count marks one worth knowing cold.
+    frequency: Mapped[int] = mapped_column(Integer, default=0)
+    # Stable id from the import, so a question can be traced back to its source
+    # row after the paper/position slot it occupies has been reshuffled.
+    source_uuid: Mapped[str] = mapped_column(String(64), default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ListeningQuestion(Base):
+    """One compréhension orale item, belonging to a numbered paper of 39.
+
+    The mirror of ReadingQuestion, with the document replaced by a recording.
+    Two columns carry the difference:
+
+    `audio_path` is relative ("listening/test01/q01.mp3") and is turned into a
+    URL by media_url() on the way out, so moving the audio to a bucket or a CDN
+    is one environment variable and not a re-seed of 1,560 rows.
+
+    `transcript` is the answer. On the first ten questions of every paper the
+    four options are spoken rather than printed, and the transcript holds all
+    four of them verbatim — so it is withheld by the question endpoint exactly
+    as the answer key is, and returned only with the correction.
+    """
+    __tablename__ = "listening_questions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    listening_question_id: Mapped[str] = mapped_column(
+        String(64), unique=True, index=True)
+    test_number: Mapped[int] = mapped_column(Integer, index=True)   # 1-40
+    position: Mapped[int] = mapped_column(Integer)                  # 1-39
+    level: Mapped[str] = mapped_column(String(4))                   # A1-C2
+    band: Mapped[str] = mapped_column(String(40), default="")
+    audio_path: Mapped[str] = mapped_column(String(255), default="")
+    # Questions 1-2 of a paper show a photograph and ask which spoken sentence
+    # describes it; without the image they cannot be answered. Empty elsewhere.
+    image_path: Mapped[str] = mapped_column(String(255), default="")
+    transcript: Mapped[str] = mapped_column(Text, default="")
+    transcript_en: Mapped[str] = mapped_column(Text, default="")
+    # Empty for every row: the oral paper prints no written stem. Kept so the
+    # two banks stay the same shape, and in case a later import carries one.
+    question_fr: Mapped[str] = mapped_column(Text, default="")
+    question_en: Mapped[str] = mapped_column(Text, default="")
+    options: Mapped[Any] = mapped_column(JSONB)
+    correct_answer: Mapped[str] = mapped_column(String(8))
+    key_line_fr: Mapped[str] = mapped_column(Text, default="")
+    key_line_en: Mapped[str] = mapped_column(Text, default="")
+    vocabulary: Mapped[Any] = mapped_column(JSONB, default=list)
+    explanation: Mapped[str] = mapped_column(Text, default="")
+    breakdown: Mapped[str] = mapped_column(Text, default="")
+    frequency: Mapped[int] = mapped_column(Integer, default=0)
+    source_uuid: Mapped[str] = mapped_column(String(64), default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
@@ -661,6 +744,24 @@ class ReadingAttempt(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     reading_attempt_id: Mapped[str] = mapped_column(
+        String(64), unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.user_id"), index=True)
+    test_number: Mapped[int] = mapped_column(Integer, index=True)
+    answers: Mapped[Any] = mapped_column(JSONB, default=dict)
+    score: Mapped[int] = mapped_column(Integer, default=0)
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    time_used_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True)
+
+
+class ListeningAttempt(Base):
+    """A completed listening test, graded on the server."""
+    __tablename__ = "listening_attempts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    listening_attempt_id: Mapped[str] = mapped_column(
         String(64), unique=True, index=True)
     user_id: Mapped[str] = mapped_column(
         String(64), ForeignKey("users.user_id"), index=True)
@@ -1256,6 +1357,10 @@ event_rate_limit = rate_limit("event", limit=60, window_seconds=300)
 # meant to: it costs nothing to a learner practising a paper (40 questions, plus
 # re-reads) and turns a few seconds of scraping into a quarter of an hour.
 reading_check_rate_limit = rate_limit("readcheck", limit=120, window_seconds=300)
+# Same reasoning for the oral paper, whose ids are lq_01_01 … lq_40_39. The
+# ceiling is the same because a listening paper is the same 39 questions; what
+# is worth more here is the transcript, which the correction also carries.
+listening_check_rate_limit = rate_limit("listencheck", limit=120, window_seconds=300)
 
 
 # ----------------------------------------------------------------------------
@@ -3682,6 +3787,11 @@ async def seed_reading_questions(db) -> int:
                 key_line_fr=q.get("key_line_fr", ""),
                 key_line_en=q.get("key_line_en", ""),
                 vocabulary=q.get("vocabulary", []),
+                text_en=q.get("text_en", ""),
+                explanation=q.get("explanation", ""),
+                breakdown=q.get("breakdown", ""),
+                frequency=q.get("frequency", 0),
+                source_uuid=q.get("source_uuid", ""),
                 is_active=True, created_at=now_utc()))
     if not rows:
         return 0
@@ -3694,6 +3804,62 @@ async def seed_reading_questions(db) -> int:
     log.info("Seeded %d reading questions across %d test(s) (was %d rows)",
              len(rows),
              sum(1 for qs in reading_bank.READING_TESTS.values() if qs),
+             existing or 0)
+    return len(rows)
+
+
+async def seed_listening_questions(db) -> int:
+    """Sync the listening_questions table with the bank on disk.
+
+    Same contract as the reading seeder above, including the rebuild: ids are
+    `lq_NN_PP`, derived from paper and position, so a recorded attempt still
+    resolves after the table has been thrown away and written again.
+
+    The audio is NOT checked for here. A missing file is a deploy problem, not
+    a content problem, and refusing to seed over it would take the whole
+    section down rather than one clip — the paths are verified by
+    scripts/build_content.py when the bank is built instead.
+    """
+    problems = listening_bank.validate()
+    if problems:
+        for p in problems[:10]:
+            log.error("Listening bank invalid: %s", p)
+        log.error("Listening bank has %d problem(s); skipping listening seed",
+                  len(problems))
+        return 0
+
+    rows = []
+    for number, questions in listening_bank.LISTENING_TESTS.items():
+        for position, q in enumerate(questions, start=1):
+            rows.append(ListeningQuestion(
+                listening_question_id=f"lq_{number:02d}_{position:02d}",
+                test_number=number, position=position,
+                level=q["level"], band=q.get("band", ""),
+                audio_path=q.get("audio", ""), image_path=q.get("image", ""),
+                transcript=q.get("transcript", ""),
+                transcript_en=q.get("transcript_en", ""),
+                question_fr=q.get("question_fr", ""),
+                question_en=q.get("question_en", ""),
+                options=q["options"], correct_answer=q["correct_answer"],
+                key_line_fr=q.get("key_line_fr", ""),
+                key_line_en=q.get("key_line_en", ""),
+                vocabulary=q.get("vocabulary", []),
+                explanation=q.get("explanation", ""),
+                breakdown=q.get("breakdown", ""),
+                frequency=q.get("frequency", 0),
+                source_uuid=q.get("source_uuid", ""),
+                is_active=True, created_at=now_utc()))
+    if not rows:
+        return 0
+
+    existing = await db.scalar(
+        select(func.count()).select_from(ListeningQuestion))
+    await db.execute(sa_delete(ListeningQuestion))
+    db.add_all(rows)
+    await db.commit()
+    log.info("Seeded %d listening questions across %d test(s) (was %d rows)",
+             len(rows),
+             sum(1 for qs in listening_bank.LISTENING_TESTS.values() if qs),
              existing or 0)
     return len(rows)
 
@@ -3767,6 +3933,9 @@ async def run_seeds():
 
         # Compréhension écrite papers
         await seed_reading_questions(db)
+
+        # Compréhension orale papers
+        await seed_listening_questions(db)
 
         # Seed SPEAKING themes (skill='speaking') separately so they can be
         # added even if writing themes already exist.
@@ -3924,6 +4093,16 @@ MIGRATIONS = [
     "ON submissions (user_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS ix_mistakes_user_due "
     "ON mistakes (user_id, srs_due_at)",
+    # The imported reading bank carries a translation of the document, a
+    # one-line verdict, the worked reasoning and the source id. create_all only
+    # creates missing TABLES, so an existing deploy needs these spelled out.
+    "ALTER TABLE reading_questions ADD COLUMN IF NOT EXISTS text_en TEXT DEFAULT ''",
+    "ALTER TABLE reading_questions ADD COLUMN IF NOT EXISTS explanation TEXT DEFAULT ''",
+    "ALTER TABLE reading_questions ADD COLUMN IF NOT EXISTS breakdown TEXT DEFAULT ''",
+    "ALTER TABLE reading_questions ADD COLUMN IF NOT EXISTS frequency INTEGER DEFAULT 0",
+    "ALTER TABLE reading_questions ADD COLUMN IF NOT EXISTS source_uuid VARCHAR(64) DEFAULT ''",
+    "CREATE INDEX IF NOT EXISTS ix_listening_attempts_user_id "
+    "ON listening_attempts (user_id)",
 ]
 
 
@@ -3966,6 +4145,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Listening audio, when MEDIA_BASE_URL is unset. This is the development and
+# fresh-checkout path; in production the same relative paths are resolved
+# against a bucket instead and this mount is never hit.
+#
+# Mounted only if the directory exists, because StaticFiles raises at import
+# on a missing one — and an API that will not boot because nobody has run the
+# content build script yet is a worse failure than a section with no audio.
+if os.path.isdir(MEDIA_ROOT):
+    # StaticFiles types a response from the system mimetype table, and on
+    # Windows that table has no .webp — the question images went out as
+    # text/plain, which a browser sent nosniff would refuse to render. Both
+    # types are registered explicitly so the answer does not depend on which
+    # machine is serving.
+    mimetypes.add_type("image/webp", ".webp")
+    mimetypes.add_type("audio/mpeg", ".mp3")
+    app.mount("/media", StaticFiles(directory=MEDIA_ROOT), name="media")
+else:
+    log.warning("No media directory at %s; listening audio will 404 until "
+                "scripts/build_content.py has run or MEDIA_BASE_URL is set",
+                MEDIA_ROOT)
 
 
 @app.exception_handler(Exception)
@@ -5314,12 +5514,22 @@ def _reading_correction(q: ReadingQuestion, picked: Optional[str]) -> dict:
         "correct_answer": q.correct_answer,
         "is_correct": picked == q.correct_answer,
         "options": [{"id": o["id"], "text": o["text"],
+                     "text_en": o.get("text_en", ""),
                      "explanation": o.get("explanation", ""),
                      "is_correct": o["id"] == q.correct_answer}
                     for o in q.options],
         "key_line_fr": q.key_line_fr,
         "key_line_en": q.key_line_en,
         "vocabulary": q.vocabulary or [],
+        # The translation of the document and of the question. Held back until
+        # now for the same reason the options are French on the paper: reading
+        # it in French is the exercise, reading it in English afterwards is the
+        # lesson.
+        "text_en": q.text_en or "",
+        "question_en": q.question_en or "",
+        "explanation": q.explanation or "",
+        "breakdown": q.breakdown or "",
+        "frequency": q.frequency or 0,
     }
 
 
@@ -5436,6 +5646,179 @@ async def reading_attempts(user: User = Depends(get_current_user),
     res = await db.execute(
         select(ReadingAttempt).where(ReadingAttempt.user_id == user.user_id)
         .order_by(ReadingAttempt.created_at.desc()).limit(50))
+    return {"attempts": [_row_to_dict(a) for a in res.scalars().all()]}
+
+
+# ----------------------------------------------------------------------------
+# Compréhension orale — numbered practice/test papers
+#
+# The reading endpoints above, with the document replaced by a recording. The
+# split between what the question endpoint serves and what the correction
+# serves is the same, and matters more here: the transcript spells out all four
+# spoken options on the questions that print none, so it belongs with the
+# answer key and not with the paper.
+# ----------------------------------------------------------------------------
+class ListeningSubmitIn(BaseModel):
+    answers: Dict[str, Optional[str]] = Field(default_factory=dict)
+    time_used_seconds: int = Field(default=0, ge=0)
+
+
+class ListeningCheckIn(BaseModel):
+    picked: Optional[str] = None
+
+
+def _listening_question_public(q: ListeningQuestion) -> dict:
+    """The question as the learner meets it: audio, and four options to choose.
+
+    Everything that would give the answer away is withheld — the key, the
+    per-option explanations, and the transcript. Withholding the transcript is
+    the whole point of an oral paper; on questions 1 to 10 it also contains the
+    four options verbatim, so serving it would not merely help, it would print
+    the paper the exam deliberately does not print.
+
+    Option `text` is passed through as it is, empty string included. An empty
+    one is not missing data: those options are spoken, and the player renders a
+    bare letter for them exactly as the candidate sees on the day.
+    """
+    return {
+        "listening_question_id": q.listening_question_id,
+        "test_number": q.test_number,
+        "position": q.position,
+        "level": q.level,
+        "band": q.band,
+        "audio_url": media_url(q.audio_path),
+        "image_url": media_url(q.image_path),
+        "question_fr": q.question_fr or "",
+        "options": [{"id": o["id"], "text": o.get("text", "")} for o in q.options],
+    }
+
+
+def _listening_correction(q: ListeningQuestion, picked: Optional[str]) -> dict:
+    """The teaching payload, returned only once an answer is in."""
+    return {
+        "listening_question_id": q.listening_question_id,
+        "position": q.position,
+        "level": q.level,
+        "picked": picked,
+        "correct_answer": q.correct_answer,
+        "is_correct": picked == q.correct_answer,
+        "options": [{"id": o["id"], "text": o.get("text", ""),
+                     "text_en": o.get("text_en", ""),
+                     "explanation": o.get("explanation", ""),
+                     "is_correct": o["id"] == q.correct_answer}
+                    for o in q.options],
+        "transcript": q.transcript or "",
+        "transcript_en": q.transcript_en or "",
+        "key_line_fr": q.key_line_fr,
+        "key_line_en": q.key_line_en,
+        "vocabulary": q.vocabulary or [],
+        "explanation": q.explanation or "",
+        "breakdown": q.breakdown or "",
+        "frequency": q.frequency or 0,
+    }
+
+
+@app.get("/api/listening/tests")
+async def listening_tests(db: AsyncSession = Depends(get_db)):
+    """The forty papers, with how many questions each currently holds."""
+    res = await db.execute(
+        select(ListeningQuestion.test_number,
+               func.count(ListeningQuestion.id),
+               func.min(ListeningQuestion.level),
+               func.max(ListeningQuestion.level))
+        .where(ListeningQuestion.is_active == True)  # noqa: E712
+        .group_by(ListeningQuestion.test_number))
+    counts = {row[0]: {"question_count": row[1],
+                       "level_from": row[2], "level_to": row[3]}
+              for row in res.all()}
+    return {"tests": [
+        {"test_number": n,
+         "question_count": counts.get(n, {}).get("question_count", 0),
+         "level_from": counts.get(n, {}).get("level_from") or "A1",
+         "level_to": counts.get(n, {}).get("level_to") or "C2",
+         "is_ready": counts.get(n, {}).get("question_count", 0) > 0}
+        for n in sorted(listening_bank.LISTENING_TESTS)]}
+
+
+@app.get("/api/listening/tests/{test_number}")
+async def listening_test_questions(test_number: int,
+                                   db: AsyncSession = Depends(get_db)):
+    if test_number not in listening_bank.LISTENING_TESTS:
+        raise HTTPException(status_code=404, detail="Unknown test")
+    res = await db.execute(
+        select(ListeningQuestion)
+        .where(ListeningQuestion.test_number == test_number,
+               ListeningQuestion.is_active == True)  # noqa: E712
+        .order_by(ListeningQuestion.position.asc()))
+    questions = res.scalars().all()
+    if not questions:
+        raise HTTPException(status_code=503,
+                            detail="This test is not available yet")
+    return {"test_number": test_number,
+            "total": len(questions),
+            "questions": [_listening_question_public(q) for q in questions]}
+
+
+@app.post("/api/listening/questions/{listening_question_id}/check")
+async def listening_check_one(listening_question_id: str, body: ListeningCheckIn,
+                              db: AsyncSession = Depends(get_db),
+                              _rl=Depends(listening_check_rate_limit)):
+    """Practice mode: mark one question and explain it straight away."""
+    res = await db.execute(
+        select(ListeningQuestion).where(
+            ListeningQuestion.listening_question_id == listening_question_id,
+            ListeningQuestion.is_active == True))  # noqa: E712
+    q = res.scalar_one_or_none()
+    if not q:
+        raise HTTPException(status_code=404, detail="Question not found")
+    return {"correction": _listening_correction(q, body.picked)}
+
+
+@app.post("/api/listening/tests/{test_number}/submit")
+async def listening_submit(test_number: int, body: ListeningSubmitIn,
+                           user: User = Depends(get_current_user),
+                           db: AsyncSession = Depends(get_db)):
+    """Grade a whole paper, record it, and return every explanation."""
+    if test_number not in listening_bank.LISTENING_TESTS:
+        raise HTTPException(status_code=404, detail="Unknown test")
+    res = await db.execute(
+        select(ListeningQuestion)
+        .where(ListeningQuestion.test_number == test_number,
+               ListeningQuestion.is_active == True)  # noqa: E712
+        .order_by(ListeningQuestion.position.asc()))
+    questions = res.scalars().all()
+    if not questions:
+        raise HTTPException(status_code=503,
+                            detail="This test is not available yet")
+
+    corrections = [
+        _listening_correction(q, body.answers.get(q.listening_question_id))
+        for q in questions]
+    score = sum(1 for c in corrections if c["is_correct"])
+    by_level = {}
+    for c in corrections:
+        stat = by_level.setdefault(c["level"], {"correct": 0, "total": 0})
+        stat["total"] += 1
+        stat["correct"] += 1 if c["is_correct"] else 0
+
+    attempt = ListeningAttempt(
+        listening_attempt_id=new_id("lda"), user_id=user.user_id,
+        test_number=test_number, answers=body.answers, score=score,
+        total=len(questions), time_used_seconds=body.time_used_seconds,
+        created_at=now_utc())
+    db.add(attempt)
+    await db.commit()
+    streak = await update_streak(db, user.user_id)
+    return {"score": score, "total": len(questions), "by_level": by_level,
+            "corrections": corrections, "streak": streak}
+
+
+@app.get("/api/listening/attempts")
+async def listening_attempts(user: User = Depends(get_current_user),
+                             db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(ListeningAttempt).where(ListeningAttempt.user_id == user.user_id)
+        .order_by(ListeningAttempt.created_at.desc()).limit(50))
     return {"attempts": [_row_to_dict(a) for a in res.scalars().all()]}
 
 

@@ -37,3 +37,16 @@ backups/
 
 # Local compose overrides stay on the machine that needs them.
 docker-compose.override.yml
+
+# Raw question exports and the media staged out of them. The listening audio is
+# 1,560 files and 1.8 GB — far past what belongs in a git history, and it does
+# not need to be there: scripts/build_content.py rebuilds backend/media/ from
+# the exports, and in production the audio is served from object storage
+# (MEDIA_BASE_URL) rather than from the repo at all.
+#
+# backend/content/*.json is NOT ignored. Those two files are the question bank
+# itself — 3 MB each, the thing the server actually seeds from — so they are
+# committed and a deploy needs neither the exports nor this script.
+fuck_tcf_export/
+fuck_tcf_reading_export/
+backend/media/
