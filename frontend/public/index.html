@@ -115,5 +115,23 @@
          plus a paragraph identical to every other page's, competing with the
          page's own heading and content. -->
     <div id="root"></div>
+
+    <!-- Cloudflare Web Analytics.
+         Cookieless, so no consent banner is needed and EU visitors are counted
+         like everyone else - which matters here, because a large share of TCF
+         Canada candidates sit the exam from France, Belgium and North Africa.
+
+         Installed by hand rather than injected. Automatic injection only
+         reaches traffic passing through Cloudflare's proxy, and the DNS
+         records for this domain are deliberately DNS-only: visitors go
+         straight to the origin, so there is no proxy to inject anything.
+
+         BOTH hosts are named in security-headers.conf - script-src for the
+         beacon file, connect-src for where it reports to. Miss either and this
+         fails silently: the page looks perfect and the dashboard stays at
+         zero. -->
+    <script type="module" defer
+      src="https://static.cloudflareinsights.com/beacon.min.js"
+      data-cf-beacon='{"token": "87c3671c3cf2498b91d1109e282e9b44"}'></script>
   </body>
 </html>
