@@ -116,7 +116,10 @@ SMTP_HOST = os.environ.get("SMTP_HOST", "")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
-SMTP_FROM = os.environ.get("SMTP_FROM", "prepfrancais <bonjour@prepfrancais.com>")
+# noreply, not a name that implies someone is reading. Nothing receives at
+# this address — the domain has no MX records — so an address a person
+# might reasonably reply to would swallow the reply in silence.
+SMTP_FROM = os.environ.get("SMTP_FROM", "prepfrancais <noreply@prepfrancais.com>")
 SMTP_STARTTLS = os.environ.get("SMTP_STARTTLS", "true").lower() != "false"
 
 # SMS, the second confirmation channel. Twilio is the only provider wired up.
@@ -1125,14 +1128,23 @@ async def send_email(to: str, subject: str, body: str,
 
 
 def reset_email_body(name: str, link: str) -> str:
-    return (f"Bonjour {name},{NEWLINE}{NEWLINE}"
-            f"Vous avez demandé à réinitialiser votre mot de passe prepfrancais."
-            f"{NEWLINE}Ouvrez ce lien pour en choisir un nouveau :{NEWLINE}{NEWLINE}"
+    """English, not French, and deliberately so.
+
+    Everyone here is learning French — a good share of them at A1 or A2. The
+    one message a locked-out learner has to read correctly is the one that
+    gets them back in, and asking them to decode it in the language they came
+    to study is the wrong place to be idiomatic. The site is bilingual; this
+    is not the surface to prove it on.
+    """
+    greeting = f"Hi {name}," if name else "Hi,"
+    return (f"{greeting}{NEWLINE}{NEWLINE}"
+            f"You asked to reset your prepfrancais password."
+            f"{NEWLINE}Open this link to choose a new one:{NEWLINE}{NEWLINE}"
             f"{link}{NEWLINE}{NEWLINE}"
-            f"Le lien est valable {RESET_TTL_MINUTES} minutes et ne fonctionne "
-            f"qu'une fois.{NEWLINE}{NEWLINE}"
-            f"Si vous n'êtes pas à l'origine de cette demande, ignorez ce "
-            f"message : votre mot de passe reste inchangé.{NEWLINE}{NEWLINE}"
+            f"The link works once and expires in {RESET_TTL_MINUTES} minutes."
+            f"{NEWLINE}{NEWLINE}"
+            f"If you did not ask for this, you can ignore this email — your "
+            f"password stays as it is.{NEWLINE}{NEWLINE}"
             f"— prepfrancais")
 
 
@@ -1183,15 +1195,16 @@ async def send_sms(to: str, body: str) -> bool:
 
 
 def phone_code_body(code: str) -> str:
-    return (f"{code} est votre code de confirmation prepfrancais. "
-            f"Il expire dans {PHONE_CODE_TTL_MINUTES} minutes.")
+    return (f"{code} is your prepfrancais confirmation code. "
+            f"It expires in {PHONE_CODE_TTL_MINUTES} minutes.")
 
 
 def verify_email_body(name: str, link: str) -> str:
-    return (f"Bonjour {name},{NEWLINE}{NEWLINE}"
-            f"Confirmez votre adresse e-mail pour sécuriser votre compte "
-            f"prepfrancais :{NEWLINE}{NEWLINE}{link}{NEWLINE}{NEWLINE}"
-            f"Le lien est valable {VERIFY_TTL_HOURS} heures.{NEWLINE}{NEWLINE}"
+    greeting = f"Hi {name}," if name else "Hi,"
+    return (f"{greeting}{NEWLINE}{NEWLINE}"
+            f"Confirm your email address to secure your prepfrancais account:"
+            f"{NEWLINE}{NEWLINE}{link}{NEWLINE}{NEWLINE}"
+            f"The link is valid for {VERIFY_TTL_HOURS} hours.{NEWLINE}{NEWLINE}"
             f"— prepfrancais")
 
 
@@ -4338,7 +4351,7 @@ async def _send_verification_email(db: AsyncSession, user: User) -> bool:
     raw = await issue_link_token(db, user.user_id, "verify",
                                  timedelta(hours=VERIFY_TTL_HOURS))
     link = f"{PUBLIC_URL}/verify-email?token={raw}"
-    return await send_email(user.email, "Confirmez votre adresse prepfrancais",
+    return await send_email(user.email, "Confirm your prepfrancais email address",
                             verify_email_body(user.name or "", link))
 
 
@@ -4441,7 +4454,7 @@ async def forgot_password(body: ForgotPasswordIn,
                                      timedelta(minutes=RESET_TTL_MINUTES))
         link = f"{PUBLIC_URL}/reset-password?token={raw}"
         await send_email(user.email,
-                         "Réinitialisez votre mot de passe prepfrancais",
+                         "Reset your prepfrancais password",
                          reset_email_body(user.name or "", link))
     return {"detail": "If that address has an account, a reset link is on its way."}
 
@@ -6602,23 +6615,23 @@ def invoice_filename(inv: Invoice) -> str:
 
 def invoice_email_body(inv: Invoice) -> str:
     lines = [
-        (f"Bonjour {inv.billed_to_name or ''}").strip() + ",",
+        (f"Hi {inv.billed_to_name or ''}").strip() + ",",
         "",
-        f"Merci pour votre paiement. Votre facture {inv.number} est jointe "
-        f"a ce message.",
+        f"Thank you for your payment. Invoice {inv.number} is attached to "
+        f"this message.",
         "",
-        f"Formule : {inv.plan_name}",
-        f"Prix de la formule : {fmt_money(inv.base_amount, inv.currency)}",
-        f"Frais de traitement du paiement ({inv.fee_percent:g}%) : "
+        f"Plan: {inv.plan_name}",
+        f"Plan price: {fmt_money(inv.base_amount, inv.currency)}",
+        f"Payment processing fee ({inv.fee_percent:g}%): "
         f"{fmt_money(inv.fee_amount, inv.currency)}",
     ]
     if inv.tax_amount:
-        lines.append(f"{inv.tax_label} ({inv.tax_percent:g}%) : "
+        lines.append(f"{inv.tax_label} ({inv.tax_percent:g}%): "
                      f"{fmt_money(inv.tax_amount, inv.currency)}")
     lines += [
-        f"Total : {fmt_money(inv.total, inv.currency)}",
+        f"Total: {fmt_money(inv.total, inv.currency)}",
         "",
-        f"Vos factures restent disponibles dans votre compte : "
+        f"Your invoices stay available in your account: "
         f"{PUBLIC_URL}/invoices",
         "",
         INVOICE_BUSINESS_NAME,
@@ -6718,7 +6731,7 @@ async def issue_invoice(db: AsyncSession, user: User, row: Subscription,
         pdf = await run_ai(render_invoice_pdf, inv)
         sent = await send_email(
             inv.billed_to_email,
-            f"{INVOICE_BUSINESS_NAME} - facture {inv.number}",
+            f"{INVOICE_BUSINESS_NAME} - invoice {inv.number}",
             invoice_email_body(inv),
             [(invoice_filename(inv), "application/pdf", pdf)])
         if sent:
