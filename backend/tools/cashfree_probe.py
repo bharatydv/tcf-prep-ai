@@ -160,21 +160,47 @@ def main():
         say(INFO, "list endpoint answered", f"HTTP {code} (proves nothing yet)")
 
     # --- 2. what can this account actually do ----------------------------
+    #
+    # /plans/{id}, which is what cf_ensure_plan calls. An earlier version asked
+    # for /subscriptions/plans, which is not an endpoint: Cashfree read "plans"
+    # as a subscription id and answered 400 subscription_not_found. That looked
+    # like an account problem and was reported as one, twice. A probe that
+    # invents a URL tests only its own spelling.
     print("\n2. account capability")
-    code, body = call("GET", "/subscriptions/plans?limit=1")
+    probe_plan = "pf_probe_does_not_exist"
+    code, body = call("GET", f"/plans/{probe_plan}")
     if stop_if_auth_failed(code, body):
         return 1
-    say(PASS if code in (200, 404) else FAIL, "plans endpoint reachable",
-        f"HTTP {code}")
-    if code not in (200, 404):
-        # Print what Cashfree said. A bare "HTTP 400" here sent someone off to
-        # re-check keys that were never the problem: the credentials are fine
-        # and the account is refusing to act, which is a different fix. The
-        # message names which — "Profile is inactive" means the merchant
-        # account is not activated and no key change will help.
-        print(f"        Cashfree said: {json.dumps(body)[:300]}")
+    err = (body or {}).get("code", "")
+    if err == "plan_not_found":
+        say(PASS, "plans endpoint answers normally", "plan_not_found, as expected")
+    elif err == "profile_inactive":
+        say(FAIL, "merchant profile is NOT activated", "profile_inactive")
+    else:
+        say(INFO, "plans endpoint answered", f"HTTP {code} {json.dumps(body)[:160]}")
 
     if live:
+        # A GET cannot tell an activated profile from an inactive one: both
+        # answer plan_not_found for an id that is not there. Only creating a
+        # plan asks the question, and this script does not write to a live
+        # account. Say so, and name the command that does, rather than
+        # implying a clean read means payments work.
+        print("\n  A read cannot decide activation — an inactive profile also")
+        print("  answers plan_not_found here. Only creating a plan settles it.")
+        print("  That is a write, so it is not done for you. To run it:\n")
+        print("    curl -s -X POST https://api.cashfree.com/pg/plans \\")
+        print("      -H \"x-client-id: $CASHFREE_APP_ID\" \\")
+        print("      -H \"x-client-secret: $CASHFREE_SECRET_KEY\" \\")
+        print("      -H 'x-api-version: 2025-01-01' \\")
+        print("      -H 'Content-Type: application/json' \\")
+        print("      -d '{\"plan_id\":\"pf_month_usd_80_00\",\"plan_name\":\"1 Month\",")
+        print("           \"plan_type\":\"PERIODIC\",\"plan_currency\":\"USD\",")
+        print("           \"plan_recurring_amount\":80,\"plan_max_amount\":80,")
+        print("           \"plan_max_cycles\":60,\"plan_intervals\":1,")
+        print("           \"plan_interval_type\":\"MONTH\"}'\n")
+        print("  profile_inactive -> Cashfree has not activated the account;")
+        print("  no code or key change helps. A plan back -> activation is done,")
+        print("  and international + recurring permissions are the next question.")
         print("\nProduction credentials: stopping before anything is created.")
         print("Run with CASHFREE_ENV=sandbox to exercise the rest.")
         return 0 if failures == 0 else 1
