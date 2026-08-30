@@ -156,7 +156,21 @@ export default function ListeningTest() {
     if (el.currentTime === 0 || el.ended) {
       setPlays((p) => ({ ...p, [qid]: (p[qid] || 0) + 1 }));
     }
-    el.play().catch(() => toast.error(t('listenTest.audioFailed')));
+    el.play().catch((err) => {
+      // play() rejects with AbortError whenever playback is interrupted before
+      // it begins, and the ordinary ways of using this player all do that:
+      // pressing Next while a clip is starting (the effect above pauses it),
+      // pressing pause quickly, or pressing play twice. None of them is a
+      // failure, and reporting them as one told learners their connection was
+      // broken while the audio was in fact fine.
+      //
+      // NotAllowedError is the browser's autoplay policy, which cannot happen
+      // from this handler because it only ever runs from a click — but if it
+      // ever did, "check your connection" would be the wrong advice, so it is
+      // left to the genuine-error branch rather than silently swallowed.
+      if (err && err.name === 'AbortError') return;
+      toast.error(t('listenTest.audioFailed'));
+    });
   };
 
   const pick = async (optionId) => {
@@ -385,7 +399,18 @@ export default function ListeningTest() {
                   onEnded={() => { setPlaying(false); setHeard(clipLength); }}
                   onTimeUpdate={(e) => setHeard(e.currentTarget.currentTime)}
                   onLoadedMetadata={(e) => setClipLength(e.currentTarget.duration || 0)}
-                  onError={() => toast.error(t('listenTest.audioFailed'))}
+                  onError={(e) => {
+                    // Only a real failure to fetch or decode. Moving between
+                    // questions swaps `src`, and a media element whose source
+                    // is being replaced can raise `error` for the resource it
+                    // is abandoning — with no request having failed. Reading
+                    // the element's own error code tells the two apart, and an
+                    // element with nothing loaded has nothing to report.
+                    const el = e.currentTarget;
+                    if (!el.error || !el.currentSrc) return;
+                    if (el.error.code === el.error.MEDIA_ERR_ABORTED) return;
+                    toast.error(t('listenTest.audioFailed'));
+                  }}
                 />
                 <div className="flex items-center gap-3">
                   <button
