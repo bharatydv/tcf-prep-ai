@@ -101,6 +101,23 @@ RUN if grep -q '<div id="root"></div>' build/index.html; then \
 # static build through nginx instead.
 FROM nginx:1.27-alpine
 COPY --from=build /app/build /usr/share/nginx/html
+
+# Make every served file readable by the nginx worker.
+#
+# Git records no read permissions, only the executable bit, so a file that is
+# mode 0600 in a checkout stays 0600 through every clone, pull and build while
+# `git status` reports the tree clean. COPY carries that straight into the
+# image, and nginx — which does not run as root — answers 403 for the one file
+# it cannot open, with nothing to distinguish it from a missing route.
+#
+# That is exactly what happened to robots.txt: edited on the deploy host under
+# a restrictive umask, served as 403 for a week. Search engines treat an
+# unreadable robots.txt as "do not crawl", so the failure was silent here and
+# expensive at Google. Normalising here fixes it for any file, not just that
+# one, and survives whatever the build context happens to carry.
+RUN find /usr/share/nginx/html -type f -exec chmod a+r {} + \
+ && find /usr/share/nginx/html -type d -exec chmod a+rx {} +
+
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 # Included from several blocks in default.conf; see the file for why.
 COPY security-headers.conf /etc/nginx/security-headers.conf
