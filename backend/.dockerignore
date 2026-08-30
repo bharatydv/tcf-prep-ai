@@ -19,3 +19,9 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Listening audio — 1,560 files, 1.8 GB. The Dockerfile ends in `COPY . .`, so
+# without this line every image build, push, pull and rollback carries it. It
+# reaches the container as a read-only bind mount from docker-compose instead,
+# or is not served by the container at all when MEDIA_BASE_URL names a bucket.
+media/
