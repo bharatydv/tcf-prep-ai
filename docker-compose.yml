@@ -58,6 +58,23 @@ services:
         condition: service_healthy
     expose:
       - "8000"
+    volumes:
+      # Listening audio: 1,560 files, 1.8 GB. Bind-mounted rather than copied
+      # into the image, because the Dockerfile ends in `COPY . .` and baking
+      # this in would add 1.8 GB to every layer, every pull and every rollback.
+      # backend/.dockerignore excludes it from the build context for that
+      # reason, which also means the ONLY way it reaches the container is here.
+      #
+      # Read-only: the API serves these and never writes them.
+      #
+      # The directory is gitignored, so a fresh VM will not have it — put the
+      # files there with scripts/build_content.py (from the exports) or rsync
+      # them from a machine that has. If it is missing the API logs a warning,
+      # skips the mount and listening has no audio; nothing else breaks.
+      #
+      # Unnecessary when MEDIA_BASE_URL points at a bucket — the browser then
+      # fetches audio from that origin and the container never serves a byte.
+      - ./backend/media:/app/media:ro
     # Published on loopback so a host nginx can reach it. The port is a
     # variable because the GCP VM already runs one on :80 that proxies to
     # 3000/5000 — hardcoding the ports here meant every deploy pulled a

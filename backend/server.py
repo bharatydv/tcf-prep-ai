@@ -4153,7 +4153,9 @@ app.add_middleware(
 # Mounted only if the directory exists, because StaticFiles raises at import
 # on a missing one — and an API that will not boot because nobody has run the
 # content build script yet is a worse failure than a section with no audio.
-if os.path.isdir(MEDIA_ROOT):
+if MEDIA_BASE_URL:
+    log.info("Media served from %s; not mounting /media", MEDIA_BASE_URL)
+elif os.path.isdir(MEDIA_ROOT):
     # StaticFiles types a response from the system mimetype table, and on
     # Windows that table has no .webp — the question images went out as
     # text/plain, which a browser sent nosniff would refuse to render. Both
@@ -4162,6 +4164,16 @@ if os.path.isdir(MEDIA_ROOT):
     mimetypes.add_type("image/webp", ".webp")
     mimetypes.add_type("audio/mpeg", ".mp3")
     app.mount("/media", StaticFiles(directory=MEDIA_ROOT), name="media")
+    # An EMPTY directory is the failure worth naming. docker-compose creates
+    # the bind-mount source if it is missing, so a VM that never received the
+    # audio gets a directory that exists, a mount that succeeds and a 404 on
+    # every clip — with nothing in the log to say why. Counting one level deep
+    # is enough to tell "no audio here" from "audio here", and costs one
+    # readdir at boot rather than a walk of 1,560 files.
+    if not any(os.scandir(MEDIA_ROOT)):
+        log.warning("Media directory %s is EMPTY — listening audio will 404. "
+                    "Copy backend/media to this host, or set MEDIA_BASE_URL to "
+                    "a bucket.", MEDIA_ROOT)
 else:
     log.warning("No media directory at %s; listening audio will 404 until "
                 "scripts/build_content.py has run or MEDIA_BASE_URL is set",
