@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   CheckCircle, XCircle, ClockCountdown, CaretLeft, CaretRight, Quotes,
-  ArrowClockwise, ListChecks, Lightning,
+  ArrowClockwise, ListChecks, Lightning, Play, Pause, SpeakerHigh, Waveform,
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api } from '../lib/api';
@@ -10,9 +10,17 @@ import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { BackLink, useConfirm } from '../components/shared';
 
-/* The official Compréhension écrite paper runs 60 minutes. Test mode counts
-   down from it and hands the paper in at zero; practice mode is untimed. */
-const TEST_SECONDS = 60 * 60;
+/* The official Compréhension orale paper runs 35 minutes for 39 questions —
+   about half the reading allowance for the same number of items, because the
+   recording sets the pace rather than the candidate. Test mode counts down from
+   it and hands the paper in at zero; practice mode is untimed. */
+const TEST_SECONDS = 35 * 60;
+
+/* How many times a clip may be played. On the day each recording is played
+   once and the candidate cannot go back, so test mode allows one play and
+   practice allows as many as the learner wants — replaying a clip until the
+   liaison finally resolves is the entire point of practising. */
+const TEST_PLAYS = 1;
 
 const LEVEL_STYLE = {
   A1: 'bg-emerald-100 text-emerald-700',
@@ -25,11 +33,11 @@ const LEVEL_STYLE = {
 
 const clock = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
-export default function ReadingTest() {
+export default function ListeningTest() {
   const [confirm, confirmDialog] = useConfirm();
   const { testNumber } = useParams();
   const location = useLocation();
-  const isTest = location.pathname.startsWith('/reading/test');
+  const isTest = location.pathname.startsWith('/listening/test');
   const { user } = useAuth();
   const t = useT();
   const navigate = useNavigate();
@@ -43,6 +51,11 @@ export default function ReadingTest() {
   const [checking, setChecking] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [left, setLeft] = useState(TEST_SECONDS);
+  const [plays, setPlays] = useState({});              // qid -> times played
+  const [playing, setPlaying] = useState(false);
+  const [heard, setHeard] = useState(0);               // seconds into the clip
+  const [clipLength, setClipLength] = useState(0);
+  const audioRef = useRef(null);
   const submittedRef = useRef(false);
   // Wall-clock deadline, so backgrounding the tab cannot buy extra time.
   const deadlineRef = useRef(null);
@@ -50,15 +63,15 @@ export default function ReadingTest() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    api.get(`/api/reading/tests/${testNumber}`)
+    api.get(`/api/listening/tests/${testNumber}`)
       .then(({ data }) => {
         if (cancelled) return;
         setQuestions(data.questions || []);
       })
       .catch((e) => {
         if (cancelled) return;
-        toast.error(e?.response?.data?.detail || t('readTest.loadFailed'));
-        navigate(`/reading/${isTest ? 'test' : 'practice'}`);
+        toast.error(e?.response?.data?.detail || t('listenTest.loadFailed'));
+        navigate(`/listening/${isTest ? 'test' : 'practice'}`);
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -70,37 +83,34 @@ export default function ReadingTest() {
     submittedRef.current = true;
     setSubmitting(true);
     try {
-      const { data } = await api.post(`/api/reading/tests/${testNumber}/submit`, {
+      const { data } = await api.post(`/api/listening/tests/${testNumber}/submit`, {
         answers,
         time_used_seconds: TEST_SECONDS - left,
       });
       const map = {};
-      (data.corrections || []).forEach((c) => { map[c.reading_question_id] = c; });
+      (data.corrections || []).forEach((c) => { map[c.listening_question_id] = c; });
       setCorrections(map);
       setResult(data);
       setIndex(0);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
       submittedRef.current = false;
-      toast.error(e?.response?.data?.detail || t('readTest.submitFailed'));
+      toast.error(e?.response?.data?.detail || t('listenTest.submitFailed'));
     } finally {
       setSubmitting(false);
     }
   }, [answers, left, testNumber, t]);
 
-  // Countdown, test mode only. Hands the paper in by itself at zero, exactly
-  // as the invigilator would — a learner who runs out of time still gets a
-  // score rather than losing the whole attempt.
+  // Countdown, test mode only — the same wall-clock deadline the reading paper
+  // uses, and for the same reason: a learner who runs out of time gets a score
+  // rather than losing the attempt.
   useEffect(() => {
-    // `user` is part of the guard: without it the clock ran behind the
-    // sign-in prompt below and auto-submitted into a 401 at zero.
     if (!isTest || !user || result || loading) return undefined;
     if (deadlineRef.current == null) deadlineRef.current = Date.now() + TEST_SECONDS * 1000;
 
     const read = () => {
       const remaining = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
       setLeft(remaining);
-      // submittedRef already guards the endpoint against a double hand-in.
       if (remaining <= 0 && !submittedRef.current) submit();
     };
 
@@ -115,22 +125,52 @@ export default function ReadingTest() {
   }, [isTest, user, result, loading, submit]);
 
   const q = questions[index];
-  const correction = q ? corrections[q.reading_question_id] : null;
+  const qid = q?.listening_question_id;
+  const correction = qid ? corrections[qid] : null;
   const answeredCount = Object.values(answers).filter(Boolean).length;
   const reviewing = Boolean(result);
 
+  const playsUsed = qid ? (plays[qid] || 0) : 0;
+  // Once the paper is marked the recording is study material, not an exam clip,
+  // so the play limit lifts — listening again with the transcript in front of
+  // you is where the question is actually learned.
+  const playsLeft = (!isTest || reviewing) ? Infinity : TEST_PLAYS - playsUsed;
+
+  // Moving to another question stops the clip and resets the scrubber. Without
+  // this the previous recording kept playing underneath the new question.
+  useEffect(() => {
+    const el = audioRef.current;
+    if (el) { el.pause(); el.currentTime = 0; }
+    setPlaying(false);
+    setHeard(0);
+    setClipLength(0);
+  }, [index, testNumber]);
+
+  const toggle = () => {
+    const el = audioRef.current;
+    if (!el) return;
+    if (playing) { el.pause(); return; }
+    // A play is counted at the moment it starts, not when it finishes, so
+    // pausing halfway and pressing play again cannot buy a second listen.
+    if (playsLeft <= 0) return;
+    if (el.currentTime === 0 || el.ended) {
+      setPlays((p) => ({ ...p, [qid]: (p[qid] || 0) + 1 }));
+    }
+    el.play().catch(() => toast.error(t('listenTest.audioFailed')));
+  };
+
   const pick = async (optionId) => {
     if (!q || correction) return;               // already marked
-    setAnswers((a) => ({ ...a, [q.reading_question_id]: optionId }));
+    setAnswers((a) => ({ ...a, [qid]: optionId }));
     if (isTest) return;                         // test mode marks at the end
     setChecking(true);
     try {
       const { data } = await api.post(
-        `/api/reading/questions/${q.reading_question_id}/check`, { picked: optionId });
-      setCorrections((c) => ({ ...c, [q.reading_question_id]: data.correction }));
+        `/api/listening/questions/${qid}/check`, { picked: optionId });
+      setCorrections((c) => ({ ...c, [qid]: data.correction }));
     } catch {
-      toast.error(t('readTest.checkFailed'));
-      setAnswers((a) => { const n = { ...a }; delete n[q.reading_question_id]; return n; });
+      toast.error(t('listenTest.checkFailed'));
+      setAnswers((a) => { const n = { ...a }; delete n[qid]; return n; });
     } finally {
       setChecking(false);
     }
@@ -139,21 +179,18 @@ export default function ReadingTest() {
   const handIn = async () => {
     if (!user) return navigate('/login');
     const blank = questions.length - answeredCount;
-    if (blank > 0 && !(await confirm(t('readTest.confirmBlank', { n: blank })))) return;
+    if (blank > 0 && !(await confirm(t('listenTest.confirmBlank', { n: blank })))) return;
     submit();
   };
 
   const restart = () => {
     submittedRef.current = false;
-    // The deadline HAS to be cleared with the rest of it. Clearing `result`
-    // re-runs the timer effect, which keeps whatever deadline is already in the
-    // ref — and after a hand-in that deadline has passed, so the effect read
-    // zero seconds remaining and immediately submitted the empty paper again.
-    // Pressing Retake filed a fresh 0/40 into the learner's history before they
-    // had answered anything. Every other timer in the app nulls its deadline on
-    // leaving the phase; this one did not.
+    // The deadline has to be cleared with the rest: clearing `result` re-runs
+    // the timer effect, which would otherwise keep the deadline that has
+    // already passed, read zero seconds left and file an empty paper.
     deadlineRef.current = null;
     setAnswers({}); setCorrections({}); setResult(null);
+    setPlays({});
     setIndex(0); setLeft(TEST_SECONDS);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -166,14 +203,10 @@ export default function ReadingTest() {
     );
   }
 
-  /* Timed mode needs an account, and it has to be said BEFORE the clock starts.
-   *
-   * The paper itself is public and practice mode stays open to everyone — but
-   * handing one in is authenticated. handIn() checked for a session; the
-   * automatic hand-in at zero called submit() directly and did not, so a
-   * signed-out visitor could sit the full hour and lose every answer to a 401
-   * at the end. Asking here costs a click; asking at minute sixty costs the
-   * hour. */
+  /* Timed mode needs an account, and it has to be said before the clock starts
+     — the same guard the reading paper carries, for the same reason: the
+     automatic hand-in at zero would otherwise lose a signed-out visitor the
+     whole 35 minutes to a 401. */
   if (isTest && !user) {
     return (
       <main className="mx-auto flex min-h-[62vh] max-w-xl items-center px-4 py-12 sm:px-6">
@@ -184,18 +217,18 @@ export default function ReadingTest() {
               <ClockCountdown size={26} weight="fill" />
             </span>
             <h1 className="mt-4 font-heading text-xl font-extrabold text-gray-900">
-              {t('readTest.signInTitle')}
+              {t('listenTest.signInTitle')}
             </h1>
             <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-gray-600">
-              {t('readTest.signInBody')}
+              {t('listenTest.signInBody')}
             </p>
             <div className="mt-6 flex flex-wrap justify-center gap-2.5">
               <Link to="/login" state={{ from: location }}
                 className="btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600">
                 {t('auth.loginButton')}
               </Link>
-              <Link to={`/reading/practice/${testNumber}`} className="btn-outline">
-                {t('readTest.orPractise')}
+              <Link to={`/listening/practice/${testNumber}`} className="btn-outline">
+                {t('listenTest.orPractise')}
               </Link>
             </div>
           </div>
@@ -206,40 +239,39 @@ export default function ReadingTest() {
 
   if (!q) return null;
 
-  /* Navigator swatch: grey before answering, then green/red once a question has
-     been marked — in practice that happens immediately, in test mode only after
-     the paper is handed in. */
   const swatch = (item) => {
-    const c = corrections[item.reading_question_id];
+    const c = corrections[item.listening_question_id];
     if (c) return c.is_correct ? 'bg-green-500 text-white' : 'bg-red-500 text-white';
-    if (answers[item.reading_question_id]) return 'bg-primary text-white';
+    if (answers[item.listening_question_id]) return 'bg-primary text-white';
     return 'bg-white text-gray-500 border border-violet-100';
   };
+
+  const progress = clipLength > 0 ? (heard / clipLength) * 100 : 0;
 
   return (
     <main className="overflow-x-clip bg-white">
       {confirmDialog}
       <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-        <BackLink to={`/reading/${isTest ? 'test' : 'practice'}`} className="!mb-6"
-          testid="back-to-reading-tests" />
+        <BackLink to={`/listening/${isTest ? 'test' : 'practice'}`} className="!mb-6"
+          testid="back-to-listening-tests" />
 
         {/* ---------------- SCORE REPORT (after hand-in) ---------------- */}
         {reviewing && (
-          <div className="mb-6 overflow-hidden rounded-3xl border border-violet-100 shadow-soft" data-testid="reading-result">
+          <div className="mb-6 overflow-hidden rounded-3xl border border-violet-100 shadow-soft" data-testid="listening-result">
             <div className="bg-gradient-to-r from-primary to-fuchsia-600 px-6 py-6 text-white">
               <p className="text-xs font-bold uppercase tracking-wide text-white/80">
-                {t('readTest.testN', { n: testNumber })}
+                {t('listenTest.testN', { n: testNumber })}
               </p>
               <p className="mt-1 font-heading text-4xl font-extrabold">
                 {result.score}<span className="text-2xl text-white/70">/{result.total}</span>
               </p>
               <p className="mt-1 text-sm text-white/90">
-                {t('readTest.scorePct', { p: Math.round((result.score / result.total) * 100) })}
+                {t('listenTest.scorePct', { p: Math.round((result.score / result.total) * 100) })}
               </p>
             </div>
             <div className="bg-white px-6 py-5">
               <p className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-gray-500">
-                <ListChecks size={14} weight="fill" /> {t('readTest.byLevel')}
+                <ListChecks size={14} weight="fill" /> {t('listenTest.byLevel')}
               </p>
               <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
                 {Object.entries(result.by_level || {}).sort().map(([lvl, s]) => (
@@ -256,7 +288,7 @@ export default function ReadingTest() {
                 ))}
               </div>
               <button onClick={restart} className="btn-outline mt-5 text-sm">
-                <ArrowClockwise size={16} weight="bold" /> {t('readTest.retake')}
+                <ArrowClockwise size={16} weight="bold" /> {t('listenTest.retake')}
               </button>
             </div>
           </div>
@@ -268,19 +300,19 @@ export default function ReadingTest() {
             <div className="rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-5 shadow-soft">
               <div className="flex items-center justify-between">
                 <p className="font-heading text-sm font-bold text-gray-900">
-                  {t('readTest.testN', { n: testNumber })}
+                  {t('listenTest.testN', { n: testNumber })}
                 </p>
                 {isTest && !reviewing && (
                   <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold tabular-nums ${
                     left < 300 ? 'bg-red-100 text-red-700' : 'bg-white text-primary'
-                  }`} data-testid="reading-timer">
+                  }`} data-testid="listening-timer">
                     <ClockCountdown size={13} weight="fill" /> {clock(left)}
                   </span>
                 )}
               </div>
 
               <p className="mt-1 text-xs text-gray-500">
-                {t('readTest.progress', { done: answeredCount, total: questions.length })}
+                {t('listenTest.progress', { done: answeredCount, total: questions.length })}
               </p>
               <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white">
                 <div className="h-full rounded-full bg-gradient-to-r from-primary to-fuchsia-500 transition-all"
@@ -290,7 +322,7 @@ export default function ReadingTest() {
               <div className="mt-4 grid grid-cols-5 gap-2 sm:grid-cols-8 lg:grid-cols-6">
                 {questions.map((item, i) => (
                   <button
-                    key={item.reading_question_id}
+                    key={item.listening_question_id}
                     onClick={() => setIndex(i)}
                     data-testid={`nav-q-${i + 1}`}
                     className={`flex h-11 items-center justify-center rounded-lg text-xs font-bold transition sm:h-9 ${swatch(item)} ${
@@ -305,16 +337,14 @@ export default function ReadingTest() {
               {isTest && !reviewing && (
                 <button onClick={handIn} disabled={submitting}
                   className="btn-primary mt-5 w-full justify-center !bg-gradient-to-r !from-pink-600 !to-fuchsia-600"
-                  data-testid="reading-submit">
-                  <CheckCircle size={16} weight="fill" /> {t('readTest.handIn')}
+                  data-testid="listening-submit">
+                  <CheckCircle size={16} weight="fill" /> {t('listenTest.handIn')}
                 </button>
               )}
-              {!isTest && (
-                <p className="mt-4 flex items-start gap-1.5 text-[11px] leading-relaxed text-gray-500">
-                  <Lightning size={13} weight="fill" className="mt-0.5 shrink-0 text-primary" />
-                  {t('readTest.practiceHint')}
-                </p>
-              )}
+              <p className="mt-4 flex items-start gap-1.5 text-[11px] leading-relaxed text-gray-500">
+                <Lightning size={13} weight="fill" className="mt-0.5 shrink-0 text-primary" />
+                {isTest ? t('listenTest.testHint') : t('listenTest.practiceHint')}
+              </p>
             </div>
           </aside>
 
@@ -323,37 +353,100 @@ export default function ReadingTest() {
             <div className="rounded-3xl border border-violet-100 bg-white p-5 shadow-xl shadow-violet-200/40 sm:p-6">
               <div className="mb-4 flex flex-wrap items-center gap-2">
                 <span className="rounded-full bg-gray-900 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
-                  {t('readTest.questionN', { n: index + 1 })}
+                  {t('listenTest.questionN', { n: index + 1 })}
                 </span>
                 <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${LEVEL_STYLE[q.level] || 'bg-gray-100 text-gray-600'}`}>
                   {q.level}
                 </span>
                 {q.band && <span className="text-[11px] text-gray-500">{q.band}</span>}
-                {q.doc_type && (
-                  <span className="ml-auto rounded-full bg-violet-50 px-2.5 py-1 text-[10px] font-semibold text-primary">
-                    {q.doc_type}
-                  </span>
-                )}
               </div>
 
-              {/* The document. whitespace-pre-line keeps the line breaks of a
-                  note, a sign or an advert — their layout is part of the text. */}
-              <div className="rounded-2xl border border-violet-100 bg-violet-50/40 p-4" data-testid="reading-doc">
-                <p className="whitespace-pre-line text-[15px] leading-relaxed text-gray-800">{q.text}</p>
+              {/* -------- THE PICTURE, when the question has one --------
+                  Questions 1 and 2 of a paper ask which spoken sentence
+                  describes a photograph; the image IS the question there. */}
+              {q.image_url && (
+                <div className="mb-4 overflow-hidden rounded-2xl border border-violet-100 bg-violet-50/40">
+                  <img src={q.image_url} alt={t('listenTest.imageAlt', { n: index + 1 })}
+                    loading="lazy"
+                    className="mx-auto max-h-80 w-full object-contain"
+                    data-testid="listening-image" />
+                </div>
+              )}
+
+              {/* -------- THE RECORDING -------- */}
+              <div className="rounded-2xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-4"
+                data-testid="listening-player">
+                <audio
+                  ref={audioRef}
+                  src={q.audio_url}
+                  preload="metadata"
+                  onPlay={() => setPlaying(true)}
+                  onPause={() => setPlaying(false)}
+                  onEnded={() => { setPlaying(false); setHeard(clipLength); }}
+                  onTimeUpdate={(e) => setHeard(e.currentTarget.currentTime)}
+                  onLoadedMetadata={(e) => setClipLength(e.currentTarget.duration || 0)}
+                  onError={() => toast.error(t('listenTest.audioFailed'))}
+                />
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={toggle}
+                    disabled={playsLeft <= 0 && !playing}
+                    data-testid="listening-play"
+                    className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-white transition ${
+                      playsLeft <= 0 && !playing
+                        ? 'cursor-not-allowed bg-gray-300'
+                        : 'bg-gradient-to-br from-primary to-fuchsia-600 hover:scale-105'
+                    }`}
+                    aria-label={playing ? t('listenTest.pause') : t('listenTest.play')}
+                  >
+                    {playing ? <Pause size={20} weight="fill" /> : <Play size={20} weight="fill" />}
+                  </button>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5 text-xs font-bold text-gray-700">
+                        <SpeakerHigh size={13} weight="fill" className="text-primary" />
+                        {t('listenTest.audioLabel')}
+                      </span>
+                      <span className="text-[11px] tabular-nums text-gray-500">
+                        {clock(Math.floor(heard))}
+                        {clipLength > 0 && ` / ${clock(Math.floor(clipLength))}`}
+                      </span>
+                    </div>
+                    <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white">
+                      <div className="h-full rounded-full bg-gradient-to-r from-primary to-fuchsia-500"
+                        style={{ width: `${progress}%` }} />
+                    </div>
+                    <p className="mt-1.5 text-[11px] text-gray-500">
+                      {playsLeft === Infinity
+                        ? t('listenTest.playsUnlimited')
+                        : playsLeft > 0
+                          ? t('listenTest.playsLeft', { n: playsLeft })
+                          : t('listenTest.playsNone')}
+                    </p>
+                  </div>
+                </div>
               </div>
 
-              {/* French only, as on the real paper — no translation beside the
-                  document or the options. The English help appears once the
-                  question has been answered. */}
-              <p className="mt-5 font-heading text-base font-bold text-gray-900">{q.question_fr}</p>
+              {/* The oral paper prints no written stem — the recording is the
+                  question. A stem is rendered only if a future import carries
+                  one. */}
+              {q.question_fr && (
+                <p className="mt-5 font-heading text-base font-bold text-gray-900">{q.question_fr}</p>
+              )}
 
-              {/* -------- OPTIONS -------- */}
+              {/* -------- OPTIONS --------
+                  On questions 1 to 10 the four options are spoken rather than
+                  printed, so `text` is empty and the button carries only its
+                  letter — exactly what the candidate sees on the day. The
+                  English gloss appears with the correction, never before it. */}
               <div className="mt-4 space-y-2.5">
                 {(correction?.options || q.options).map((o) => {
-                  const picked = answers[q.reading_question_id] === o.id;
+                  const picked = answers[qid] === o.id;
                   const marked = Boolean(correction);
                   const isRight = marked && o.is_correct;
                   const isWrongPick = marked && picked && !o.is_correct;
+                  const spokenOnly = !(o.text || '').trim();
 
                   let tone = 'border-violet-100 bg-white hover:bg-violet-50/50';
                   if (isRight) tone = 'border-green-300 bg-green-50';
@@ -381,17 +474,20 @@ export default function ReadingTest() {
 
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-2">
-                          <span className="font-semibold text-gray-900">{o.text}</span>
+                          {spokenOnly && !marked ? (
+                            <span className="flex items-center gap-1.5 text-sm italic text-gray-400">
+                              <Waveform size={14} weight="fill" /> {t('listenTest.spokenOption')}
+                            </span>
+                          ) : (
+                            <span className="font-semibold text-gray-900">
+                              {o.text || (marked ? o.text_en : '')}
+                            </span>
+                          )}
                           {isRight && <CheckCircle size={16} weight="fill" className="shrink-0 text-green-600" />}
                           {isWrongPick && <XCircle size={16} weight="fill" className="shrink-0 text-red-600" />}
                         </span>
-                        {/* Why this option is right, or why it is not. Shown for
-                            every option, not just the one that was picked —
-                            ruling the others out is the skill being taught. */}
-                        {/* The English gloss of the option, once it is marked.
-                            Before that the options are French only, as on the
-                            paper. */}
-                        {marked && o.text_en && (
+                        {/* The English gloss, once the question is marked. */}
+                        {marked && o.text_en && o.text && (
                           <span className="mt-0.5 block text-xs italic text-gray-500">{o.text_en}</span>
                         )}
                         {marked && o.explanation && (
@@ -399,7 +495,7 @@ export default function ReadingTest() {
                             o.is_correct ? 'bg-green-100/70 text-green-900' : 'bg-white/80 text-gray-600'
                           }`}>
                             <span className="font-bold uppercase tracking-wide">
-                              {o.is_correct ? t('readTest.correctLabel') : t('readTest.wrongLabel')}
+                              {o.is_correct ? t('listenTest.correctLabel') : t('listenTest.wrongLabel')}
                             </span>{' — '}{o.explanation}
                           </span>
                         )}
@@ -409,77 +505,62 @@ export default function ReadingTest() {
                 })}
               </div>
 
-              {/* -------- THE CORRECTION -------- */}
+              {/* -------- TRANSCRIPT, KEY LINE, VOCABULARY, REASONING -------- */}
               {correction && (
-                <div className="mt-5 space-y-4" data-testid="reading-explanation">
-                  {/* The one-line verdict first: what the document actually
-                      said, before the reasoning that gets you there. */}
-                  {correction.explanation && (
+                <div className="mt-5 space-y-4" data-testid="listening-explanation">
+                  {/* The transcript is the heart of the correction: hearing it
+                      wrong and then reading what was actually said is what
+                      moves an oral score. */}
+                  {correction.transcript && (
                     <div className="rounded-2xl border border-violet-100 bg-violet-50/40 p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-primary">
-                        {t('readTest.why')}
+                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                        <Waveform size={12} weight="fill" /> {t('listenTest.transcript')}
                       </p>
-                      <p className="mt-1.5 text-sm leading-relaxed text-gray-800">{correction.explanation}</p>
-                    </div>
-                  )}
-
-                  {/* The document and question in English. Held back until the
-                      answer is in, so the paper is read in French first. */}
-                  {(correction.text_en || correction.question_en) && (
-                    <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">
-                        {t('readTest.translation')}
+                      <p className="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-gray-800">
+                        {correction.transcript}
                       </p>
-                      {correction.text_en && (
-                        <p className="mt-1.5 whitespace-pre-line text-xs leading-relaxed text-gray-600">
-                          {correction.text_en}
-                        </p>
-                      )}
-                      {correction.question_en && (
-                        <p className="mt-2 text-xs font-semibold leading-relaxed text-gray-700">
-                          {correction.question_en}
+                      {correction.transcript_en && (
+                        <p className="mt-2 whitespace-pre-line text-xs italic leading-relaxed text-gray-500">
+                          {correction.transcript_en}
                         </p>
                       )}
                     </div>
                   )}
 
                   <div className="grid gap-4 sm:grid-cols-2">
-                  {correction.key_line_fr && (
-                    <div className="rounded-2xl border border-amber-100 bg-amber-50/60 p-4">
-                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
-                        <Quotes size={12} weight="fill" /> {t('readTest.keyLine')}
-                      </p>
-                      <p className="mt-1.5 text-sm font-semibold leading-relaxed text-gray-800">{correction.key_line_fr}</p>
-                      {correction.key_line_en && (
-                        <p className="mt-1 text-xs italic leading-relaxed text-gray-500">{correction.key_line_en}</p>
-                      )}
-                    </div>
-                  )}
-                  {correction.vocabulary?.length > 0 && (
-                    <div className="rounded-2xl border border-violet-100 bg-white p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-primary">
-                        {t('readTest.vocabulary')}
-                      </p>
-                      <ul className="mt-1.5 space-y-1">
-                        {correction.vocabulary.map((v, i) => (
-                          <li key={i} className="text-xs leading-relaxed text-gray-700">
-                            <span className="font-semibold text-gray-900">{v.term}</span>
-                            <span className="text-gray-400"> — </span>
-                            <span className="text-gray-600">{v.gloss}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
+                    {correction.key_line_fr && (
+                      <div className="rounded-2xl border border-amber-100 bg-amber-50/60 p-4">
+                        <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                          <Quotes size={12} weight="fill" /> {t('listenTest.keyLine')}
+                        </p>
+                        <p className="mt-1.5 text-sm font-semibold leading-relaxed text-gray-800">{correction.key_line_fr}</p>
+                        {correction.key_line_en && (
+                          <p className="mt-1 text-xs italic leading-relaxed text-gray-500">{correction.key_line_en}</p>
+                        )}
+                      </div>
+                    )}
+                    {correction.vocabulary?.length > 0 && (
+                      <div className="rounded-2xl border border-violet-100 bg-white p-4">
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-primary">
+                          {t('listenTest.vocabulary')}
+                        </p>
+                        <ul className="mt-1.5 space-y-1">
+                          {correction.vocabulary.map((v, i) => (
+                            <li key={i} className="text-xs leading-relaxed text-gray-700">
+                              <span className="font-semibold text-gray-900">{v.term}</span>
+                              <span className="text-gray-400"> — </span>
+                              <span className="text-gray-600">{v.gloss}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
 
-                  {/* The worked reasoning — how the answer is arrived at, step
-                      by step. The longest part of the correction, so it sits
-                      last, after the score-relevant material. */}
                   {correction.breakdown && (
                     <div className="rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
                       <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-sky-700">
-                        <ListChecks size={12} weight="fill" /> {t('readTest.breakdown')}
+                        <ListChecks size={12} weight="fill" /> {t('listenTest.breakdown')}
                       </p>
                       <p className="mt-1.5 whitespace-pre-line text-xs leading-relaxed text-gray-700">
                         {correction.breakdown}
@@ -493,14 +574,14 @@ export default function ReadingTest() {
               <div className="mt-6 flex items-center justify-between gap-3">
                 <button onClick={() => setIndex((i) => Math.max(0, i - 1))}
                   disabled={index === 0} className="btn-outline text-sm disabled:opacity-40">
-                  <CaretLeft size={15} weight="bold" /> {t('readTest.prev')}
+                  <CaretLeft size={15} weight="bold" /> {t('listenTest.prev')}
                 </button>
                 <span className="text-xs text-gray-400">{index + 1} / {questions.length}</span>
                 <button onClick={() => setIndex((i) => Math.min(questions.length - 1, i + 1))}
                   disabled={index === questions.length - 1}
                   className="btn-primary text-sm !bg-gradient-to-r !from-primary !to-fuchsia-600 disabled:opacity-40"
-                  data-testid="reading-next">
-                  {t('readTest.next')} <CaretRight size={15} weight="bold" />
+                  data-testid="listening-next">
+                  {t('listenTest.next')} <CaretRight size={15} weight="bold" />
                 </button>
               </div>
             </div>

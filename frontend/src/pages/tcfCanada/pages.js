@@ -127,7 +127,7 @@ export const PAGES = [
   },
   {
     slug: 'tcf-canada-mock-test', k: 'mock', icon: GraduationCap, tone: 'emerald',
-    cta: ['/exam/reading-comprehension', '/exam/oral-comprehension'],
+    cta: ['/reading/test', '/listening/test'],
     facts: [['39', 'f1'], ['60 min', 'f2'], ['39', 'f3'], ['35 min', 'f4']],
     visual: 'sections', family: 'mcq', tips: 4, faqs: 4,
     related: ['tcf-canada', 'tcf-canada-exam-simulator', 'tcf-canada-reading',
@@ -170,7 +170,7 @@ export const PAGES = [
   },
   {
     slug: 'tcf-canada-listening', k: 'listen', icon: Headphones, tone: 'cyan',
-    cta: ['/listening', '/exam/oral-comprehension'],
+    cta: ['/listening', '/listening/test'],
     facts: [['39', 'f1'], ['35 min', 'f2'], ['1', 'f3'], ['331 - 699', 'f4']],
     visual: 'skill', family: 'mcq', tips: 4, faqs: 4,
     related: ['tcf-canada', 'tcf-canada-reading', 'tcf-canada-mock-test',

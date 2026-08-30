@@ -1,18 +1,21 @@
-"""Compréhension écrite question bank — 10 tests of 40 questions each.
+"""Compréhension écrite question bank — 40 papers of 39 questions each.
 
-Kept out of server.py deliberately: at four hundred questions carrying a
-document, four glossed options, a per-option explanation, a key line and a
-vocabulary list, the bank is far larger than the application code it feeds.
+The bank used to be ten hand-written Python modules. It is now the real exam
+material, imported from an export by scripts/build_content.py into
+`backend/content/reading.json` and read from there at import time. The public
+contract is unchanged — `READING_TESTS` and `validate()` — so the seeder in
+server.py did not have to learn where the questions come from.
 
-Each test module exposes QUESTIONS, a list of dicts shaped like:
+Each question is a dict:
 
     {
       "level": "A1",                     # A1 | A2 | B1 | B2 | C1 | C2
       "band": "100 – 199 points",        # official TCF score band for the level
-      "doc_type": "Note personnelle / Personal note",
+      "doc_type": "",                    # not carried by the export
       "text": "...",                     # the French document the learner reads
+      "text_en": "...",                  # gloss, withheld until the answer is in
       "question_fr": "...",
-      "question_en": "...",              # gloss, shown under the French question
+      "question_en": "...",
       "options": [
           {"id": "a", "text": "...", "text_en": "...", "explanation": "..."},
           ... exactly four, ids a-d ...
@@ -21,14 +24,38 @@ Each test module exposes QUESTIONS, a list of dicts shaped like:
       "key_line_fr": "...",              # the sentence that decides the answer
       "key_line_en": "...",
       "vocabulary": [{"term": "...", "gloss": "..."}, ...],
+      "explanation": "...",              # one-line why, for the correction card
+      "breakdown": "...",                # the worked reasoning, step by step
+      "frequency": 2,                    # how many papers this question sits in
+      "source_uuid": "...",              # stable id from the export
     }
 
-The explanation on every option is the point of the exercise: after submitting,
-the learner is told why the right answer is right AND why each distractor is
-wrong, which is what turns a score into a lesson.
+A question that appears in several papers is stored once in the JSON and
+referenced by uuid from each paper that uses it — 365 of the 890 do. They are
+expanded into per-paper lists here, sharing nothing mutable, because the seeder
+writes one row per (paper, position) and `reading_question_id` has to stay
+`rq_NN_PP` for old attempts to keep pointing at real questions.
+
+The old validate() also enforced a level profile, a topic spread and word-count
+bands per level. Those rules policed hand-authoring — they caught a paper
+drifting towards whatever its author found easy to write. They are gone, and
+deliberately: this is the material as it is actually set, and a rule saying a
+C2 document may not exceed 95 words would now reject the exam rather than the
+bank. What remains is structural, which is what the seeder needs to be true.
+
+_balance.py is gone for the same reason, and must not come back. It rotated
+each option set so the key cycled a, b, c, d — worth doing when the questions
+were written by hand, because a first draft put sixteen answers on b and one on
+d. These keys are the real ones: across the eighty papers they already fall
+25/28/24/22, and rotating an imported question would move its options away from
+the order the source sets them in. In the listening bank the same rotation
+would be actively wrong, because the recording names the options aloud ("A.
+Allez-y, entrez. B. Asseyez-vous…") and the printed letters have to match what
+the candidate hears. Individual papers do lean — paper 38 puts 19 of 39 on b —
+but that is the paper as it is sat.
 """
-from . import (test_01, test_02, test_03, test_04, test_05,
-               test_06, test_07, test_08, test_09, test_10)
+import json
+import os
 
 LEVELS = ("A1", "A2", "B1", "B2", "C1", "C2")
 BANDS = {
@@ -39,177 +66,84 @@ BANDS = {
     "C1": "500 – 599 points",
     "C2": "600 – 699 points",
 }
-QUESTIONS_PER_TEST = 40
+QUESTIONS_PER_TEST = 39
+TEST_COUNT = 40
 
-# The level profile of one paper. The TCF compréhension écrite runs from A1 to
-# C2 in ascending difficulty so that a candidate meets their ceiling instead of
-# being stopped by the first hard item; every paper carries the same profile so
-# a score on test 3 means what it means on test 7.
-LEVEL_PROFILE = {"A1": 6, "A2": 7, "B1": 7, "B2": 7, "C1": 7, "C2": 6}
-
-# The subject areas the TCF draws its reading documents from. Checked, not
-# hoped for: without this list a hand-written paper drifts towards whatever the
-# author finds easy to write, and a candidate who prepared on it would meet
-# unfamiliar material on the day.
-TOPICS = (
-    "Vie quotidienne & logement",
-    "Travail & emploi",
-    "Études & formation",
-    "Santé & bien-être",
-    "Transports & voyages",
-    "Loisirs, culture & médias",
-    "Alimentation & consommation",
-    "Environnement & nature",
-    "Sciences & technologies",
-    "Société, citoyenneté & administration",
-)
-# A 40-question paper cannot carry all ten domains evenly, but one that covers
-# fewer than this is too narrow to be representative.
-MIN_TOPICS_PER_TEST = 8
-
-# A question has to be as hard as the level it claims. Nothing here measures
-# CEFR difficulty properly — that is a judgement about abstraction, inference
-# and idiom, which no word count captures. These bands catch the gross
-# mismatches instead: a 90-word argumentative essay filed as A1, or a two-line
-# sign filed as C1. Length and sentence length climb steeply to B1 and then
-# level off, because past B1 the difficulty stops coming from how much there is
-# to read and starts coming from what has to be inferred from it.
-#
-# Only an upper bound on sentence length. A lower bound sounds symmetrical but
-# fails honest documents: a B1 job advert or a C1 notice is legitimately written
-# in short clauses, and the minimum word count already stops a two-line sign
-# being filed as C1.
-#
-# (min_words, max_words, max_words_per_sentence)
-LEVEL_SHAPE = {
-    "A1": (8,  35, 14),
-    "A2": (18, 55, 18),
-    "B1": (28, 75, 26),
-    "B2": (30, 85, 30),
-    "C1": (30, 90, 32),
-    "C2": (30, 95, 32),
-}
+_CONTENT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "content", "reading.json")
 
 
-def _shape(text: str):
-    """Word count and mean words per sentence for one document.
+def _load():
+    """Expand {questions, tests} into {paper number: [question dicts]}.
 
-    Line breaks end a unit as surely as a full stop does: a sign or an advert
-    is written one item per line and often carries no punctuation at all, so
-    splitting on [.!?] alone reported a four-line notice as one 17-word
-    sentence and failed it for complexity it did not have.
+    Returns an empty paper for every number the content file does not cover, so
+    /api/reading/tests still lists all forty and the frontend shows the missing
+    ones as "coming soon" rather than hiding them — the same behaviour the
+    hand-written bank had for papers that were not written yet.
     """
-    import re
-    words = len(text.split())
-    units = [s for s in re.split(r"[.!?…\n]+", text) if s.strip()]
-    return words, words / max(1, len(units))
+    tests = {n: [] for n in range(1, TEST_COUNT + 1)}
+    try:
+        with open(_CONTENT, encoding="utf-8") as fh:
+            bank = json.load(fh)
+    except (OSError, ValueError):
+        # No content file (a checkout that has not run the build script yet):
+        # every paper is simply empty. The seeder logs it and moves on rather
+        # than refusing to boot the whole API over missing practice material.
+        return tests
 
-READING_TESTS = {
-    1: test_01.QUESTIONS,
-    2: test_02.QUESTIONS,
-    3: test_03.QUESTIONS,
-    4: test_04.QUESTIONS,
-    5: test_05.QUESTIONS,
-    6: test_06.QUESTIONS,
-    7: test_07.QUESTIONS,
-    8: test_08.QUESTIONS,
-    9: test_09.QUESTIONS,
-    10: test_10.QUESTIONS,
-}
+    questions = bank.get("questions", {})
+    for number, uuids in bank.get("tests", {}).items():
+        rows = []
+        for uuid in uuids:
+            q = questions.get(uuid)
+            if q is None:
+                continue
+            rows.append({**q, "source_uuid": uuid})
+        tests[int(number)] = rows
+    return tests
+
+
+READING_TESTS = _load()
 
 
 def validate() -> list:
-    """Return a list of problems with the bank, empty when it is well formed.
+    """Structural problems with the bank, as a list of human-readable strings.
 
-    Run by the seeder before it writes anything: a question whose correct_answer
-    names no option, or which lost an explanation, would reach a learner as a
-    broken exercise, and that is far worse than a loud failure at startup.
+    The seeder refuses to write anything if this is non-empty, so it checks the
+    things that would otherwise reach the database as a broken paper: a missing
+    field the API would serve as null, an option set the player cannot render,
+    or an answer key pointing at an option that is not there.
     """
     problems = []
-    for number, questions in READING_TESTS.items():
+    required = ("level", "text", "question_fr", "options", "correct_answer")
+
+    for number in sorted(READING_TESTS):
+        questions = READING_TESTS[number]
         if not questions:
-            continue  # an unwritten test is incomplete, not malformed
+            continue                      # not imported yet; served as not-ready
         if len(questions) != QUESTIONS_PER_TEST:
             problems.append(
-                f"test {number}: {len(questions)} questions, "
-                f"expected {QUESTIONS_PER_TEST}")
-        for i, q in enumerate(questions, start=1):
-            where = f"test {number} q{i}"
-            missing = [f for f in ("level", "topic", "text", "question_fr",
-                                   "options", "correct_answer")
-                       if not q.get(f)]
-            if missing:
-                problems.append(f"{where}: missing {', '.join(missing)}")
-                continue
-            if q["level"] not in LEVELS:
-                problems.append(f"{where}: unknown level {q['level']!r}")
-            if q["topic"] not in TOPICS:
-                problems.append(f"{where}: unknown topic {q['topic']!r}")
-            ids = [o.get("id") for o in q["options"]]
+                f"test {number}: {len(questions)} questions, expected {QUESTIONS_PER_TEST}")
+
+        for position, q in enumerate(questions, start=1):
+            where = f"test {number} q{position}"
+            for field in required:
+                if not q.get(field):
+                    problems.append(f"{where}: missing {field}")
+            if q.get("level") not in LEVELS:
+                problems.append(f"{where}: unknown level {q.get('level')!r}")
+
+            options = q.get("options") or []
+            ids = [o.get("id") for o in options]
             if ids != ["a", "b", "c", "d"]:
                 problems.append(f"{where}: option ids are {ids}, expected a-d")
-            if q["correct_answer"] not in ids:
+            if q.get("correct_answer") not in ids:
                 problems.append(
-                    f"{where}: correct_answer {q['correct_answer']!r} "
-                    f"matches no option")
-            for o in q["options"]:
-                if not o.get("explanation"):
-                    problems.append(
-                        f"{where}: option {o.get('id')} has no explanation")
+                    f"{where}: correct_answer {q.get('correct_answer')!r} is not an option")
+            for o in options:
+                if not (o.get("text") or "").strip():
+                    problems.append(f"{where}: option {o.get('id')} has no text")
+                if not (o.get("explanation") or "").strip():
+                    problems.append(f"{where}: option {o.get('id')} has no explanation")
 
-            # Nothing but French should reach a learner's screen. A stray CJK
-            # ideograph once survived into an option here, invisible in review
-            # because the sentence around it still read normally.
-            french = q["text"] + q["question_fr"] + "".join(
-                o.get("text", "") for o in q["options"])
-            stray = {c for c in french
-                     if ord(c) > 0x2200 or 0x0500 < ord(c) < 0x2000}
-            if stray:
-                problems.append(
-                    f"{where}: non-French character(s) {sorted(stray)!r} "
-                    f"in the question text")
-
-            # Does the document look like the level it claims?
-            lo, hi, sl_hi = LEVEL_SHAPE[q["level"]]
-            words, per_sentence = _shape(q["text"])
-            if not lo <= words <= hi:
-                problems.append(
-                    f"{where}: {q['level']} document is {words} words, "
-                    f"expected {lo}-{hi}")
-            if per_sentence > sl_hi:
-                problems.append(
-                    f"{where}: {q['level']} averages {per_sentence:.0f} words "
-                    f"per sentence, at most {sl_hi} expected")
-
-        # A paper that drifts off the level profile stops being comparable to
-        # the others, and one built from three subject areas stops being
-        # representative of the exam.
-        levels = {lvl: sum(1 for q in questions if q.get("level") == lvl)
-                  for lvl in LEVELS}
-        if levels != LEVEL_PROFILE:
-            problems.append(f"test {number}: level profile is {levels}, "
-                            f"expected {LEVEL_PROFILE}")
-        covered = {q.get("topic") for q in questions} & set(TOPICS)
-        if len(covered) < MIN_TOPICS_PER_TEST:
-            problems.append(
-                f"test {number}: covers {len(covered)} topic(s), "
-                f"expected at least {MIN_TOPICS_PER_TEST} — missing "
-                f"{sorted(set(TOPICS) - covered)}")
-
-    # Across the whole bank every domain must appear, or the programme as a
-    # whole leaves a hole a candidate could fall into on exam day.
-    written = [q for qs in READING_TESTS.values() for q in qs]
-    if written:
-        never = sorted(set(TOPICS) - {q.get("topic") for q in written})
-        if never:
-            problems.append(f"bank: no question anywhere on {never}")
     return problems
-
-
-def coverage() -> dict:
-    """Topic × level counts across every written test, for a quick eyeball."""
-    written = [q for qs in READING_TESTS.values() for q in qs]
-    return {topic: {lvl: sum(1 for q in written
-                             if q.get("topic") == topic and q.get("level") == lvl)
-                    for lvl in LEVELS}
-            for topic in TOPICS}

@@ -5,11 +5,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { useSeo } from '../lib/seo';
-import { ComingSoon } from '../components/shared';
 import { FREE_TRIAL_TOTAL } from '../lib/tcf';
-
-// Flip to false to restore the page below exactly as it was.
-const NOT_READY = true;
 
 // The one-time trial: 3 written corrections plus 3 spoken ones. The server is
 // the authority (free_trial_total); this is the value to show before it has
@@ -30,13 +26,6 @@ export default function ListeningHome() {
     if (!user) return navigate('/login');
     navigate('/listening/test');
   };
-
-  // Listening is not open yet: show the notice instead of controls that would
-  // lead to an exam with no audio behind it.
-  if (NOT_READY) {
-    return <ComingSoon icon={<Headphones size={30} weight="fill" />}
-      title={t('listen.soonTitle')} body={t('listen.soonBody')} />;
-  }
 
   return (
     <main className="overflow-x-clip bg-white">
