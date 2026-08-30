@@ -48,10 +48,26 @@ if [ ! -d "$MEDIA/listening" ]; then
     exit 1
 fi
 
+# Which key to authenticate with. gcloud writes ~/.ssh/google_compute_engine
+# and teaches only its own wrapper to use it, so a plain `ssh` ignores it and
+# fails with "Permission denied (publickey)" on a host that gcloud reaches
+# perfectly well. Prefer an explicit SSH_KEY, otherwise fall back to that one
+# when it exists and there is no ordinary default key for ssh to find.
+SSH_KEY="${SSH_KEY:-}"
+if [ -z "$SSH_KEY" ] \
+   && [ -f "$HOME/.ssh/google_compute_engine" ] \
+   && [ ! -f "$HOME/.ssh/id_rsa" ] && [ ! -f "$HOME/.ssh/id_ed25519" ]; then
+    SSH_KEY="$HOME/.ssh/google_compute_engine"
+fi
+
+SSH=(ssh)
+[ -n "$SSH_KEY" ] && SSH+=(-i "$SSH_KEY")
+
 count=$(find "$MEDIA" -type f | wc -l | tr -d ' ')
 size=$(du -sh "$MEDIA" | cut -f1)
 
 echo "Sending $count files ($size) to ${DEST}:${REMOTE_REPO}/backend/media"
+[ -n "$SSH_KEY" ] && echo "Using key: $SSH_KEY"
 echo "This is silent and can take a long while on a home connection. Leave it."
 echo
 
@@ -59,11 +75,11 @@ echo
 # far side. The remote mkdir keeps this working on a host that has never had
 # the directory, which is every host before the first run.
 tar -cf - -C "$ROOT/backend" media \
-  | ssh "$DEST" "mkdir -p ${REMOTE_REPO}/backend && tar -xf - -C ${REMOTE_REPO}/backend"
+  | "${SSH[@]}" "$DEST" "mkdir -p ${REMOTE_REPO}/backend && tar -xf - -C ${REMOTE_REPO}/backend"
 
 echo
 echo "Verifying on the far side …"
-remote=$(ssh "$DEST" "find ${REMOTE_REPO}/backend/media -type f 2>/dev/null | wc -l" | tr -d ' \r')
+remote=$("${SSH[@]}" "$DEST" "find ${REMOTE_REPO}/backend/media -type f 2>/dev/null | wc -l" | tr -d ' \r')
 echo "  local:  $count files"
 echo "  remote: $remote files"
 
