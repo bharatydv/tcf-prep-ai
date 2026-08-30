@@ -166,6 +166,13 @@ def main():
         return 1
     say(PASS if code in (200, 404) else FAIL, "plans endpoint reachable",
         f"HTTP {code}")
+    if code not in (200, 404):
+        # Print what Cashfree said. A bare "HTTP 400" here sent someone off to
+        # re-check keys that were never the problem: the credentials are fine
+        # and the account is refusing to act, which is a different fix. The
+        # message names which — "Profile is inactive" means the merchant
+        # account is not activated and no key change will help.
+        print(f"        Cashfree said: {json.dumps(body)[:300]}")
 
     if live:
         print("\nProduction credentials: stopping before anything is created.")
