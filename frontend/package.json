@@ -26,7 +26,7 @@
     "start": "craco start",
     "build": "craco build",
     "test": "craco test",
-    "build:prerender": "craco build && node scripts/prerender-shell.js save && react-snap && node scripts/prerender-shell.js prune",
+    "build:prerender": "node scripts/generate-sitemap.js && craco build && node scripts/prerender-shell.js save && react-snap && node scripts/prerender-shell.js prune",
     "prebuild": "node scripts/generate-sitemap.js",
     "sitemap": "node scripts/generate-sitemap.js"
   },

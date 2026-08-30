@@ -30,6 +30,7 @@ const STATIC = [
   ['/reading', 0.7, 'monthly'],
   ['/reading/practice', 0.6, 'monthly'],
   ['/listening', 0.7, 'monthly'],
+  ['/listening/practice', 0.6, 'monthly'],
   ['/resources', 0.7, 'monthly'],
   ['/combinations', 0.6, 'monthly'],
   ['/pricing', 0.8, 'monthly'],
@@ -52,8 +53,6 @@ const STATIC = [
   ['/tcf-canada-writing-task-2', 0.7, 'monthly'],
   ['/tcf-canada-writing-task-3', 0.7, 'monthly'],
 
-  ['/register', 0.6, 'yearly'],
-  ['/login', 0.4, 'yearly'],
   ['/privacy', 0.3, 'yearly'],
   ['/terms', 0.3, 'yearly'],
   ['/contact', 0.5, 'yearly'],
