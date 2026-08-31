@@ -11,7 +11,7 @@ import { useAuth } from '../context/AuthContext';
 import { useI18n } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
 import { track } from '../lib/api';
-import { useBillingPlans } from '../lib/plans';
+import { useBillingPlans, formatPrice } from '../lib/plans';
 
 /* ===================================================================== page */
 /* Verifiable description of the product, in place of invented testimonials. */
@@ -67,8 +67,14 @@ export default function Landing() {
      GET /api/billing/plans. This section used to carry its own Bronze/Silver/
      Gold cards at prices that existed nowhere else, so the first page a visitor
      saw quoted one figure and checkout charged another. */
-  const { plans } = useBillingPlans();
+  const { plans, currency } = useBillingPlans();
   const planFeatures = ['pricing.feature1', 'pricing.feature2', 'pricing.feature3', 'pricing.feature4'];
+  /* The free plan sits outside the billing catalogue: nothing is bought, so
+     there is no price for the server to quote and nothing to keep in step with
+     it. Its two headline claims are the ones the API actually honours —
+     reading and listening take no credit and hit no paywall. */
+  const freeFeatures = ['pricing.freeReading', 'pricing.freeListening',
+                        'pricing.freeTrial', 'pricing.freeNoCard'];
 
   const nclc = [
     ['10+', '549 - 699', '16 - 20', '549 - 699', '16 - 20'],
@@ -345,14 +351,19 @@ export default function Landing() {
               body={<>
                 <p className="text-xs leading-relaxed text-violet-200/80">{t('land.simBlurb')}</p>
                 <div className="mt-4 space-y-2">
-                  {/* the map variable used to be named `t`, which shadowed the translator */}
-                  {[['TCF Canada', '1h 45m · 203 pts'], ['TCF FR', '1h 30m · 200 pts'], ['TCF Québec', '1h 45m · 200 pts']].map(([exam, m]) => (
-                    <div key={exam} className="flex items-center gap-2.5 rounded-xl bg-white/5 px-3 py-2.5 ring-1 ring-white/10">
+                  {/* The two comprehension papers, with what the bank actually
+                      holds: 40 tests each, counted in backend/reading_bank.py
+                      and backend/listening_bank.py.
+                      The map variable is not named `t` — it used to be, and it
+                      shadowed the translator. */}
+                  {[['Compréhension Orale', 40], ['Compréhension Écrite', 40]].map(([paper, n]) => (
+                    <div key={paper} className="flex items-center gap-2.5 rounded-xl bg-white/5 px-3 py-2.5 ring-1 ring-white/10">
                       <Play size={12} weight="fill" className="shrink-0 text-fuchsia-400" />
-                      <div className="leading-tight"><p className="text-[11px] font-semibold text-white">{t('land.fullTest', { exam })}</p><p className="text-[9px] text-violet-300/60">{m}</p></div>
+                      <div className="leading-tight"><p className="text-[11px] font-semibold text-white">{paper}</p><p className="text-[9px] text-violet-300/60">{t('land.nTests', { n })}</p></div>
                     </div>
                   ))}
                 </div>
+                <p className="mt-3 text-[10px] leading-relaxed text-violet-300/70">{t('land.mockRecords')}</p>
               </>}
               cta={t('land.cardMockCta')} to="/exam/reading-comprehension" testid="dark-mock" />
             {/* Roadmap */}
@@ -412,7 +423,29 @@ export default function Landing() {
           <h2 className="text-center font-heading text-3xl font-extrabold text-gray-900">{t('land.offers')}</h2>
           <p className="mt-2 text-center text-xs uppercase tracking-wider text-gray-400">{t('land.offersSub')}</p>
         </Reveal>
-        <div className="mx-auto mt-10 grid max-w-5xl items-stretch gap-6 md:grid-cols-3">
+        <div className="mx-auto mt-10 grid max-w-6xl items-stretch gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          <Reveal>
+            <div className="tilt-card relative flex h-full flex-col overflow-hidden rounded-3xl border border-green-200 bg-white text-center shadow-soft">
+              <div className="bg-green-100 px-6 pb-5 pt-8 font-heading text-2xl font-bold text-green-800">
+                {t('pricing.freeName')}
+              </div>
+              <div className="flex flex-1 flex-col px-7 py-7">
+                <p className="font-heading text-4xl font-extrabold text-gray-900">{formatPrice(0, currency)}</p>
+                <p className="mt-1 text-xs font-semibold text-gray-400">{t('pricing.freeDuration')}</p>
+                <ul className="mt-6 flex-1 space-y-3 text-left text-[13px] font-semibold text-gray-700">
+                  {freeFeatures.map((f) => (
+                    <li key={f} className="flex items-center gap-2.5">
+                      <CheckCircle size={17} weight="fill" className="shrink-0 text-green-600" /> {t(f)}
+                    </li>
+                  ))}
+                </ul>
+                <Link to="/register" data-testid="plan-free"
+                  className="btn-outline mt-7 w-full justify-center !border-green-300 !text-green-800">
+                  {t('pricing.createAccount')}
+                </Link>
+              </div>
+            </div>
+          </Reveal>
           {plans.map((p, i) => (
             <Reveal key={p.id} delay={i * 100} className={p.popular ? 'md:-my-4 z-10' : ''}>
               <div className={`tilt-card relative flex h-full flex-col overflow-hidden rounded-3xl bg-white text-center ${p.popular ? 'shadow-2xl shadow-violet-300/60 ring-2 ring-primary md:scale-[1.04]' : 'border border-violet-100 shadow-soft'}`}>
@@ -474,7 +507,17 @@ export default function Landing() {
                 <tbody>
                   {nclc.map((row, i) => (
                     <tr key={row[0]} className={`text-gray-600 ${i % 2 ? 'bg-white' : 'bg-violet-50/40'}`}>
-                      <td className="px-4 py-3"><span className="inline-block min-w-[44px] rounded-lg border border-primary/40 bg-violet-100 px-2 py-1 font-heading font-bold text-primary">{row[0]}</span></td>
+                      <td className="px-4 py-3">
+                        <span className="inline-block min-w-[44px] rounded-lg border border-primary/40 bg-violet-100 px-2 py-1 font-heading font-bold text-primary">{row[0]}</span>
+                        {/* CLB 7 is the level most Express Entry candidates are
+                            actually aiming at, so the table says so rather than
+                            leaving them to count rows. */}
+                        {row[0] === '7' && (
+                          <span className="mt-1 block whitespace-nowrap text-[10px] font-semibold text-primary">
+                            ({t('land.nclcPr')})
+                          </span>
+                        )}
+                      </td>
                       {row.slice(1).map((c, k) => <td key={k} className="px-4 py-3">{c}</td>)}
                     </tr>
                   ))}
