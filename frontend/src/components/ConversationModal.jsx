@@ -6,6 +6,7 @@ import {
 import { toast } from 'sonner';
 import { api, errMsg } from '../lib/api';
 import { startRecording as startCapture, appendAudio, isRecordingSupported } from '../lib/recorder';
+import { SPEAKING_TASKS } from '../lib/tcf';
 import { useT } from '../i18n';
 
 /* Tache 2 is a live roleplay: the candidate asks, an examiner answers. This
@@ -98,18 +99,29 @@ const SpeechRec = typeof window !== 'undefined'
 const HAS_LIVE_STT = Boolean(SpeechRec);
 
 export default function ConversationModal({
-  consigne, tacheTitle, onCancel, onGraded, mode = 'tache2',
+  consigne, tacheTitle, onCancel, onGraded, mode = 'tache2', segments = null,
 }) {
   const t = useT();
+  /* A session given `segments` runs them in order, each with its own clock and
+     its own brief for the agent; `consigne` stays the whole-session brief, so
+     the intro card and the grader still see the session as one thing. */
+  const segs = segments?.length ? segments : null;
+  const [segIdx, setSegIdx] = useState(0);
+  const segment = segs ? segs[segIdx] : null;
   // Free practice has no exam framing: no preparation, a longer window, and it
   // is metered by its own monthly allowance rather than an AI credit.
   const isFree = mode === 'free';
-  const { prep: PREP_SECONDS, speak: SPEAK_SECONDS } = TIMINGS[mode] || TIMINGS.tache2;
+  const { prep: PREP_SECONDS, speak: TOTAL_SECONDS } = TIMINGS[mode] || TIMINGS.tache2;
+  // With segments the header still announces the whole session; the clock the
+  // candidate watches belongs to the tâche actually running.
+  const SPEAK_SECONDS = segs
+    ? segs.reduce((sum, seg) => sum + seg.seconds, 0)
+    : TOTAL_SECONDS;
   const hasPrep = PREP_SECONDS > 0;
 
   const [phase, setPhase] = useState('brief');      // brief | prep | live | grading
   const [prepLeft, setPrepLeft] = useState(PREP_SECONDS);
-  const [left, setLeft] = useState(SPEAK_SECONDS);
+  const [left, setLeft] = useState(segment ? segment.seconds : SPEAK_SECONDS);
   const [turns, setTurns] = useState([]);
   const [interim, setInterim] = useState('');
   const [status, setStatus] = useState('idle');     // idle | listening | thinking | speaking
@@ -135,7 +147,20 @@ export default function ConversationModal({
   // chunk queue of an older utterance stops instead of talking over the mic.
   const speakSeqRef = useRef(0);
   const voiceRef = useRef(null);
+  // The brief the next agent turn is generated from. A ref because a tâche can
+  // change under a turn that is already in flight, and the request must carry
+  // the new brief rather than the one React last rendered.
+  const consigneRef = useRef(segment ? segment.consigne : consigne);
+  // The tâche a turn began under, against the tâche running now: a turn the
+  // clock cut off keeps its words in the transcript, but must not be answered
+  // under a tâche that is over.
+  const segIdxRef = useRef(0);
+  const turnSegRef = useRef(0);
 
+  useEffect(() => {
+    consigneRef.current = segment ? segment.consigne : consigne;
+    segIdxRef.current = segIdx;
+  }, [segment, consigne, segIdx]);
   useEffect(() => { turnsRef.current = turns; }, [turns]);
   useEffect(() => { mutedRef.current = muted; }, [muted]);
 
@@ -238,6 +263,7 @@ export default function ConversationModal({
 
   /* ---------------- speech in ---------------- */
   const listen = useCallback(() => {
+    const segAtStart = segIdxRef.current;
     if (doneRef.current) return;
     if (!HAS_LIVE_STT) { setStatus('idle'); return; }   // fallback uses the button
     try {
@@ -266,6 +292,13 @@ export default function ConversationModal({
         clearSilence();
         setInterim('');
         if (doneRef.current) return;
+        if (segAtStart !== segIdxRef.current) {
+          // The tâche ran out mid-turn. What the candidate managed to say still
+          // belongs in the transcript the grader reads; the answer to it does
+          // not, because the next tâche is already opening.
+          if (text) setTurns((prev) => [...prev, { role: 'candidate', text }]);
+          return;
+        }
         if (text) sendTurnRef.current?.(text);
         else listenRef.current?.();   // heard nothing; keep the mic open
       };
@@ -328,7 +361,8 @@ export default function ConversationModal({
     setStatus('thinking');
     setError('');
     try {
-      const { data } = await api.post('/api/speaking/converse', { consigne, history, mode });
+      const { data } = await api.post('/api/speaking/converse',
+                                      { consigne: consigneRef.current, history, mode });
       const reply = (data?.reply || '').trim();
       if (!reply) throw new Error('empty reply');
       const after = [...history, { role: 'agent', text: reply }];
@@ -341,7 +375,7 @@ export default function ConversationModal({
       setStatus('idle');
       setError(errMsg(err, t('conv.errNoReply')));
     }
-  }, [consigne, mode, speak, t]);
+  }, [mode, speak, t]);
 
   const sendTurn = useCallback((text) => {
     const next = [...turnsRef.current, { role: 'candidate', text }];
@@ -358,6 +392,7 @@ export default function ConversationModal({
       // and labelling that as audio/webm made every iOS turn fail to
       // transcribe. See lib/recorder.js.
       captureRef.current = await startCapture({ basename: 'turn' });
+      turnSegRef.current = segIdxRef.current;
       setRecording(true);
       setStatus('listening');
     } catch (err) {
@@ -384,6 +419,10 @@ export default function ConversationModal({
         appendAudio(new FormData(), recorded),
         { headers: { 'Content-Type': 'multipart/form-data' } });
       const text = (data?.text || '').trim();
+      if (turnSegRef.current !== segIdxRef.current) {
+        if (text) setTurns((prev) => [...prev, { role: 'candidate', text }]);
+        return;                       // the tâche moved on while this uploaded
+      }
       if (text) sendTurnRef.current?.(text);
       else { setStatus('idle'); toast.error(t('conv.noSpeech')); }
     } catch (err) {
@@ -468,6 +507,29 @@ export default function ConversationModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, goLive]);
 
+  /* A tâche whose clock has run out, handed over to the next one. The agent is
+     cut off mid-sentence and the microphone closed, exactly as an examiner
+     moving the paper on would: the point of the timer is that the tâche ends
+     whether or not the exchange had finished. */
+  const nextSegment = useCallback(() => {
+    const next = segs?.[segIdx + 1];
+    if (!next) return;
+    speakSeqRef.current += 1;
+    try { recRef.current?.abort?.(); } catch (e) { /* not listening */ }
+    try { window.speechSynthesis?.cancel(); } catch (e) { /* not speaking */ }
+    try { captureRef.current?.cancel(); } catch (e) { /* no push-to-talk turn */ }
+    captureRef.current = null;
+    setInterim('');
+    consigneRef.current = next.consigne;
+    setSegIdx((i) => i + 1);
+    setLeft(next.seconds);
+    liveEndsRef.current = Date.now() + next.seconds * 1000;
+    segIdxRef.current = segIdx + 1;
+    // The recogniser reports its final words asynchronously after abort(), so
+    // the new tâche opens on the tick after they have landed in the transcript.
+    setTimeout(() => { if (!doneRef.current) exchange(turnsRef.current); }, 250);
+  }, [segs, segIdx, exchange]);
+
   useEffect(() => {
     if (phase !== 'live') { liveEndsRef.current = null; return undefined; }
     if (liveEndsRef.current == null) liveEndsRef.current = Date.now() + left * 1000;
@@ -475,7 +537,10 @@ export default function ConversationModal({
     const read = () => {
       const remaining = Math.max(0, Math.ceil((liveEndsRef.current - Date.now()) / 1000));
       setLeft(remaining);
-      if (remaining <= 0 && !autoFinishedRef.current) {
+      if (remaining > 0) return;
+      if (segs && segIdx < segs.length - 1) {
+        nextSegment();
+      } else if (!autoFinishedRef.current) {
         autoFinishedRef.current = true;
         finish();
       }
@@ -490,7 +555,7 @@ export default function ConversationModal({
       document.removeEventListener('visibilitychange', onVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, finish]);
+  }, [phase, finish, nextSegment, segIdx]);
 
   const spokenTurns = turns.filter((t) => t.role === 'candidate').length;
   const statusLabel = {
@@ -555,6 +620,20 @@ export default function ConversationModal({
                 t('conv.briefInterview', { speak: fmt(SPEAK_SECONDS) })
               )}
             </p>
+            {segs && (
+              <ul className="mx-auto mt-4 max-w-sm space-y-1.5 text-left">
+                {segs.map((seg, i) => (
+                  <li key={i} className="flex items-center justify-between gap-3 rounded-xl bg-violet-50/60 px-3 py-2">
+                    <span className="text-xs font-semibold text-gray-700">
+                      {SPEAKING_TASKS[seg.taskType]?.name}
+                    </span>
+                    <span className="font-heading text-xs font-bold tabular-nums text-primary">
+                      {fmt(seg.seconds)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
             {!HAS_LIVE_STT && (
               <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">
                 {t('conv.noLiveStt')}
@@ -604,8 +683,16 @@ export default function ConversationModal({
                     : status === 'speaking' ? 'bg-primary animate-pulse' : 'bg-gray-400'}`} />
                 {statusLabel}
               </span>
-              <span className={`font-heading text-sm font-extrabold tabular-nums ${
-                left <= 30 ? 'text-red-600' : 'text-gray-900'}`}>{fmt(left)}</span>
+              <span className="flex items-center gap-2">
+                {segs && (
+                  <span className="rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-bold text-primary"
+                    data-testid="conv-segment">
+                    {t('conv.taskOf', { n: segIdx + 1, total: segs.length })}
+                  </span>
+                )}
+                <span className={`font-heading text-sm font-extrabold tabular-nums ${
+                  left <= 30 ? 'text-red-600' : 'text-gray-900'}`}>{fmt(left)}</span>
+              </span>
             </div>
 
             {/* transcript */}
