@@ -147,24 +147,105 @@ export default function Landing() {
               </div> */}
             </div>
           </div>
-          {/* right: youtube video — oozing-from-screen effect */}
+          {/* right: the product itself, in three shots — see .film-* in index.css */}
           <div className="hero-rise" style={{ animationDelay: '0.25s' }}>
             <div className="relative mx-auto max-w-lg[1024px]">
               <div aria-hidden className="pointer-events-none absolute -inset-4 rounded-[2rem] bg-violet-400/20 blur-2xl" />
               <div aria-hidden className="pointer-events-none absolute -inset-8 rounded-[2.5rem] bg-fuchsia-300/15 blur-3xl" />
               <div className="relative rounded-[1.75rem] bg-gradient-to-br from-white/60 to-violet-200/40 p-[5px] shadow-2xl shadow-violet-400/50 backdrop-blur-sm ring-1 ring-white/60">
-              <div className="overflow-hidden rounded-[1.4rem]">
-                <div className="relative" style={{ paddingBottom: '56.25%' }}>
-                  <iframe
-                  className="absolute inset-0 h-full w-full"
-                  src="https://www.youtube.com/embed/Sgxbx65IDeM?autoplay=1&mute=1&loop=1&playlist=Sgxbx65IDeM&controls=1&rel=0&modestbranding=1"
-                  title={t('land.videoTitle')}
-                  frameBorder="0"
-                  allow="autoplay; encrypted-media; picture-in-picture"
-                  allowFullScreen
-                  />
+                <div className="overflow-hidden rounded-[1.4rem] bg-[#150a2e]">
+                  {/* The film is decorative: it shows what the copy beside it
+                      already says, so it carries one label and nothing else for
+                      a screen reader to wade through. */}
+                  <div className="relative" style={{ paddingBottom: '56.25%' }}
+                    role="img" aria-label={t('land.videoTitle')}>
+                    <div className="film-stage absolute inset-0 bg-[radial-gradient(120%_100%_at_20%_0%,#3b1078_0%,#1e0b45_45%,#0f0725_100%)]">
+                      {/* window chrome, so it reads as a screen rather than a poster */}
+                      <div aria-hidden className="flex items-center gap-1.5 px-4 pt-3.5">
+                        {['#f87171', '#fbbf24', '#34d399'].map((c) => (
+                          <span key={c} className="h-2 w-2 rounded-full" style={{ background: c, opacity: 0.75 }} />
+                        ))}
+                        <span className="ml-2 h-2 w-24 rounded-full bg-white/10" />
+                      </div>
+
+                      {/* SHOT 1 — the sentence is written */}
+                      <div className="film-shot film-shot-1 absolute inset-x-0 bottom-0 top-9 flex flex-col justify-center px-[7%]">
+                        <p className="font-heading text-[11px] font-bold uppercase tracking-[0.2em] text-fuchsia-300/80 sm:text-xs">{t('land.filmShot1')}</p>
+                        <div className="mt-3 rounded-xl bg-white/95 p-3 shadow-lg sm:p-4">
+                          <p className="film-type whitespace-nowrap text-[10px] leading-relaxed text-gray-800 sm:text-[13px]">
+                            Je veux <span className="relative">écris<span className="film-mark absolute -bottom-0.5 left-0 h-[2px] w-full rounded bg-red-400" /></span> pour exprimer mon raisonnement.
+                            <span className="film-caret ml-0.5 inline-block h-[1em] w-[2px] translate-y-[3px] bg-primary" />
+                          </p>
+                          <p className="mt-2 text-[8px] font-semibold uppercase tracking-wider text-gray-400 sm:text-[10px]">Tâche 2 · 120–150 mots</p>
+                        </div>
+                      </div>
+
+                      {/* SHOT 2 — it is corrected */}
+                      <div className="film-shot absolute inset-x-0 bottom-0 top-9 flex flex-col justify-center px-[7%]" style={{ '--d': '6s' }}>
+                        <p className="font-heading text-[11px] font-bold uppercase tracking-[0.2em] text-fuchsia-300/80 sm:text-xs">{t('land.filmShot2')}</p>
+                        <div className="mt-3 rounded-xl bg-white/95 p-3 shadow-lg sm:p-4">
+                          <p className="text-[10px] leading-relaxed text-gray-800 sm:text-[13px]">
+                            Je veux{' '}
+                            <span className="relative rounded bg-red-100 px-1 text-gray-500">
+                              écris
+                              <span className="film-strike absolute left-0 top-1/2 h-[1.5px] w-full bg-red-400" />
+                            </span>{' '}
+                            <span className="film-in inline-block rounded bg-green-100 px-1 font-semibold text-green-800">écrire</span>{' '}
+                            pour exprimer mon raisonnement.
+                          </p>
+                          <div className="mt-3 flex flex-wrap gap-1.5 text-[8px] font-bold sm:text-[10px]">
+                            {[['land.metricGrammar', '92%'], ['land.metricVocab', '85%'], ['land.metricCoherence', '90%']].map(([k, v], i) => (
+                              <span key={k} className="film-in rounded-md bg-violet-50 px-2 py-1 text-primary"
+                                style={{ animationDelay: `calc(var(--d) + ${i * 0.22}s)` }}>
+                                {t(k)} <span className="text-green-600">{v}</span>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* SHOT 3 — it is scored, on the scale the exam reports */}
+                      <div className="film-shot absolute inset-x-0 bottom-0 top-9 flex flex-col justify-center px-[7%]" style={{ '--d': '12s' }}>
+                        <p className="font-heading text-[11px] font-bold uppercase tracking-[0.2em] text-fuchsia-300/80 sm:text-xs">{t('land.filmShot3')}</p>
+                        <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-white/[0.06] p-3 ring-1 ring-white/10 sm:p-4">
+                          <div className="flex items-center gap-4 sm:gap-6">
+                          <svg viewBox="0 0 100 100" className="h-16 w-16 shrink-0 -rotate-90 sm:h-24 sm:w-24" aria-hidden>
+                            <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="7" />
+                            <circle className="film-ring" cx="50" cy="50" r="46" fill="none" stroke="url(#filmGrad)"
+                              strokeWidth="7" strokeLinecap="round" strokeDasharray="289" strokeDashoffset="289"
+                              style={{ '--d': '12s' }} />
+                            <defs>
+                              <linearGradient id="filmGrad" x1="0" y1="0" x2="1" y2="1">
+                                <stop offset="0%" stopColor="#a78bfa" />
+                                <stop offset="100%" stopColor="#e879f9" />
+                              </linearGradient>
+                            </defs>
+                          </svg>
+                          <div className="film-in">
+                            <p className="font-heading text-2xl font-extrabold text-white sm:text-4xl">
+                              11<span className="text-base text-white/50 sm:text-xl">/20</span>
+                            </p>
+                            <p className="mt-1 inline-block rounded-full bg-white/15 px-2.5 py-0.5 font-heading text-[10px] font-bold text-white sm:text-xs">CLB 7</p>
+                            <p className="mt-1.5 text-[9px] uppercase tracking-wider text-violet-300/70 sm:text-[11px]">Expression écrite</p>
+                          </div>
+                          </div>
+                          {/* what that mark is actually for — the same label the
+                              equivalency table further down the page carries. */}
+                          <span className="film-in shrink-0 rounded-full border border-fuchsia-400/40 px-2.5 py-1 text-[8px] font-bold uppercase tracking-wider text-fuchsia-200 sm:text-[10px]"
+                            style={{ animationDelay: 'calc(var(--d) + 0.5s)' }}>
+                            {t('land.nclcPr')}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* light travelling across the glass */}
+                      <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+                        <div className="film-sweep absolute -inset-y-8 left-0 w-1/3 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                      </div>
+                      <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_90%_at_50%_45%,transparent_45%,rgba(6,2,20,0.55)_100%)]" />
+                    </div>
+                  </div>
                 </div>
-              </div>
               </div>
               <div aria-hidden className="pointer-events-none absolute -bottom-6 left-1/2 h-6 w-3/4 -translate-x-1/2 rounded-full bg-violet-400/30 blur-xl" />
             </div>

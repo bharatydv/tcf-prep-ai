@@ -121,6 +121,89 @@ h1, h2, h3, h4 { @apply font-heading; }
 .tilt-card:hover { transform: translateY(-8px); box-shadow: 0 24px 48px -16px rgba(124, 58, 237, 0.35); }
 
 
+/* ------------------------------------------------- hero demo film -------- */
+/* The hero used to embed a YouTube clip of somebody else's showreel: a third
+   party frame, an autoplay the browser may block, and 200-odd kB of player for
+   a picture of an eye. This is the product itself, in three shots on an 18s
+   loop — a sentence is written, it is corrected, it is scored.
+   
+   One timeline drives everything: every element runs an 18s animation and the
+   shot it belongs to sets --d, so the shots start 6s apart and each one's own
+   moving parts stay in step with it. Only opacity, transform and clip-path are
+   animated, which the compositor can do without laying the page out again —
+   that is what keeps it smooth on a phone. */
+.film-shot { opacity: 0; animation: film-cut 18s ease-in-out infinite; animation-delay: var(--d, 0s); }
+@keyframes film-cut {
+  0%        { opacity: 0; transform: translateY(12px) scale(0.985); }
+  4%        { opacity: 1; transform: none; }
+  30%       { opacity: 1; transform: none; }
+  36%, 100% { opacity: 0; transform: translateY(-10px) scale(1.015); }
+}
+
+/* The slow push in. A film is never perfectly still. */
+.film-stage { animation: film-push 18s ease-in-out infinite; }
+@keyframes film-push {
+  0%, 100% { transform: scale(1.015); }
+  50%      { transform: scale(1.055); }
+}
+
+/* Light travelling across the glass, the way it does over a real screen. */
+.film-sweep { animation: film-sweep 9s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+@keyframes film-sweep {
+  0%        { transform: translateX(-140%) skewX(-14deg); opacity: 0; }
+  12%       { opacity: 1; }
+  55%       { opacity: 0; }
+  55.01%, 100% { transform: translateX(240%) skewX(-14deg); opacity: 0; }
+}
+
+/* Shot 1 — the sentence types itself out, then the mistake is marked. */
+.film-type { clip-path: inset(0 100% 0 0); animation: film-type 18s cubic-bezier(0.65, 0, 0.35, 1) infinite; animation-delay: var(--d, 0s); }
+@keyframes film-type {
+  0%, 2%    { clip-path: inset(0 100% 0 0); }
+  17%, 100% { clip-path: inset(0 -2% 0 0); }
+}
+.film-caret { opacity: 0; animation: film-caret 18s steps(1, end) infinite; animation-delay: var(--d, 0s); }
+@keyframes film-caret {
+  0%, 2%   { opacity: 0; }
+  3%       { opacity: 1; }
+  4%       { opacity: 0; }
+  5%       { opacity: 1; }
+  6%       { opacity: 0; }
+  7%       { opacity: 1; }
+  8%       { opacity: 0; }
+  9%       { opacity: 1; }
+  10%      { opacity: 0; }
+  11%      { opacity: 1; }
+  12%      { opacity: 0; }
+  13%      { opacity: 1; }
+  14%      { opacity: 0; }
+  15%      { opacity: 1; }
+  16%, 100% { opacity: 0; }
+}
+.film-mark { transform: scaleX(0); transform-origin: left; animation: film-mark 18s cubic-bezier(0.22, 1, 0.36, 1) infinite; animation-delay: var(--d, 0s); }
+@keyframes film-mark {
+  0%, 18%   { transform: scaleX(0); }
+  23%, 100% { transform: scaleX(1); }
+}
+
+/* Shots 2 and 3 — the correction lands, the chips arrive, the ring sweeps. */
+.film-strike { transform: scaleX(0); transform-origin: left; animation: film-strike 18s cubic-bezier(0.22, 1, 0.36, 1) infinite; animation-delay: var(--d, 0s); }
+@keyframes film-strike {
+  0%, 6%    { transform: scaleX(0); }
+  13%, 100% { transform: scaleX(1); }
+}
+.film-in { opacity: 0; animation: film-in 18s cubic-bezier(0.22, 1, 0.36, 1) infinite; animation-delay: var(--d, 0s); }
+@keyframes film-in {
+  0%, 10%   { opacity: 0; transform: translateY(9px) scale(0.97); }
+  19%, 100% { opacity: 1; transform: none; }
+}
+.film-ring { animation: film-ring 18s cubic-bezier(0.22, 1, 0.36, 1) infinite; animation-delay: var(--d, 0s); }
+@keyframes film-ring {
+  0%, 5%    { stroke-dashoffset: 289; }
+  26%, 100% { stroke-dashoffset: 130; }
+}
+
+
 /* -------------------------------------------------------- reduced motion --- */
 /* Everything above animates for effect, not to convey information, so when the
    viewer has asked for less motion the page simply arrives in its end state.
@@ -148,4 +231,25 @@ h1, h2, h3, h4 { @apply font-heading; }
   .recording {
     animation: none !important;
   }
+  /* The demo film is three shots stacked on one another, visible in turn. With
+     the animation gone they would all be visible at once, so it holds on the
+     opening shot — a still, which is what a viewer asking for no motion wants
+     from a film. */
+  .film-stage,
+  .film-shot,
+  .film-type,
+  .film-caret,
+  .film-mark,
+  .film-strike,
+  .film-in,
+  .film-ring {
+    animation: none !important;
+    transform: none !important;
+  }
+  .film-shot { opacity: 0 !important; }
+  .film-shot-1 { opacity: 1 !important; }
+  .film-type { clip-path: none !important; }
+  .film-caret,
+  .film-sweep { display: none !important; }
+  .film-ring { stroke-dashoffset: 130 !important; }
 }
