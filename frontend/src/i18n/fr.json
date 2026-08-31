@@ -566,9 +566,7 @@
     "faq3q": "Le simulateur d'examen est-il identique à l'examen officiel ?",
     "faq4a": "Oui. L'essai gratuit — 3 corrections écrites et 3 évaluations orales — ne demande aucune carte bancaire, et les formules payantes sont des achats uniques valables une durée fixe : il n'y a aucun abonnement à résilier.",
     "faq4q": "Puis-je arrêter l'essai gratuit à tout moment ?",
-    "filmShot1": "Écrivez.",
-    "filmShot2": "Évaluez.",
-    "filmShot3": "Notez.",
+    "filmRevision": "Erreurs enregistrées pour révision",
     "footBlog": "Blog",
     "footCombos": "Combinaisons de niveaux",
     "footCompany": "À propos",
@@ -666,7 +664,7 @@
     "trust2": "Plafonds du barème réel appliqués dans le code",
     "trust3": "Retour immédiat avec un niveau CECR estimé",
     "trust4": "Sécurisé, privé et sans publicité",
-    "videoTitle": "prepfrancais — un texte écrit, corrigé puis noté",
+    "videoTitle": "prepfrancais — l'écrit, l'oral, l'entraînement et la note",
     "weakness": "Nous suivons vos points faibles et les transformons en plan de révision bâti sur vos propres erreurs.",
     "weeklyGoalText": "Améliorer la cohérence à l'écrit",
     "weeklyGoals": "Objectifs de la semaine",
@@ -2182,5 +2180,23 @@
     "topicsList": "Sujets du thème",
     "writeFirst": "Écrivez quelque chose d’abord !",
     "yourQuestion": "Votre question"
+  },
+  "landing": {
+    "film": {
+      "t1a": "Écrivez ce que",
+      "t1b": "l’examen demande.",
+      "t2a": "Corrigé",
+      "t2b": "en quelques secondes.",
+      "t3a": "Parlez à un",
+      "t3b": "examinateur IA.",
+      "t4a": "Mode examen,",
+      "t4b": "durées réelles.",
+      "t5a": "40 en orale.",
+      "t5b": "40 en écrite.",
+      "t6a": "Examens blancs",
+      "t6b": "complets, chronométrés.",
+      "t7a": "Votre note,",
+      "t7b": "votre niveau NCLC."
+    }
   }
 }

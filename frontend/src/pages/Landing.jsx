@@ -153,96 +153,279 @@ export default function Landing() {
               <div aria-hidden className="pointer-events-none absolute -inset-4 rounded-[2rem] bg-violet-400/20 blur-2xl" />
               <div aria-hidden className="pointer-events-none absolute -inset-8 rounded-[2.5rem] bg-fuchsia-300/15 blur-3xl" />
               <div className="relative rounded-[1.75rem] bg-gradient-to-br from-white/60 to-violet-200/40 p-[5px] shadow-2xl shadow-violet-400/50 backdrop-blur-sm ring-1 ring-white/60">
-                <div className="overflow-hidden rounded-[1.4rem] bg-[#150a2e]">
+                <div className="overflow-hidden rounded-[1.4rem] bg-white">
                   {/* The film is decorative: it shows what the copy beside it
                       already says, so it carries one label and nothing else for
                       a screen reader to wade through. */}
                   <div className="relative" style={{ paddingBottom: '56.25%' }}
                     role="img" aria-label={t('land.videoTitle')}>
-                    <div className="film-stage absolute inset-0 bg-[radial-gradient(120%_100%_at_20%_0%,#3b1078_0%,#1e0b45_45%,#0f0725_100%)]">
-                      {/* window chrome, so it reads as a screen rather than a poster */}
-                      <div aria-hidden className="flex items-center gap-1.5 px-4 pt-3.5">
-                        {['#f87171', '#fbbf24', '#34d399'].map((c) => (
-                          <span key={c} className="h-2 w-2 rounded-full" style={{ background: c, opacity: 0.75 }} />
-                        ))}
-                        <span className="ml-2 h-2 w-24 rounded-full bg-white/10" />
+                    <div className="film-stage absolute inset-0 bg-[linear-gradient(180deg,#ffffff_0%,#f7f5fb_55%,#eee9f7_100%)]">
+                      {/* Colour drifting under the white, on its own clock, so no
+                          two passes of the same shot are lit alike. */}
+                      <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+                        <div className="film-mesh absolute -left-1/4 top-[-35%] h-[70%] w-[70%] rounded-full bg-fuchsia-300/30 blur-[70px]" />
+                        <div className="film-mesh absolute -right-1/4 bottom-[-35%] h-[75%] w-[75%] rounded-full bg-violet-400/25 blur-[70px]"
+                          style={{ animationDelay: '-9s' }} />
                       </div>
 
-                      {/* SHOT 1 — the sentence is written */}
-                      <div className="film-shot film-shot-1 absolute inset-x-0 bottom-0 top-9 flex flex-col justify-center px-[7%]">
-                        <p className="font-heading text-[11px] font-bold uppercase tracking-[0.2em] text-fuchsia-300/80 sm:text-xs">{t('land.filmShot1')}</p>
-                        <div className="mt-3 rounded-xl bg-white/95 p-3 shadow-lg sm:p-4">
-                          <p className="film-type whitespace-nowrap text-[10px] leading-relaxed text-gray-800 sm:text-[13px]">
-                            Je veux <span className="relative">écris<span className="film-mark absolute -bottom-0.5 left-0 h-[2px] w-full rounded bg-red-400" /></span> pour exprimer mon raisonnement.
-                            <span className="film-caret ml-0.5 inline-block h-[1em] w-[2px] translate-y-[3px] bg-primary" />
+                      {/* SHOT 1 */}
+                      <div className="film-shot film-shot-1 absolute inset-0 flex flex-col justify-center gap-3 px-[7%] pb-7 pt-4 sm:flex-row sm:items-center sm:gap-5 sm:px-[8%] sm:pb-8" style={{ '--d': '0s' }}>
+                        <div className="font-heading text-base font-extrabold leading-[1.05] tracking-tight text-gray-900 sm:w-[38%] sm:text-[25px]">
+                          <span className="block overflow-hidden pb-[2px]">
+                            <span className="film-title block">{t('landing.film.t1a')}</span>
+                          </span>
+                          <span className="block overflow-hidden pb-[2px]">
+                            <span className="film-title block">{t('landing.film.t1b')}</span>
+                          </span>
+                        </div>
+                        <div className="film-plate min-w-0 flex-1 rounded-xl border border-gray-100 bg-white p-3 shadow-[0_18px_45px_-12px_rgba(24,10,60,0.28)] sm:p-4">
+                          <p className="text-[9px] font-semibold uppercase tracking-wider text-gray-400 sm:text-[10px]">Tâche 2 · 120–150 mots</p>
+                          <p className="mt-2 space-y-0.5 text-[10px] leading-relaxed text-gray-900 sm:text-[12px]">
+                            <span className="film-type block whitespace-nowrap">
+                              Je veux <span className="relative">écris<span className="film-mark absolute -bottom-0.5 left-0 h-[2px] w-full rounded bg-red-400" /></span> mon opinion.
+                            </span>
+                            <span className="film-type2 block whitespace-nowrap">
+                              <span className="relative">Malgré que<span className="film-mark absolute -bottom-0.5 left-0 h-[2px] w-full rounded bg-red-400"
+                                style={{ animationDelay: 'calc(var(--d) + 0.12s)' }} /></span> le sujet soit dur.
+                            </span>
+                            <span className="film-type3 block whitespace-nowrap">
+                              J’ai <span className="relative">beaucoup des<span className="film-mark absolute -bottom-0.5 left-0 h-[2px] w-full rounded bg-red-400"
+                                style={{ animationDelay: 'calc(var(--d) + 0.24s)' }} /></span> idées.
+                              <span className="film-caret ml-0.5 inline-block h-[1em] w-[2px] translate-y-[3px] bg-primary" />
+                            </span>
                           </p>
-                          <p className="mt-2 text-[8px] font-semibold uppercase tracking-wider text-gray-400 sm:text-[10px]">Tâche 2 · 120–150 mots</p>
                         </div>
                       </div>
-
-                      {/* SHOT 2 — it is corrected */}
-                      <div className="film-shot absolute inset-x-0 bottom-0 top-9 flex flex-col justify-center px-[7%]" style={{ '--d': '6s' }}>
-                        <p className="font-heading text-[11px] font-bold uppercase tracking-[0.2em] text-fuchsia-300/80 sm:text-xs">{t('land.filmShot2')}</p>
-                        <div className="mt-3 rounded-xl bg-white/95 p-3 shadow-lg sm:p-4">
-                          <p className="text-[10px] leading-relaxed text-gray-800 sm:text-[13px]">
-                            Je veux{' '}
-                            <span className="relative rounded bg-red-100 px-1 text-gray-500">
-                              écris
-                              <span className="film-strike absolute left-0 top-1/2 h-[1.5px] w-full bg-red-400" />
-                            </span>{' '}
-                            <span className="film-in inline-block rounded bg-green-100 px-1 font-semibold text-green-800">écrire</span>{' '}
-                            pour exprimer mon raisonnement.
+                      {/* SHOT 2 */}
+                      <div className="film-shot absolute inset-0 flex flex-col justify-center gap-3 px-[7%] pb-7 pt-4 sm:flex-row sm:items-center sm:gap-5 sm:px-[8%] sm:pb-8" style={{ '--d': '3.6s' }}>
+                        <div className="font-heading text-base font-extrabold leading-[1.05] tracking-tight text-gray-900 sm:w-[38%] sm:text-[25px]">
+                          <span className="block overflow-hidden pb-[2px]">
+                            <span className="film-title block">{t('landing.film.t2a')}</span>
+                          </span>
+                          <span className="block overflow-hidden pb-[2px]">
+                            <span className="film-title block">{t('landing.film.t2b')}</span>
+                          </span>
+                        </div>
+                        <div className="film-plate min-w-0 flex-1 rounded-xl border border-gray-100 bg-white p-3 shadow-[0_18px_45px_-12px_rgba(24,10,60,0.28)] sm:p-4">
+                          <p className="space-y-0.5 text-[10px] leading-relaxed text-gray-900 sm:text-[12px]">
+                            <span className="block">
+                              Je veux{' '}
+                              <span className="relative rounded bg-red-50 px-1 text-gray-400">écris
+                                <span className="film-strike absolute left-0 top-1/2 h-[1.5px] w-full bg-red-400" /></span>{' '}
+                              <span className="film-in inline-block rounded bg-green-50 px-1 font-semibold text-green-700">écrire</span>{' '}
+                              mon opinion.
+                            </span>
+                            <span className="block">
+                              <span className="relative rounded bg-red-50 px-1 text-gray-400">Malgré que
+                                <span className="film-strike absolute left-0 top-1/2 h-[1.5px] w-full bg-red-400"
+                                  style={{ animationDelay: 'calc(var(--d) + 0.18s)' }} /></span>{' '}
+                              <span className="film-in inline-block rounded bg-green-50 px-1 font-semibold text-green-700"
+                                style={{ animationDelay: 'calc(var(--d) + 0.26s)' }}>Bien que</span>{' '}
+                              le sujet soit dur.
+                            </span>
+                            <span className="block">
+                              J’ai{' '}
+                              <span className="relative rounded bg-red-50 px-1 text-gray-400">beaucoup des
+                                <span className="film-strike absolute left-0 top-1/2 h-[1.5px] w-full bg-red-400"
+                                  style={{ animationDelay: 'calc(var(--d) + 0.36s)' }} /></span>{' '}
+                              <span className="film-in inline-block rounded bg-green-50 px-1 font-semibold text-green-700"
+                                style={{ animationDelay: 'calc(var(--d) + 0.44s)' }}>de nombreuses</span>{' '}
+                              idées.
+                            </span>
                           </p>
                           <div className="mt-3 flex flex-wrap gap-1.5 text-[8px] font-bold sm:text-[10px]">
                             {[['land.metricGrammar', '92%'], ['land.metricVocab', '85%'], ['land.metricCoherence', '90%']].map(([k, v], i) => (
                               <span key={k} className="film-in rounded-md bg-violet-50 px-2 py-1 text-primary"
-                                style={{ animationDelay: `calc(var(--d) + ${i * 0.22}s)` }}>
+                                style={{ animationDelay: `calc(var(--d) + ${0.2 + i * 0.16}s)` }}>
                                 {t(k)} <span className="text-green-600">{v}</span>
                               </span>
                             ))}
                           </div>
                         </div>
                       </div>
-
-                      {/* SHOT 3 — it is scored, on the scale the exam reports */}
-                      <div className="film-shot absolute inset-x-0 bottom-0 top-9 flex flex-col justify-center px-[7%]" style={{ '--d': '12s' }}>
-                        <p className="font-heading text-[11px] font-bold uppercase tracking-[0.2em] text-fuchsia-300/80 sm:text-xs">{t('land.filmShot3')}</p>
-                        <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-white/[0.06] p-3 ring-1 ring-white/10 sm:p-4">
-                          <div className="flex items-center gap-4 sm:gap-6">
-                          <svg viewBox="0 0 100 100" className="h-16 w-16 shrink-0 -rotate-90 sm:h-24 sm:w-24" aria-hidden>
-                            <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="7" />
-                            <circle className="film-ring" cx="50" cy="50" r="46" fill="none" stroke="url(#filmGrad)"
-                              strokeWidth="7" strokeLinecap="round" strokeDasharray="289" strokeDashoffset="289"
-                              style={{ '--d': '12s' }} />
-                            <defs>
-                              <linearGradient id="filmGrad" x1="0" y1="0" x2="1" y2="1">
-                                <stop offset="0%" stopColor="#a78bfa" />
-                                <stop offset="100%" stopColor="#e879f9" />
-                              </linearGradient>
-                            </defs>
-                          </svg>
-                          <div className="film-in">
-                            <p className="font-heading text-2xl font-extrabold text-white sm:text-4xl">
-                              11<span className="text-base text-white/50 sm:text-xl">/20</span>
-                            </p>
-                            <p className="mt-1 inline-block rounded-full bg-white/15 px-2.5 py-0.5 font-heading text-[10px] font-bold text-white sm:text-xs">CLB 7</p>
-                            <p className="mt-1.5 text-[9px] uppercase tracking-wider text-violet-300/70 sm:text-[11px]">Expression écrite</p>
-                          </div>
-                          </div>
-                          {/* what that mark is actually for — the same label the
-                              equivalency table further down the page carries. */}
-                          <span className="film-in shrink-0 rounded-full border border-fuchsia-400/40 px-2.5 py-1 text-[8px] font-bold uppercase tracking-wider text-fuchsia-200 sm:text-[10px]"
-                            style={{ animationDelay: 'calc(var(--d) + 0.5s)' }}>
-                            {t('land.nclcPr')}
+                      {/* SHOT 3 */}
+                      <div className="film-shot absolute inset-0 flex flex-col justify-center gap-3 px-[7%] pb-7 pt-4 sm:flex-row sm:items-center sm:gap-5 sm:px-[8%] sm:pb-8" style={{ '--d': '7.2s' }}>
+                        <div className="font-heading text-base font-extrabold leading-[1.05] tracking-tight text-gray-900 sm:w-[38%] sm:text-[25px]">
+                          <span className="block overflow-hidden pb-[2px]">
+                            <span className="film-title block">{t('landing.film.t3a')}</span>
+                          </span>
+                          <span className="block overflow-hidden pb-[2px]">
+                            <span className="film-title block">{t('landing.film.t3b')}</span>
                           </span>
                         </div>
+                        <div className="film-plate min-w-0 flex-1 rounded-xl border border-gray-100 bg-white p-3 shadow-[0_18px_45px_-12px_rgba(24,10,60,0.28)] sm:p-4">
+                          <div className="space-y-[3px] sm:space-y-1.5">
+                            {[['a', 'Bonjour ! Quelles informations souhaitez-vous ?'],
+                              ['c', 'Je voudrais connaître les horaires et le tarif.'],
+                              ['a', 'Nous ouvrons de 9 h à 20 h. C’est 45 € par mois.'],
+                              ['c', 'Merci. Faut-il réserver une séance à l’avance ?']].map(([who, line], i) => (
+                              <p key={i} className={`film-in max-w-[86%] rounded-xl px-2 py-[3px] text-[8px] leading-snug sm:px-2.5 sm:py-1.5 sm:text-[11px] ${
+                                who === 'a' ? 'rounded-bl-sm bg-gray-100 text-gray-800'
+                                  : 'ml-auto rounded-br-sm bg-gradient-to-br from-primary to-fuchsia-600 text-white'}`}
+                                style={{ animationDelay: `calc(var(--d) + ${i * 0.22}s)` }}>
+                                {line}
+                              </p>
+                            ))}
+                          </div>
+                          <div className="mt-2 flex items-center gap-2.5">
+                            <span aria-hidden className="flex h-3.5 items-end gap-[2px] sm:h-5">
+                              {[0.45, 0.8, 1, 0.6, 0.9, 0.5, 0.95, 0.7].map((h, i) => (
+                                <span key={i} className="eq-bar w-[3px] rounded-full bg-gradient-to-t from-primary to-fuchsia-400"
+                                  style={{ height: `${h * 100}%`, animationDelay: `${i * 0.09}s` }} />
+                              ))}
+                            </span>
+                            <span className="flex items-center gap-1.5 text-[8px] font-bold uppercase tracking-wider text-gray-500 sm:text-[10px]">
+                              <span className="relative flex h-1.5 w-1.5 shrink-0">
+                                <span className="ping-soft absolute inset-0 rounded-full bg-red-500" />
+                                <span className="relative h-1.5 w-1.5 rounded-full bg-red-500" />
+                              </span>
+                              Tâche 2 · 03:30
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      {/* SHOT 4 */}
+                      <div className="film-shot absolute inset-0 flex flex-col justify-center gap-3 px-[7%] pb-7 pt-4 sm:flex-row sm:items-center sm:gap-5 sm:px-[8%] sm:pb-8" style={{ '--d': '10.8s' }}>
+                        <div className="font-heading text-base font-extrabold leading-[1.05] tracking-tight text-gray-900 sm:w-[38%] sm:text-[25px]">
+                          <span className="block overflow-hidden pb-[2px]">
+                            <span className="film-title block">{t('landing.film.t4a')}</span>
+                          </span>
+                          <span className="block overflow-hidden pb-[2px]">
+                            <span className="film-title block">{t('landing.film.t4b')}</span>
+                          </span>
+                        </div>
+                        <div className="film-plate min-w-0 flex-1 rounded-xl border border-gray-100 bg-white p-3 shadow-[0_18px_45px_-12px_rgba(24,10,60,0.28)] sm:p-4">
+                          <div className="space-y-1.5">
+                            {[['Tâche 1 — Entretien dirigé', '02:00'],
+                              ['Tâche 2 — Exercice en interaction', '03:30'],
+                              ['Tâche 3 — Point de vue', '02:30']].map(([name, clock], i) => (
+                              <div key={name} className="film-in flex items-center justify-between gap-2 rounded-lg bg-gray-50 px-2 py-1.5 ring-1 ring-gray-100"
+                                style={{ animationDelay: `calc(var(--d) + ${i * 0.18}s)` }}>
+                                <span className="flex items-center gap-1.5 text-[8px] font-semibold text-gray-800 sm:text-[11px]">
+                                  <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-primary text-[7px] font-bold text-white sm:h-4 sm:w-4 sm:text-[9px]">{i + 1}</span>
+                                  {name}
+                                </span>
+                                <span className="font-heading text-[8px] font-bold tabular-nums text-primary sm:text-[11px]">{clock}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      {/* SHOT 5 */}
+                      <div className="film-shot absolute inset-0 flex flex-col justify-center gap-3 px-[7%] pb-7 pt-4 sm:flex-row sm:items-center sm:gap-5 sm:px-[8%] sm:pb-8" style={{ '--d': '14.4s' }}>
+                        <div className="font-heading text-base font-extrabold leading-[1.05] tracking-tight text-gray-900 sm:w-[38%] sm:text-[25px]">
+                          <span className="block overflow-hidden pb-[2px]">
+                            <span className="film-title block">{t('landing.film.t5a')}</span>
+                          </span>
+                          <span className="block overflow-hidden pb-[2px]">
+                            <span className="film-title block">{t('landing.film.t5b')}</span>
+                          </span>
+                        </div>
+                        <div className="film-plate min-w-0 flex-1 rounded-xl border border-gray-100 bg-white p-3 shadow-[0_18px_45px_-12px_rgba(24,10,60,0.28)] sm:p-4">
+                          <div className="space-y-2.5">
+                            {[['Compréhension orale', 40, 0.82, '0s'], ['Compréhension écrite', 40, 0.66, '0.22s']].map(([paper, n, w, d]) => (
+                              <div key={paper}>
+                                <div className="flex items-baseline justify-between text-[9px] font-semibold text-gray-800 sm:text-[11px]">
+                                  <span>{paper}</span>
+                                  <span className="text-gray-400">{t('land.nTests', { n })}</span>
+                                </div>
+                                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-gray-100">
+                                  <div className="film-grow h-full origin-left rounded-full bg-gradient-to-r from-primary to-fuchsia-500"
+                                    style={{ width: `${w * 100}%`, animationDelay: `calc(var(--d) + ${d})` }} />
+                                </div>
+                              </div>
+                            ))}
+                            <p className="film-in flex items-center gap-1.5 text-[8px] font-semibold text-green-600 sm:text-[10px]"
+                              style={{ animationDelay: 'calc(var(--d) + 0.5s)' }}>
+                              <CheckCircle size={12} weight="fill" className="shrink-0" /> {t('land.filmRevision')}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      {/* SHOT 6 */}
+                      <div className="film-shot absolute inset-0 flex flex-col justify-center gap-3 px-[7%] pb-7 pt-4 sm:flex-row sm:items-center sm:gap-5 sm:px-[8%] sm:pb-8" style={{ '--d': '18s' }}>
+                        <div className="font-heading text-base font-extrabold leading-[1.05] tracking-tight text-gray-900 sm:w-[38%] sm:text-[25px]">
+                          <span className="block overflow-hidden pb-[2px]">
+                            <span className="film-title block">{t('landing.film.t6a')}</span>
+                          </span>
+                          <span className="block overflow-hidden pb-[2px]">
+                            <span className="film-title block">{t('landing.film.t6b')}</span>
+                          </span>
+                        </div>
+                        <div className="film-plate min-w-0 flex-1 rounded-xl border border-gray-100 bg-white p-3 shadow-[0_18px_45px_-12px_rgba(24,10,60,0.28)] sm:p-4">
+                          <div className="space-y-1.5">
+                            {[['Compréhension orale', '39 questions · 35 min'],
+                              ['Compréhension écrite', '39 questions · 60 min']].map(([paper, meta], i) => (
+                              <div key={paper} className="film-in flex items-center gap-2 rounded-lg bg-gray-50 px-2 py-1.5 ring-1 ring-gray-100"
+                                style={{ animationDelay: `calc(var(--d) + ${i * 0.2}s)` }}>
+                                <Play size={11} weight="fill" className="shrink-0 text-primary" />
+                                <span className="leading-tight">
+                                  <span className="block text-[8px] font-semibold text-gray-800 sm:text-[11px]">{paper}</span>
+                                  <span className="block text-[7px] text-gray-400 sm:text-[9px]">{meta}</span>
+                                </span>
+                              </div>
+                            ))}
+                            <div className="film-in flex items-center justify-between rounded-lg bg-primary/5 px-2 py-1.5"
+                              style={{ animationDelay: 'calc(var(--d) + 0.42s)' }}>
+                              <span className="text-[8px] font-bold uppercase tracking-wider text-primary sm:text-[10px]">Temps restant</span>
+                              <span className="font-heading text-[10px] font-extrabold tabular-nums text-primary sm:text-[13px]">28:14</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      {/* SHOT 7 */}
+                      <div className="film-shot absolute inset-0 flex flex-col justify-center gap-3 px-[7%] pb-7 pt-4 sm:flex-row sm:items-center sm:gap-5 sm:px-[8%] sm:pb-8" style={{ '--d': '21.6s' }}>
+                        <div className="font-heading text-base font-extrabold leading-[1.05] tracking-tight text-gray-900 sm:w-[38%] sm:text-[25px]">
+                          <span className="block overflow-hidden pb-[2px]">
+                            <span className="film-title block">{t('landing.film.t7a')}</span>
+                          </span>
+                          <span className="block overflow-hidden pb-[2px]">
+                            <span className="film-title block">{t('landing.film.t7b')}</span>
+                          </span>
+                        </div>
+                        <div className="film-plate min-w-0 flex-1 rounded-xl border border-gray-100 bg-white p-3 shadow-[0_18px_45px_-12px_rgba(24,10,60,0.28)] sm:p-4">
+                          <div className="flex items-center gap-3 sm:gap-5">
+                            <svg viewBox="0 0 100 100" className="h-14 w-14 shrink-0 -rotate-90 sm:h-20 sm:w-20" aria-hidden>
+                              <circle cx="50" cy="50" r="46" fill="none" stroke="#EDE9FE" strokeWidth="8" />
+                              <circle className="film-ring" cx="50" cy="50" r="46" fill="none" stroke="url(#filmGrad)"
+                                strokeWidth="8" strokeLinecap="round" strokeDasharray="289" strokeDashoffset="289" />
+                              <defs>
+                                <linearGradient id="filmGrad" x1="0" y1="0" x2="1" y2="1">
+                                  <stop offset="0%" stopColor="#7C3AED" />
+                                  <stop offset="100%" stopColor="#D946EF" />
+                                </linearGradient>
+                              </defs>
+                            </svg>
+                            <div className="film-in">
+                              <p className="font-heading text-xl font-extrabold text-gray-900 sm:text-3xl">
+                                11<span className="text-sm text-gray-400 sm:text-lg">/20</span>
+                              </p>
+                              <p className="mt-0.5 inline-block rounded-full bg-primary px-2 py-0.5 font-heading text-[9px] font-bold text-white sm:text-xs">CLB 7</p>
+                              <p className="mt-1 text-[8px] uppercase tracking-wider text-gray-400 sm:text-[10px]">Expression écrite</p>
+                            </div>
+                            <span className="film-in ml-auto hidden shrink-0 rounded-full border border-primary/40 px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider text-primary sm:block"
+                              style={{ animationDelay: 'calc(var(--d) + 0.4s)' }}>
+                              {t('land.nclcPr')}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Chapter marks: seven parts of the product, and where
+                          the film has got to in them. */}
+                      <div aria-hidden className="absolute inset-x-0 bottom-2.5 flex justify-center gap-1.5 sm:bottom-3.5">
+                        {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+                          <span key={i} className="h-[3px] w-4 overflow-hidden rounded-full bg-gray-900/10">
+                            <span className="film-dot block h-full w-full rounded-full bg-primary"
+                              style={{ '--d': `${i * 3.6}s` }} />
+                          </span>
+                        ))}
                       </div>
 
                       {/* light travelling across the glass */}
                       <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
-                        <div className="film-sweep absolute -inset-y-8 left-0 w-1/3 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                        <div className="film-sweep absolute -inset-y-8 left-0 w-1/3 bg-gradient-to-r from-transparent via-white/60 to-transparent" />
                       </div>
-                      <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_90%_at_50%_45%,transparent_45%,rgba(6,2,20,0.55)_100%)]" />
                     </div>
                   </div>
                 </div>

@@ -127,28 +127,63 @@ h1, h2, h3, h4 { @apply font-heading; }
    a picture of an eye. This is the product itself, in three shots on an 18s
    loop — a sentence is written, it is corrected, it is scored.
    
-   One timeline drives everything: every element runs an 18s animation and the
-   shot it belongs to sets --d, so the shots start 6s apart and each one's own
-   moving parts stay in step with it. Only opacity, transform and clip-path are
-   animated, which the compositor can do without laying the page out again —
-   that is what keeps it smooth on a phone. */
-.film-shot { opacity: 0; animation: film-cut 18s ease-in-out infinite; animation-delay: var(--d, 0s); }
+   One timeline drives everything: every element runs a 25.2s animation and the
+   shot it belongs to sets --d, so the seven shots start 3.6s apart and each
+   one's own moving parts stay in step with it. Only opacity, transform and
+   clip-path are animated, which the compositor can do without laying the page
+   out again — that is what keeps it smooth on a phone. */
+.film-shot { opacity: 0; animation: film-cut 25.2s ease-in-out infinite; animation-delay: var(--d, 0s); }
 @keyframes film-cut {
-  0%        { opacity: 0; transform: translateY(12px) scale(0.985); }
-  4%        { opacity: 1; transform: none; }
-  30%       { opacity: 1; transform: none; }
-  36%, 100% { opacity: 0; transform: translateY(-10px) scale(1.015); }
+  0%          { opacity: 0; }
+  2%          { opacity: 1; }
+  12%         { opacity: 1; }
+  15.5%, 100% { opacity: 0; }
+}
+
+/* Display type rising from behind its own mask, and leaving the same way. */
+.film-title { transform: translateY(115%); animation: film-title 25.2s cubic-bezier(0.16, 1, 0.3, 1) infinite; animation-delay: var(--d, 0s); }
+@keyframes film-title {
+  0%, 0.3%    { transform: translateY(115%); }
+  4%, 12%     { transform: translateY(0); }
+  15.5%, 100% { transform: translateY(-115%); }
+}
+
+/* The plate tilts up out of depth and settles. The long tail on this curve is
+   the whole effect: it arrives fast and comes to rest slowly, the way a real
+   object with weight does. */
+.film-plate { opacity: 0; animation: film-plate 25.2s cubic-bezier(0.16, 1, 0.3, 1) infinite; animation-delay: var(--d, 0s); }
+@keyframes film-plate {
+  0%, 0.8%    { opacity: 0; transform: perspective(1100px) rotateX(9deg) rotateY(-7deg) translateY(26px) scale(0.94); }
+  5.5%, 11%   { opacity: 1; transform: perspective(1100px) rotateX(0deg) rotateY(0deg) translateY(0) scale(1); }
+  15.5%, 100% { opacity: 0; transform: perspective(1100px) rotateX(-2deg) rotateY(4deg) translateY(-12px) scale(1.06); }
+}
+
+/* Chapter marks along the bottom edge. */
+.film-dot { transform: scaleX(0.18); transform-origin: center; opacity: 0.3; animation: film-dot 25.2s cubic-bezier(0.16, 1, 0.3, 1) infinite; animation-delay: var(--d, 0s); }
+@keyframes film-dot {
+  0%, 0.5%    { transform: scaleX(0.18); opacity: 0.25; }
+  3%, 12%     { transform: scaleX(1); opacity: 1; }
+  15.5%, 100% { transform: scaleX(0.18); opacity: 0.25; }
+}
+
+/* The mesh drifts on its own clock, so the light never lands the same way
+   twice on the same shot. */
+.film-mesh { animation: film-mesh 26s ease-in-out infinite; }
+@keyframes film-mesh {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  33%      { transform: translate3d(12%, 8%, 0) scale(1.15); }
+  66%      { transform: translate3d(-9%, -6%, 0) scale(0.92); }
 }
 
 /* The slow push in. A film is never perfectly still. */
-.film-stage { animation: film-push 18s ease-in-out infinite; }
+.film-stage { animation: film-push 25.2s ease-in-out infinite; }
 @keyframes film-push {
-  0%, 100% { transform: scale(1.015); }
-  50%      { transform: scale(1.055); }
+  0%, 100% { transform: scale(1.01); }
+  50%      { transform: scale(1.035); }
 }
 
 /* Light travelling across the glass, the way it does over a real screen. */
-.film-sweep { animation: film-sweep 9s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+.film-sweep { animation: film-sweep 7s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
 @keyframes film-sweep {
   0%        { transform: translateX(-140%) skewX(-14deg); opacity: 0; }
   12%       { opacity: 1; }
@@ -157,50 +192,64 @@ h1, h2, h3, h4 { @apply font-heading; }
 }
 
 /* Shot 1 — the sentence types itself out, then the mistake is marked. */
-.film-type { clip-path: inset(0 100% 0 0); animation: film-type 18s cubic-bezier(0.65, 0, 0.35, 1) infinite; animation-delay: var(--d, 0s); }
+.film-type { clip-path: inset(0 100% 0 0); animation: film-type 25.2s cubic-bezier(0.65, 0, 0.35, 1) infinite; animation-delay: var(--d, 0s); }
 @keyframes film-type {
-  0%, 2%    { clip-path: inset(0 100% 0 0); }
-  17%, 100% { clip-path: inset(0 -2% 0 0); }
+  0%, 0.5%   { clip-path: inset(0 100% 0 0); }
+  3.2%, 100% { clip-path: inset(0 -2% 0 0); }
 }
-.film-caret { opacity: 0; animation: film-caret 18s steps(1, end) infinite; animation-delay: var(--d, 0s); }
+
+/* The second line waits for the first to finish. */
+.film-type2 { clip-path: inset(0 100% 0 0); animation: film-type2 25.2s cubic-bezier(0.65, 0, 0.35, 1) infinite; animation-delay: var(--d, 0s); }
+@keyframes film-type2 {
+  0%, 3.2%   { clip-path: inset(0 100% 0 0); }
+  5.8%, 100% { clip-path: inset(0 -2% 0 0); }
+}
+
+/* ...and the third. */
+.film-type3 { clip-path: inset(0 100% 0 0); animation: film-type3 25.2s cubic-bezier(0.65, 0, 0.35, 1) infinite; animation-delay: var(--d, 0s); }
+@keyframes film-type3 {
+  0%, 5.8%   { clip-path: inset(0 100% 0 0); }
+  8.4%, 100% { clip-path: inset(0 -2% 0 0); }
+}
+.film-caret { opacity: 0; animation: film-caret 25.2s steps(1, end) infinite; animation-delay: var(--d, 0s); }
 @keyframes film-caret {
-  0%, 2%   { opacity: 0; }
-  3%       { opacity: 1; }
-  4%       { opacity: 0; }
-  5%       { opacity: 1; }
-  6%       { opacity: 0; }
-  7%       { opacity: 1; }
-  8%       { opacity: 0; }
-  9%       { opacity: 1; }
-  10%      { opacity: 0; }
-  11%      { opacity: 1; }
-  12%      { opacity: 0; }
-  13%      { opacity: 1; }
-  14%      { opacity: 0; }
-  15%      { opacity: 1; }
-  16%, 100% { opacity: 0; }
+  0%, 7.8%  { opacity: 0; }
+  8.5%      { opacity: 1; }
+  9.2%      { opacity: 0; }
+  9.9%      { opacity: 1; }
+  10.6%     { opacity: 0; }
+  11.3%     { opacity: 1; }
+  12%, 100% { opacity: 0; }
 }
-.film-mark { transform: scaleX(0); transform-origin: left; animation: film-mark 18s cubic-bezier(0.22, 1, 0.36, 1) infinite; animation-delay: var(--d, 0s); }
+.film-mark { transform: scaleX(0); transform-origin: left; animation: film-mark 25.2s cubic-bezier(0.16, 1, 0.3, 1) infinite; animation-delay: var(--d, 0s); }
 @keyframes film-mark {
-  0%, 18%   { transform: scaleX(0); }
-  23%, 100% { transform: scaleX(1); }
+  0%, 8.8%    { transform: scaleX(0); }
+  10.5%, 100% { transform: scaleX(1); }
 }
 
 /* Shots 2 and 3 — the correction lands, the chips arrive, the ring sweeps. */
-.film-strike { transform: scaleX(0); transform-origin: left; animation: film-strike 18s cubic-bezier(0.22, 1, 0.36, 1) infinite; animation-delay: var(--d, 0s); }
+.film-strike { transform: scaleX(0); transform-origin: left; animation: film-strike 25.2s cubic-bezier(0.16, 1, 0.3, 1) infinite; animation-delay: var(--d, 0s); }
 @keyframes film-strike {
-  0%, 6%    { transform: scaleX(0); }
-  13%, 100% { transform: scaleX(1); }
+  0%, 1.5%   { transform: scaleX(0); }
+  4.5%, 100% { transform: scaleX(1); }
 }
-.film-in { opacity: 0; animation: film-in 18s cubic-bezier(0.22, 1, 0.36, 1) infinite; animation-delay: var(--d, 0s); }
+.film-in { opacity: 0; animation: film-in 25.2s cubic-bezier(0.16, 1, 0.3, 1) infinite; animation-delay: var(--d, 0s); }
 @keyframes film-in {
-  0%, 10%   { opacity: 0; transform: translateY(9px) scale(0.97); }
-  19%, 100% { opacity: 1; transform: none; }
+  0%, 2%     { opacity: 0; transform: translateY(7px) scale(0.975); }
+  6.5%, 100% { opacity: 1; transform: none; }
 }
-.film-ring { animation: film-ring 18s cubic-bezier(0.22, 1, 0.36, 1) infinite; animation-delay: var(--d, 0s); }
+
+/* A bar filling. scaleX rather than width: the compositor can do one without
+   laying the row out again on every frame. */
+.film-grow { transform: scaleX(0); animation: film-grow 25.2s cubic-bezier(0.16, 1, 0.3, 1) infinite; animation-delay: var(--d, 0s); }
+@keyframes film-grow {
+  0%, 1.5%  { transform: scaleX(0); }
+  9%, 100%  { transform: scaleX(1); }
+}
+.film-ring { animation: film-ring 25.2s cubic-bezier(0.16, 1, 0.3, 1) infinite; animation-delay: var(--d, 0s); }
 @keyframes film-ring {
-  0%, 5%    { stroke-dashoffset: 289; }
-  26%, 100% { stroke-dashoffset: 130; }
+  0%, 1.5%  { stroke-dashoffset: 289; }
+  9%, 100%  { stroke-dashoffset: 130; }
 }
 
 
@@ -238,17 +287,28 @@ h1, h2, h3, h4 { @apply font-heading; }
   .film-stage,
   .film-shot,
   .film-type,
+  .film-type2,
+  .film-type3,
   .film-caret,
   .film-mark,
   .film-strike,
   .film-in,
-  .film-ring {
+  .film-grow,
+  .film-ring,
+  .film-title,
+  .film-plate,
+  .film-dot,
+  .film-mesh {
     animation: none !important;
     transform: none !important;
   }
+  .film-plate { opacity: 1 !important; }
+  .film-dot { opacity: 0.25 !important; }
   .film-shot { opacity: 0 !important; }
   .film-shot-1 { opacity: 1 !important; }
-  .film-type { clip-path: none !important; }
+  .film-type,
+  .film-type2,
+  .film-type3 { clip-path: none !important; }
   .film-caret,
   .film-sweep { display: none !important; }
   .film-ring { stroke-dashoffset: 130 !important; }
