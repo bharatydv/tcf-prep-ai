@@ -31,16 +31,53 @@ const FREE_TALK_LIMIT = 2;
    chat — otherwise the session would not deliver what the panel promises. */
 const FREE_TALK_CONSIGNE =
   "Séance d'entraînement à l'expression orale du TCF Canada, couvrant les trois tâches "
-  + "dans l'ordre. Vous êtes l'examinateur et vous ne parlez qu'en français. "
-  + "1) Tâche 1 — entretien dirigé : demandez au candidat de se présenter, puis posez des "
-  + "questions simples sur son parcours, sa vie quotidienne et ses centres d'intérêt. "
-  + "2) Tâche 2 — exercice en interaction : proposez une situation concrète de la vie "
-  + "courante (réserver, se renseigner, régler un problème) et jouez le rôle de "
-  + "l'interlocuteur pendant que le candidat mène l'échange. "
-  + "3) Tâche 3 — point de vue : posez une question d'opinion sur un sujet de société et "
-  + "demandez-lui de justifier sa position. "
-  + "Annoncez chaque tâche avant de la commencer, posez une seule question à la fois et "
-  + "rebondissez sur ses réponses pour le faire parler le plus possible.";
+  + "dans l'ordre : entretien dirigé, exercice en interaction, puis expression d'un point "
+  + "de vue.";
+
+/* The combined session is the three tâches back to back, and each one holds
+   its own clock. Run as a single ten-minute window with the three tâches named
+   only inside one long brief, the agent decided for itself how long to spend on
+   each: it filled the whole session with tâches 1 and 2, and the candidate
+   never reached tâche 3 at all. A tâche now ends when its own timer does, and
+   the agent is handed the next brief whether it was finished or not.
+
+   The three add up to the same ten minutes the session always had. */
+const FREE_TALK_SEGMENTS = [
+  {
+    taskType: 1,
+    seconds: 150,
+    consigne:
+      "Séance d'entraînement à l'expression orale du TCF Canada — Tâche 1 : entretien "
+      + "dirigé. Vous êtes l'examinateur et vous ne parlez qu'en français. Annoncez la "
+      + "tâche 1, puis demandez au candidat de se présenter et posez-lui des questions "
+      + "simples sur son parcours, sa vie quotidienne et ses centres d'intérêt. Une seule "
+      + "question à la fois, et rebondissez sur ses réponses pour le faire parler le plus "
+      + "possible.",
+  },
+  {
+    taskType: 2,
+    seconds: 240,
+    consigne:
+      "Séance d'entraînement à l'expression orale du TCF Canada — Tâche 2 : exercice en "
+      + "interaction. Vous êtes l'examinateur et vous ne parlez qu'en français. Le temps "
+      + "de la tâche 1 est écoulé : annoncez brièvement le passage à la tâche 2, proposez "
+      + "une situation concrète de la vie courante (réserver, se renseigner, régler un "
+      + "problème) et jouez le rôle de l'interlocuteur. C'est le candidat qui mène "
+      + "l'échange et qui pose les questions : répondez-lui sans jamais lui souffler ce "
+      + "qu'il pourrait demander ensuite.",
+  },
+  {
+    taskType: 3,
+    seconds: 210,
+    consigne:
+      "Séance d'entraînement à l'expression orale du TCF Canada — Tâche 3 : expression "
+      + "d'un point de vue. Vous êtes l'examinateur et vous ne parlez qu'en français. Le "
+      + "temps de la tâche 2 est écoulé : annoncez brièvement le passage à la tâche 3, "
+      + "posez une question d'opinion sur un sujet de société et demandez au candidat de "
+      + "justifier sa position. Relancez-le une question à la fois pour qu'il développe "
+      + "ses arguments.",
+  },
+];
 
 /* Tâche 1 is the entretien dirigé: there is no question bank to pick from, the
    examiner simply interviews the candidate about themselves. The AI plays that
@@ -684,6 +721,7 @@ export default function SpeakingTasks() {
         <ConversationModal
           mode="free"
           consigne={FREE_TALK_CONSIGNE}
+          segments={FREE_TALK_SEGMENTS}
           tacheTitle={t('st.freeTalkTitle')}
           onCancel={() => setFreeTalkOpen(false)}
           onGraded={onFreeTalkGraded}
