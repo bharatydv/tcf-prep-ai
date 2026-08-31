@@ -566,6 +566,7 @@
     "faq3q": "Is the exam simulator identical to the official one?",
     "faq4a": "Yes. The free trial — 3 writing and 3 speaking corrections — needs no credit card at all, and paid packs are one-time purchases for a fixed duration, so there is no recurring subscription to cancel.",
     "faq4q": "Can I cancel my free trial at any time?",
+    "filmRevision": "Wrong answers saved for revision",
     "footBlog": "Blog",
     "footCombos": "Score combinations",
     "footCompany": "Company",
@@ -663,7 +664,7 @@
     "trust2": "Scoring caps from the real barème applied in code",
     "trust3": "Instant feedback with an estimated CEFR level",
     "trust4": "Secure, private and ad-free",
-    "videoTitle": "prepfrancais — See it in action",
+    "videoTitle": "prepfrancais — writing, speaking, practice and the score",
     "weakness": "We track your weak points and turn them into a review plan built from your own mistakes.",
     "weeklyGoalText": "Improve written coherence",
     "weeklyGoals": "Weekly goals",
@@ -2179,5 +2180,23 @@
     "topicsList": "Theme topics",
     "writeFirst": "Write something first.",
     "yourQuestion": "Your question"
+  },
+  "landing": {
+    "film": {
+      "t1a": "Write what",
+      "t1b": "the exam asks.",
+      "t2a": "Corrected",
+      "t2b": "in seconds.",
+      "t3a": "Speak to an",
+      "t3b": "AI examiner.",
+      "t4a": "Test mode,",
+      "t4b": "real timings.",
+      "t5a": "40 reading.",
+      "t5b": "40 listening.",
+      "t6a": "Full mock",
+      "t6b": "exams, timed.",
+      "t7a": "Your mark,",
+      "t7b": "your CLB level."
+    }
   }
 }
