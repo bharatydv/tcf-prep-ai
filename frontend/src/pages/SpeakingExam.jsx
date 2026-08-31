@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ClockCountdown, CheckCircle, CaretRight, Microphone, Handshake,
   Scales, ArrowClockwise, Lock,
@@ -10,6 +10,8 @@ import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { BackLink } from '../components/shared';
 import ConversationModal from '../components/ConversationModal';
+import { speakingPaperMark } from '../lib/tcf';
+import { readSitting, writeSitting } from '../lib/speakingExam';
 
 /* Test Mode for Expression orale: one numbered sitting, the three tâches in the
    order the real exam gives them. Tâches 1 and 2 are live roleplays and run in
@@ -22,6 +24,7 @@ export default function SpeakingExam() {
   const t = useT();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [params, setParams] = useSearchParams();
   const setNumber = parseInt(params.get('set'), 10) || null;
 
@@ -38,6 +41,10 @@ export default function SpeakingExam() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Tâche 3 is graded on the recorder's own route, so the results survive in
+  // sessionStorage rather than in state alone; coming back finishes the paper.
+  useEffect(() => { setResults(readSitting(setNumber)); }, [setNumber]);
+
   useEffect(() => {
     if (!setNumber) { setPaper(null); return; }
     api.get(`/api/speaking/exam-sets/${setNumber}`)
@@ -49,21 +56,26 @@ export default function SpeakingExam() {
   const open = (n) => {
     if (!user) return navigate('/login');
     setParams({ set: String(n) });
-    setResults({});
   };
 
   const startTask = (n) => {
     if (!user) return navigate('/login');
     if (n === 3) {
       // The monologue recorder owns the preparation timer; send it the question.
-      navigate(`/speaking/record?tache=3&q=${encodeURIComponent(paper.task3.question)}`);
+      // `exam` tells the recorder this is a sitting, not free practice: it
+      // reports the grade back into the sitting instead of ending the paper.
+      navigate(`/speaking/record?tache=3&exam=${setNumber}`
+               + `&back=${encodeURIComponent(pathname)}`
+               + `&q=${encodeURIComponent(paper.task3.question)}`);
       return;
     }
     setLive(n);
   };
 
   const onGraded = (taskType) => (data) => {
-    setResults((r) => ({ ...r, [taskType]: data }));
+    const next = { ...results, [taskType]: data };
+    setResults(next);
+    writeSitting(setNumber, next);
     setLive(null);
   };
 
@@ -144,8 +156,10 @@ export default function SpeakingExam() {
   const unlocked = (n) => n === 1 || Boolean(results[n - 1]);
   const finished = done === 3;
   const levels = stages.map((s) => results[s.n]?.tcf_level).filter(Boolean);
-  const meanScore = finished
-    ? Math.round(stages.reduce((sum, s) => sum + (results[s.n]?.overall_score || 0), 0) / 3)
+  // Expression orale is reported the way the real paper reports it: one mark
+  // out of 20 for the skill, and the NCLC/CLB level that mark converts to.
+  const paperMark = finished
+    ? speakingPaperMark(stages.map((s) => results[s.n]))
     : null;
 
   return (
@@ -215,7 +229,18 @@ export default function SpeakingExam() {
           <div className="mt-5 overflow-hidden rounded-3xl border border-green-200 shadow-soft" data-testid="exam-summary">
             <div className="bg-gradient-to-r from-green-600 to-emerald-600 px-6 py-5 text-white">
               <p className="text-xs font-bold uppercase tracking-wide text-white/80">{t('sexam.doneTitle')}</p>
-              <p className="mt-1 font-heading text-3xl font-extrabold">{meanScore}<span className="text-xl text-white/70">/100</span></p>
+              {paperMark && (
+                <div className="mt-1 flex flex-wrap items-center gap-3">
+                  <p className="font-heading text-3xl font-extrabold" data-testid="paper-mark">
+                    {paperMark.mark}<span className="text-xl text-white/70">/20</span>
+                  </p>
+                  <span className="rounded-full bg-white/20 px-3 py-1 text-sm font-bold" data-testid="paper-clb">
+                    {paperMark.nclc
+                      ? t('sexam.clb', { level: paperMark.nclc })
+                      : t('sexam.clbBelow')}
+                  </span>
+                </div>
+              )}
               <p className="mt-1 text-sm text-white/90">{t('sexam.doneSub', { levels: levels.join(' · ') })}</p>
             </div>
             <div className="bg-white px-6 py-4">

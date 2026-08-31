@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { api } from '../lib/api';
 import { startRecording as startCapture, appendAudio, isRecordingSupported } from '../lib/recorder';
 import { SPEAKING_TASKS, fmtClock } from '../lib/tcf';
+import { saveTask } from '../lib/speakingExam';
 import { useAuth } from '../context/AuthContext';
 import { BackLink, CreditsBadge } from '../components/shared';
 import { useT } from '../i18n';
@@ -38,6 +39,14 @@ export default function SpeakingRecord() {
   const tacheNum = parseInt(searchParams.get('tache'), 10);
   const tache = TACHE_INFO[tacheNum] || null;
   const themeId = searchParams.get('theme');
+  // Set by Test Mode when tâche 3 is being taken as part of a sitting: the
+  // grade belongs to that paper, and the candidate goes back to finish it.
+  const examSet = parseInt(searchParams.get('exam'), 10) || null;
+  // Both /speaking/test and /exam-simulator render the sitting; go back to
+  // whichever one the candidate actually came from. Same-page paths only, so
+  // the parameter cannot be used to bounce anyone off the site.
+  const examBack = /^\/[\w-]+(\/[\w-]+)*$/.test(searchParams.get('back') || '')
+    ? searchParams.get('back') : '/speaking/test';
   const mode = searchParams.get('mode') === 'upload' ? 'upload' : 'record';
 
   const [question, setQuestion] = useState(
@@ -210,6 +219,7 @@ export default function SpeakingRecord() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setResult(data);
+      if (examSet && tacheNum) saveTask(examSet, tacheNum, data);
       await refreshUser();
       if (!data.transcript) toast.error(t('speak.noSpeech'));
       else toast.success(t('speak.doneToast', { level: data.tcf_level }));
@@ -334,6 +344,13 @@ export default function SpeakingRecord() {
         {/* RESULT */}
         {result && (
           <div className="mt-8 space-y-5">
+            {examSet && (
+              <button onClick={() => navigate(`${examBack}?set=${examSet}`)}
+                data-testid="back-to-sitting"
+                className="btn-primary w-full !bg-gradient-to-r !from-pink-600 !to-fuchsia-600">
+                {t('speak.backToSitting')}
+              </button>
+            )}
             <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
