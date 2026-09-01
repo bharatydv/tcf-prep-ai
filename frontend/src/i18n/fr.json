@@ -680,6 +680,8 @@
   },
   "legal": {
     "backHome": "Retour à l'accueil",
+    "operatorH": "Qui exploite ce service",
+    "operatorP": "prepfrancais est un service exploité par {{name}}. Courrier, courriel et téléphone nous parviennent ici.",
     "updated": "Dernière mise à jour : {{date}}"
   },
   "listen": {

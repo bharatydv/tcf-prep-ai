@@ -30,7 +30,45 @@ import {
    must mean the text changed, not that the page was rendered today. */
 const LAST_UPDATED = '2026-09-01';
 
-function Shell({ icon, title, intro, children }) {
+/* Who the merchant actually is.
+ *
+ * Every policy page named the brand and never the business behind it, which
+ * leaves a reader — and a payment aggregator's reviewer — with no way to tell
+ * who they would be contracting with. It sits at the foot of all four
+ * documents rather than in one of them, because whichever page a reviewer
+ * opens is the page that has to answer the question.
+ *
+ * Contact repeats none of this: there the address is the content, not the
+ * footnote. */
+function Operator() {
+  const t = useT();
+  if (!BUSINESS_NAME) return null;
+  return (
+    <section className="mt-12 rounded-2xl border border-gray-200 bg-gray-50 px-5 py-4 text-[13px] leading-relaxed text-gray-600">
+      <p className="font-heading font-bold text-gray-900">{t('legal.operatorH')}</p>
+      <p className="mt-1">{t('legal.operatorP', { name: BUSINESS_NAME })}</p>
+      {BUSINESS_ADDRESS && (
+        <address className="mt-2 whitespace-pre-line not-italic">{BUSINESS_ADDRESS}</address>
+      )}
+      <p className="mt-2">
+        <a href={`mailto:${SUPPORT_EMAIL}`} className="font-semibold text-primary hover:underline">
+          {SUPPORT_EMAIL}
+        </a>
+        {SUPPORT_PHONE && (
+          <>
+            {' · '}
+            <a href={`tel:${SUPPORT_PHONE.replace(/[^+\d]/g, '')}`}
+              className="font-semibold text-primary hover:underline">
+              {SUPPORT_PHONE}
+            </a>
+          </>
+        )}
+      </p>
+    </section>
+  );
+}
+
+function Shell({ icon, title, intro, children, operator = true }) {
   const t = useT();
   return (
     <main className="mx-auto max-w-3xl px-4 py-12 sm:px-6 sm:py-16">
@@ -43,6 +81,7 @@ function Shell({ icon, title, intro, children }) {
         {t('legal.updated', { date: LAST_UPDATED })}
       </p>
       <div className="mt-10 space-y-8">{children}</div>
+      {operator && <Operator />}
       <Link to="/" className="mt-12 inline-block text-sm font-semibold text-primary hover:underline">
         ← {t('legal.backHome')}
       </Link>
@@ -159,7 +198,7 @@ export function Contact() {
         jsonLd={contactSchema}
       />
       <Shell icon={<ChatCircleText size={26} weight="duotone" />}
-        title={t('contact.h')} intro={t('contact.intro')}>
+        title={t('contact.h')} intro={t('contact.intro')} operator={false}>
         <a href={`mailto:${SUPPORT_EMAIL}`}
           className="flex items-center gap-3 rounded-2xl border-2 border-violet-100 bg-violet-50/60 px-5 py-4 transition hover:border-primary">
           <EnvelopeSimple size={22} weight="duotone" className="shrink-0 text-primary" />
@@ -185,8 +224,8 @@ export function Contact() {
             <span>
               <span className="block text-xs font-semibold uppercase tracking-wide text-gray-500">{t('contact.addressH')}</span>
               <address className="mt-0.5 whitespace-pre-line font-heading text-[15px] font-bold not-italic leading-relaxed text-gray-900">
-                {BUSINESS_NAME ? `${BUSINESS_NAME}
-${BUSINESS_ADDRESS}` : BUSINESS_ADDRESS}
+                {BUSINESS_NAME && <span className="block">{BUSINESS_NAME}</span>}
+                {BUSINESS_ADDRESS}
               </address>
             </span>
           </div>
