@@ -15,7 +15,7 @@ import { toast } from 'sonner';
 import { api, errMsg } from '../lib/api';
 import { useT } from '../i18n';
 
-export const SUPPORT_EMAIL = 'bonjour@prepfrancais.com';
+export const SUPPORT_EMAIL = 'contact@prepfrancais.com';
 
 /* The registered address and support line, published on /contact.
  *
