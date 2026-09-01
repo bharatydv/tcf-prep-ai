@@ -59,6 +59,8 @@ const SpeakingExam = lazy(() => import("./pages/SpeakingExam"));
 const Privacy = lazy(() => import("./pages/Legal").then((m) => ({ default: m.Privacy })));
 const Terms = lazy(() => import("./pages/Legal").then((m) => ({ default: m.Terms })));
 const Contact = lazy(() => import("./pages/Legal").then((m) => ({ default: m.Contact })));
+const Refund = lazy(() => import("./pages/Legal").then((m) => ({ default: m.Refund })));
+const Shipping = lazy(() => import("./pages/Legal").then((m) => ({ default: m.Shipping })));
 const ForgotPassword = lazy(() => import("./pages/PasswordReset").then((m) => ({ default: m.ForgotPassword })));
 const ResetPassword = lazy(() => import("./pages/PasswordReset").then((m) => ({ default: m.ResetPassword })));
 const VerifyEmail = lazy(() => import("./pages/VerifyEmail"));
@@ -174,6 +176,16 @@ export default function App() {
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/contact" element={<Contact />} />
+          <Route path="/refund" element={<Refund />} />
+          <Route path="/shipping" element={<Shipping />} />
+          {/* A reviewer checking the policies types the name they know
+              rather than the one we chose, and a 404 reads as a missing
+              policy. The obvious spellings land on the real page. */}
+          <Route path="/refunds" element={<Navigate to="/refund" replace />} />
+          <Route path="/refund-policy" element={<Navigate to="/refund" replace />} />
+          <Route path="/cancellation" element={<Navigate to="/refund" replace />} />
+          <Route path="/shipping-policy" element={<Navigate to="/shipping" replace />} />
+          <Route path="/delivery" element={<Navigate to="/shipping" replace />} />
           {/* Account recovery. Without these a forgotten password meant a dead
               account holding all of the learner's practice history. */}
           <Route path="/forgot-password" element={<ForgotPassword />} />

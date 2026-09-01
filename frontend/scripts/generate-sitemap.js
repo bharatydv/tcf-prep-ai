@@ -56,6 +56,8 @@ const STATIC = [
   ['/privacy', 0.3, 'yearly'],
   ['/terms', 0.3, 'yearly'],
   ['/contact', 0.5, 'yearly'],
+  ['/refund', 0.3, 'yearly'],
+  ['/shipping', 0.3, 'yearly'],
 ];
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

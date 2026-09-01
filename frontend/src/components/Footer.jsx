@@ -17,6 +17,16 @@ import { useT } from '../i18n';
 
 export const SUPPORT_EMAIL = 'bonjour@prepfrancais.com';
 
+/* The registered address and support line, published on /contact.
+ *
+ * A payment aggregator checks these against the KYC filed with it, so they
+ * have to be the registered details rather than a friendly approximation.
+ * Both render only when set: an empty string leaves the row out entirely,
+ * which is better than shipping a placeholder address to production. */
+export const BUSINESS_NAME = 'Prep Francais';
+export const BUSINESS_ADDRESS = 'Alwar, Rajasthan, India';
+export const SUPPORT_PHONE = '+91 95095 63943';
+
 function Wordmark() {
   return (
     /* Set in Poppins rather than drawn as paths — see the header wordmark in
@@ -125,6 +135,11 @@ export default function Footer() {
             <li><Link to="/contact" className="inline-block py-1.5 transition hover:text-white">{t('land.footContact')}</Link></li>
             <li><Link to="/privacy" className="inline-block py-1.5 transition hover:text-white">{t('land.footPrivacy')}</Link></li>
             <li><Link to="/terms" className="inline-block py-1.5 transition hover:text-white">{t('land.footTerms')}</Link></li>
+            {/* A payment aggregator's site check looks for the refund and
+                delivery policies from the footer of any page, not only from
+                the one page that happens to link them. */}
+            <li><Link to="/refund" className="inline-block py-1.5 transition hover:text-white">{t('land.footRefund')}</Link></li>
+            <li><Link to="/shipping" className="inline-block py-1.5 transition hover:text-white">{t('land.footShipping')}</Link></li>
           </ul>
         </div>
       </div>
