@@ -680,6 +680,8 @@
   },
   "legal": {
     "backHome": "Back to home",
+    "operatorH": "Who operates this service",
+    "operatorP": "prepfrancais is a service operated by {{name}}. Post, email and phone all reach us here.",
     "updated": "Last updated {{date}}"
   },
   "listen": {
