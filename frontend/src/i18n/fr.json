@@ -333,14 +333,16 @@
     "soonWriting": "S'entraîner à l'écrit"
   },
   "contact": {
+    "addressH": "Adresse du siège",
     "gradingH": "Une correction qui semble fausse",
     "gradingP": "Envoyez le code de référence affiché avec l'erreur, ou la date et la tâche de la soumission. Cela suffit pour la retrouver dans les journaux.",
     "h": "Contact",
     "intro": "De vraies réponses, par une petite équipe. Choisissez la ligne qui correspond à votre besoin et nous vous répondrons.",
+    "phoneH": "Téléphone",
     "partnerH": "Écoles et partenariats",
     "partnerP": "Vous encadrez un groupe préparant le TEF ou le TCF Canada ? Indiquez-nous l'effectif et le calendrier.",
     "responseH": "Délai de réponse",
-    "responseP": "Généralement sous deux jours ouvrables. Il n'y a pas de ligne téléphonique — l'e-mail nous parvient plus vite et laisse une trace pour chacun.",
+    "responseP": "En général sous deux jours ouvrés. Le courriel nous parvient le plus vite et laisse une trace pour vous comme pour nous.",
     "supportH": "Compte et facturation",
     "supportP": "Problème de connexion, crédit dépensé pour une correction jamais reçue, ou toute question sur vos données."
   },
@@ -580,8 +582,10 @@
     "footProduct": "Produit",
     "footReading": "Compréhension écrite",
     "footRecent": "Sujets d'examen récents",
+    "footRefund": "Remboursements",
     "footResources": "Ressources",
     "footReview": "Révision des erreurs",
+    "footShipping": "Livraison",
     "footSimulator": "Simulateur d'examen",
     "footSpeaking": "Atelier d'oral",
     "footTerms": "Conditions",
@@ -852,8 +856,8 @@
     "duration2m": "2 mois",
     "duration3m": "3 mois",
     "duration5d": "5 jours",
-    "faq1a": "Le paiement en ligne n'est pas encore ouvert. Les tarifs ci-dessous sont affichés à titre indicatif et aucune formule ne peut être achetée pour le moment. En attendant, tout le monde utilise la formule gratuite.",
-    "faq1q": "Quand les formules seront-elles disponibles ?",
+    "faq1a": "Oui. Dans les 7 jours suivant le paiement, si vous n’avez utilisé aucune des corrections ni des évaluations orales par IA du forfait, nous remboursons intégralement, sans motif à fournir. La politique de remboursement et d’annulation donne le détail.",
+    "faq1q": "Puis-je être remboursé ?",
     "faq2a": "3 corrections écrites et 3 évaluations orales par l'IA, dont une peut être le jeu de rôle de la tâche 2, ainsi que la simulation complète de l'épreuve, la révision illimitée de vos propres erreurs, les examens blancs et 3 corrigés types.",
     "faq2q": "Que puis-je faire gratuitement ?",
     "faq3a": "Votre compte revient à la formule gratuite. L'essai gratuit est offert une seule fois et ne se recharge pas, mais vos données, votre historique d'erreurs et vos statistiques sont conservés.",
@@ -947,6 +951,26 @@
     "testN": "Test {{n}}",
     "testSub": "Quarante épreuves de 39 questions en conditions d'examen : 60 minutes, correction seulement après avoir rendu la copie.",
     "testTitle": "Test — Compréhension écrite"
+  },
+  "refund": {
+    "h": "Politique de remboursement et d’annulation",
+    "h1": "Ce que vous achetez",
+    "h2": "Annuler un forfait",
+    "h3": "Le remboursement sous 7 jours",
+    "h4": "Une fois le forfait utilisé",
+    "h5": "Quand la faute vient de nous",
+    "h6": "Comment l’argent revient",
+    "h7": "Devise et frais bancaires",
+    "h8": "Comment demander",
+    "intro": "prepfrancais vend l’accès à un service numérique. Cette page dit exactement quand un forfait peut être annulé, quand il peut être remboursé, comment le demander et en combien de temps l’argent revient.",
+    "p1": "Un forfait donne accès, pour la durée indiquée sur le forfait choisi, aux fonctions payantes : corrections écrites par IA, évaluations orales par IA, simulateur d’examen et packs de révision. L’accès est appliqué à votre compte dès que le paiement est confirmé. Rien de physique n’est vendu ni expédié.",
+    "p2": "Vous pouvez annuler à tout moment, sans frais d’annulation. Écrivez à {{email}} depuis l’adresse de votre compte et nous annulons le mandat, ce qui arrête tout prélèvement futur. L’annulation n’écourte pas la période déjà payée : l’accès va jusqu’à son terme, puis le compte revient au forfait gratuit. Votre compte, votre historique et vos erreurs enregistrées sont conservés.",
+    "p3": "Dans les 7 jours suivant un paiement, si aucune des corrections écrites ni des évaluations orales par IA du forfait n’a été utilisée, nous remboursons intégralement, sans avoir à fournir de motif. Demandez-le dans ce délai et nous ne discutons pas.",
+    "p4": "Dès qu’une correction ou une évaluation orale du forfait a été livrée, le forfait est considéré comme livré et n’est plus remboursable ; il en va de même une fois les 7 jours passés. Cela ne couvre pas une défaillance de notre côté — voir la clause suivante.",
+    "p5": "Si une correction échoue parce qu’un fournisseur d’IA est indisponible, la tentative est automatiquement recréditée : vous n’êtes jamais facturé pour un travail non livré. Au-delà, si un paiement a été prélevé deux fois, si l’accès n’a jamais été ouvert après un paiement réussi, ou si le service a été inutilisable pendant une partie notable de votre forfait, nous remboursons intégralement, quels que soient les 7 jours. Dites-le-nous et nous corrigeons.",
+    "p6": "Un remboursement accordé retourne sur la carte ou le compte d’origine du paiement — nous ne pouvons pas l’envoyer ailleurs. Nous le déclenchons dans les 3 jours ouvrés suivant l’accord. Votre banque prend ensuite son propre délai : généralement 5 à 7 jours ouvrés, jusqu’à 10 pour une carte internationale.",
+    "p7": "Les forfaits sont facturés dans la devise affichée sur la page des tarifs, et les frais de traitement du paiement y sont détaillés avant que vous ne payiez. Un remboursement restitue le montant que nous avons facturé. Les frais de change, de transaction transfrontalière ou d’émetteur ajoutés par votre propre banque sont prélevés par elle et non par nous : nous ne pouvons pas les restituer, et un taux de change qui a bougé entre le paiement et le remboursement peut modifier le montant qui arrive finalement sur votre compte.",
+    "p8": "Écrivez à {{email}} depuis l’adresse de votre compte, avec le numéro de facture de votre reçu ou la date et le montant du paiement. Nous répondons sous deux jours ouvrés et vous disons clairement si c’est accordé, et pourquoi."
   },
   "res": {
     "badge": "Ressources",
@@ -1061,6 +1085,10 @@
       "desc": "Épreuves de compréhension écrite du TCF Canada en mode entraînement ou examen, corrigées avec l'explication de la bonne réponse.",
       "title": "Entraînement à la compréhension écrite"
     },
+    "refund": {
+      "desc": "Quand un forfait prepfrancais peut être annulé ou remboursé, comment le demander et en combien de temps l’argent revient.",
+      "title": "Politique de remboursement et d’annulation"
+    },
     "register": {
       "desc": "Créez un compte prepfrancais gratuit et obtenez 3 corrections écrites et 3 évaluations orales par IA, sans carte bancaire.",
       "title": "Créer votre compte"
@@ -1075,6 +1103,10 @@
     },
     "review": {
       "title": "Révisez vos erreurs"
+    },
+    "shipping": {
+      "desc": "prepfrancais est un service numérique : comment l’accès est livré dans votre compte, en combien de temps, et quoi faire s’il n’apparaît pas.",
+      "title": "Politique de livraison"
     },
     "sim": {
       "title": "Simulateur d'examen écrit"
@@ -1129,6 +1161,20 @@
     "sub": "Vingt épreuves complètes. Chacune propose les trois tâches dans l'ordre de l'examen, avec les durées officielles.",
     "testMode": "Mode examen",
     "title": "Mode examen — Expression orale"
+  },
+  "shipping": {
+    "h": "Politique de livraison",
+    "h1": "Rien n’est expédié",
+    "h2": "Comment l’accès est livré",
+    "h3": "Votre reçu",
+    "h4": "Où nous livrons",
+    "h5": "Si l’accès n’apparaît pas",
+    "intro": "prepfrancais est un service numérique. Rien n’est posté, transporté ni expédié, et il n’y a aucun frais de livraison. Cette page explique comment l’accès vous parvient, et en combien de temps.",
+    "p1": "Il n’y a aucun produit physique. Nous n’envoyons ni livres, ni disques, ni documents imprimés : aucune adresse de livraison à nous fournir, aucun frais d’expédition, aucun numéro de suivi.",
+    "p2": "Tout est livré dans votre compte sur prepfrancais.com. Dès qu’un paiement est confirmé, le forfait est appliqué au compte qui a payé et les fonctions payantes s’ouvrent immédiatement — en général en une ou deux minutes, et sous 24 heures au maximum si un paiement demande une confirmation manuelle. Rien à télécharger, rien à installer : connectez-vous, c’est là.",
+    "p3": "Une facture est envoyée par courriel à l’adresse de votre compte dès que le paiement aboutit, et les mêmes reçus restent dans votre compte, sous Factures, aussi longtemps que le compte existe.",
+    "p4": "Partout. Le service fonctionne depuis n’importe où avec une connexion internet et nous n’excluons aucun pays.",
+    "p5": "Si un paiement a abouti et que les fonctions payantes restent verrouillées, déconnectez-vous puis reconnectez-vous : cela rafraîchit ce que votre navigateur sait du compte. Si c’est toujours verrouillé, écrivez à {{email}} avec la date et le montant du paiement et nous débloquons l’accès, en général le jour ouvré même. Si nous ne pouvons pas livrer, nous remboursons intégralement."
   },
   "sim": {
     "allErrors": "Toutes les erreurs par catégorie",
@@ -2092,7 +2138,7 @@
     "p2": "Le niveau CECR renvoyé est une estimation produite par un modèle de langue. Il sert à suivre vos progrès et à repérer vos faiblesses. Ce n'est pas un résultat officiel, il ne prédit pas votre note à l'examen et il ne peut être présenté nulle part comme une preuve de niveau.",
     "p3": "Un compte par personne. Gardez votre mot de passe pour vous ; vous êtes responsable de ce qui se passe sous votre compte. Prévenez-nous si vous pensez qu'une autre personne y a accès.",
     "p4": "Les comptes gratuits reçoivent un essai unique de 3 corrections écrites et 3 évaluations orales par l'IA, dont une peut être le jeu de rôle de la tâche 2, ainsi qu'une petite réserve mensuelle pour la conversation libre. Si une correction échoue parce que le fournisseur d'IA est indisponible, la tentative est restituée automatiquement — vous n'êtes jamais débité pour un travail non livré.",
-    "p5": "Aucun paiement n'est encore traité. Rien sur la page des tarifs ne peut être acheté et aucune donnée bancaire n'est collectée sur le site. À l'ouverture des formules payantes, ces conditions seront mises à jour au préalable.",
+    "p5": "prepfrancais vend des forfaits d’accès à durée limitée aux fonctions payantes. Le prix, la durée du forfait et les frais de traitement du paiement sont affichés sur la page des tarifs avant tout paiement, et le paiement lui-même est encaissé par notre prestataire : les données de carte n’atteignent jamais nos serveurs. Un forfait se renouvelle jusqu’à son annulation, et vous pouvez annuler à tout moment sans frais. Ce qui peut être remboursé, et dans quel délai, figure dans la politique de remboursement et d’annulation ; la façon dont l’accès vous parvient figure dans la politique de livraison.",
     "p6": "Ce que vous écrivez reste à vous. Vous nous accordez uniquement l'autorisation nécessaire pour le faire corriger et vous en montrer le résultat. Nous ne le publions pas et ne l'utilisons pas pour entraîner des modèles.",
     "p7": "N'aspirez pas le matériel d'examen, ne revendez pas l'accès et n'automatisez pas les soumissions. Des limites de débit s'appliquent et les comptes qui en abusent peuvent être suspendus.",
     "p8": "Le service est fourni en l'état. Nous mettons tout en œuvre pour que la correction reste juste et disponible, mais nous ne pouvons être tenus responsables des résultats d'examen, des sessions manquées ou des décisions prises sur la base d'une note d'entraînement.",

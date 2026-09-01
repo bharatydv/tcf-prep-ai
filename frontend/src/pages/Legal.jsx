@@ -1,24 +1,34 @@
-/* Privacy, Terms and Contact.
+/* Privacy, Terms, Refunds, Delivery and Contact.
  *
  * None of these existed as a route. A paid product needs them before a payment
  * processor will onboard it, search engines weigh them for anything
  * commercial, and a service that stores learner writing and voice recordings
  * owes its users a plain statement under Quebec's Law 25 and PIPEDA.
  *
- * All three share one layout so they read as one document set. Copy lives in
+ * The refund and delivery pages were added when Cashfree's site check bounced
+ * the account for them. Nothing is shipped here, but a delivery policy is
+ * still required of a digital merchant, so it says how access reaches the
+ * account instead of how a parcel reaches a door.
+ *
+ * They all share one layout so they read as one document set. Copy lives in
  * the dictionaries, so the French version is a translation rather than a
  * separate legal text that can drift from it.
  */
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { EnvelopeSimple, ShieldCheck, Scales, ChatCircleText } from '@phosphor-icons/react';
+import {
+  EnvelopeSimple, ShieldCheck, Scales, ChatCircleText, Phone, MapPin,
+  ArrowUUpLeft, Package,
+} from '@phosphor-icons/react';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
-import { SUPPORT_EMAIL } from '../components/Footer';
+import {
+  SUPPORT_EMAIL, SUPPORT_PHONE, BUSINESS_NAME, BUSINESS_ADDRESS,
+} from '../components/Footer';
 
 /* The date the wording last changed. Hardcoded on purpose: "last updated"
    must mean the text changed, not that the page was rendered today. */
-const LAST_UPDATED = '2026-08-18';
+const LAST_UPDATED = '2026-09-01';
 
 function Shell({ icon, title, intro, children }) {
   const t = useT();
@@ -81,6 +91,37 @@ export function Terms() {
   );
 }
 
+export function Refund() {
+  const t = useT();
+  return (
+    <>
+      <Seo titleKey="seo.refund.title" descKey="seo.refund.desc" path="/refund" />
+      <Shell icon={<ArrowUUpLeft size={26} weight="duotone" />}
+        title={t('refund.h')} intro={t('refund.intro')}>
+        {[1, 2, 3, 4, 5, 6, 7].map((n) => (
+          <Clause key={n} heading={t(`refund.h${n}`)} body={t(`refund.p${n}`, { email: SUPPORT_EMAIL })} />
+        ))}
+        <Clause heading={t('refund.h8')} body={t('refund.p8', { email: SUPPORT_EMAIL })} />
+      </Shell>
+    </>
+  );
+}
+
+export function Shipping() {
+  const t = useT();
+  return (
+    <>
+      <Seo titleKey="seo.shipping.title" descKey="seo.shipping.desc" path="/shipping" />
+      <Shell icon={<Package size={26} weight="duotone" />}
+        title={t('shipping.h')} intro={t('shipping.intro')}>
+        {[1, 2, 3, 4, 5].map((n) => (
+          <Clause key={n} heading={t(`shipping.h${n}`)} body={t(`shipping.p${n}`, { email: SUPPORT_EMAIL })} />
+        ))}
+      </Shell>
+    </>
+  );
+}
+
 export function Contact() {
   const t = useT();
   const rows = [
@@ -96,12 +137,15 @@ export function Contact() {
     name: t('contact.h'),
     mainEntity: {
       '@type': 'Organization',
-      name: 'prepfrancais',
+      name: BUSINESS_NAME || 'prepfrancais',
       email: SUPPORT_EMAIL,
+      ...(SUPPORT_PHONE ? { telephone: SUPPORT_PHONE } : {}),
+      ...(BUSINESS_ADDRESS ? { address: { '@type': 'PostalAddress', streetAddress: BUSINESS_ADDRESS } } : {}),
       contactPoint: {
         '@type': 'ContactPoint',
         contactType: 'customer support',
         email: SUPPORT_EMAIL,
+        ...(SUPPORT_PHONE ? { telephone: SUPPORT_PHONE } : {}),
         availableLanguage: ['French', 'English'],
       },
     },
@@ -121,6 +165,32 @@ export function Contact() {
           <EnvelopeSimple size={22} weight="duotone" className="shrink-0 text-primary" />
           <span className="font-heading text-lg font-bold text-gray-900 break-all">{SUPPORT_EMAIL}</span>
         </a>
+        {/* A payment aggregator's site check wants a reachable phone number
+            and the registered address on this page, both matching the KYC on
+            file. Each row is skipped while its constant is empty rather than
+            rendering an empty label. */}
+        {SUPPORT_PHONE && (
+          <a href={`tel:${SUPPORT_PHONE.replace(/[^+\d]/g, '')}`}
+            className="flex items-center gap-3 rounded-2xl border-2 border-violet-100 bg-violet-50/60 px-5 py-4 transition hover:border-primary">
+            <Phone size={22} weight="duotone" className="shrink-0 text-primary" />
+            <span>
+              <span className="block text-xs font-semibold uppercase tracking-wide text-gray-500">{t('contact.phoneH')}</span>
+              <span className="font-heading text-lg font-bold text-gray-900">{SUPPORT_PHONE}</span>
+            </span>
+          </a>
+        )}
+        {BUSINESS_ADDRESS && (
+          <div className="flex items-start gap-3 rounded-2xl border-2 border-violet-100 bg-violet-50/60 px-5 py-4">
+            <MapPin size={22} weight="duotone" className="mt-0.5 shrink-0 text-primary" />
+            <span>
+              <span className="block text-xs font-semibold uppercase tracking-wide text-gray-500">{t('contact.addressH')}</span>
+              <address className="mt-0.5 whitespace-pre-line font-heading text-[15px] font-bold not-italic leading-relaxed text-gray-900">
+                {BUSINESS_NAME ? `${BUSINESS_NAME}
+${BUSINESS_ADDRESS}` : BUSINESS_ADDRESS}
+              </address>
+            </span>
+          </div>
+        )}
         {rows.map(([h, p]) => <Clause key={h} heading={t(h)} body={t(p)} />)}
         <Clause heading={t('contact.responseH')} body={t('contact.responseP')} />
       </Shell>

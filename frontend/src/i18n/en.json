@@ -333,14 +333,16 @@
     "soonWriting": "Practise writing"
   },
   "contact": {
+    "addressH": "Registered address",
     "gradingH": "A correction that looks wrong",
     "gradingP": "Send the reference code shown with the error, or the date and task of the submission. That is enough to find it in the logs.",
     "h": "Contact",
     "intro": "Real replies from a small team. Pick the line that matches what you need and we will get back to you.",
+    "phoneH": "Phone",
     "partnerH": "Schools and partnerships",
     "partnerP": "Teaching a group preparing for the TEF or TCF Canada? Tell us the size and timeline.",
     "responseH": "Response time",
-    "responseP": "Usually within two business days. There is no phone line — email reaches us faster and leaves a record for both of us.",
+    "responseP": "Usually within two business days. Email reaches us fastest and leaves a record for both of us.",
     "supportH": "Account and billing",
     "supportP": "Trouble signing in, a credit that was spent on a correction you never received, or anything about your data."
   },
@@ -580,8 +582,10 @@
     "footProduct": "Product",
     "footReading": "Reading practice",
     "footRecent": "Recent exam topics",
+    "footRefund": "Refunds & cancellation",
     "footResources": "Resources",
     "footReview": "Mistake review",
+    "footShipping": "Shipping & delivery",
     "footSimulator": "Exam simulator",
     "footSpeaking": "Speaking Lab",
     "footTerms": "Terms",
@@ -852,8 +856,8 @@
     "duration2m": "2 months",
     "duration3m": "3 months",
     "duration5d": "5 days",
-    "faq1a": "Online payment is not open yet. The prices below are indicative and no plan can be purchased for now. In the meantime everyone uses the free plan.",
-    "faq1q": "When will the plans be available?",
+    "faq1a": "Yes. Within 7 days of paying, if you have not used any of the AI corrections or speaking evaluations the plan gave you, we refund it in full — no reason needed. The refund and cancellation policy has the rest of the detail.",
+    "faq1q": "Can I get a refund?",
     "faq2a": "3 AI writing corrections and 3 speaking evaluations, one of which can be the tâche 2 roleplay, plus the full exam simulation, unlimited review of your own mistakes, mock exams, and 3 model answers.",
     "faq2q": "What can I do for free?",
     "faq3a": "Your account returns to the free plan. The free trial is granted once and does not refill, but your data, mistake history and statistics are kept.",
@@ -947,6 +951,26 @@
     "testN": "Test {{n}}",
     "testSub": "Forty papers of 39 questions under exam conditions: 60 minutes, no feedback until you hand in.",
     "testTitle": "Reading test"
+  },
+  "refund": {
+    "h": "Refund and cancellation policy",
+    "h1": "What you are buying",
+    "h2": "Cancelling a plan",
+    "h3": "The 7-day refund",
+    "h4": "Once the plan has been used",
+    "h5": "When something went wrong on our side",
+    "h6": "How the money comes back",
+    "h7": "Currency and bank charges",
+    "h8": "How to ask",
+    "intro": "prepfrancais sells access to a digital service. This page says exactly when a plan can be cancelled, when it can be refunded, how to ask, and how long the money takes to come back.",
+    "p1": "A plan is timed access to the paid features — AI writing corrections, AI speaking evaluations, the exam simulator and the study packs — for the length printed on the plan you chose. Access is applied to your account as soon as the payment is confirmed. Nothing physical is sold and nothing is shipped.",
+    "p2": "You can cancel at any time and there is no cancellation fee. Write to {{email}} from the address on your account and we cancel the mandate, which stops every future charge. Cancelling does not cut short what you have already paid for: access runs to the end of the period and then returns to the free plan. Your account, your history and your saved mistakes are kept.",
+    "p3": "Within 7 days of a payment, if none of the AI corrections or speaking evaluations that plan gave you have been used, we refund it in full and you do not have to give a reason. Ask inside those 7 days and we will not argue about it.",
+    "p4": "Once an AI correction or a speaking evaluation from the plan has been delivered, the plan counts as delivered and is no longer refundable, and the same applies once the 7 days have passed. This does not cover a failure on our side — that is the next clause.",
+    "p5": "If a correction fails because an AI provider was unavailable, the attempt returns to your balance automatically: you are never charged for work that was not delivered. Beyond that, if a payment was taken twice, if access was never unlocked after a successful payment, or if the service was unusable for a meaningful part of your plan, we refund in full whatever the 7 days say. Tell us and we will put it right.",
+    "p6": "An approved refund goes back to the card or account the payment came from — we cannot send it anywhere else. We instruct it within 3 business days of approving it. Your bank then takes its own time: usually 5 to 7 business days, and up to 10 for an international card.",
+    "p7": "Plans are charged in the currency shown on the pricing page, with the payment processing fee itemised there before you pay. A refund returns the amount we charged. Any cross-border, foreign-exchange or issuer fee your own bank added is charged by your bank and not by us, so we cannot return it, and an exchange rate that has moved between the payment and the refund can change what finally lands in your account.",
+    "p8": "Email {{email}} from the address on your account, with the invoice number from your receipt or the date and amount of the payment. We reply within two business days and tell you plainly whether it is approved, and why."
   },
   "res": {
     "badge": "Resources",
@@ -1061,6 +1085,10 @@
       "desc": "TCF Canada compréhension écrite papers in practice and test mode, marked with the correct answer explained.",
       "title": "Reading comprehension practice"
     },
+    "refund": {
+      "desc": "When a prepfrancais plan can be cancelled or refunded, how to ask, and how long the money takes to come back.",
+      "title": "Refund and cancellation policy"
+    },
     "register": {
       "desc": "Create a free prepfrancais account and get 3 writing and 3 speaking AI corrections, with no card required.",
       "title": "Create your account"
@@ -1075,6 +1103,10 @@
     },
     "review": {
       "title": "Review your mistakes"
+    },
+    "shipping": {
+      "desc": "prepfrancais is a digital service: how access is delivered to your account, how fast, and what to do if it does not appear.",
+      "title": "Shipping and delivery policy"
     },
     "sim": {
       "title": "Writing exam simulator"
@@ -1129,6 +1161,20 @@
     "sub": "Twenty complete sittings. Each gives you the three tâches in exam order, with the official timings.",
     "testMode": "Test Mode",
     "title": "Speaking Test Mode"
+  },
+  "shipping": {
+    "h": "Shipping and delivery policy",
+    "h1": "Nothing is shipped",
+    "h2": "How access is delivered",
+    "h3": "Your receipt",
+    "h4": "Where we deliver",
+    "h5": "If access does not appear",
+    "intro": "prepfrancais is a digital service. Nothing is posted, couriered or shipped, and there is no delivery charge. This page explains how access reaches you instead, and how quickly.",
+    "p1": "There is no physical product. We do not post books, discs or printed material, so there is no shipping address to give us, no delivery fee, and no tracking number.",
+    "p2": "Everything is delivered inside your account at prepfrancais.com. When a payment is confirmed, the plan is applied to the account that paid and the paid features unlock immediately — normally within a minute or two, and within 24 hours at the outside if a payment needs manual confirmation. There is nothing to download and nothing to install: sign in and it is there.",
+    "p3": "An invoice is emailed to the address on your account as soon as the payment lands, and the same receipts stay in your account under Invoices for as long as the account exists.",
+    "p4": "Everywhere. The service works from anywhere with an internet connection and there is no country we exclude.",
+    "p5": "If a payment succeeded and the paid features are still locked, sign out and back in first — that refreshes what your browser knows about the account. If it is still locked, email {{email}} with the date and amount of the payment and we will unlock it, usually the same business day. If we cannot deliver it at all, we refund it in full."
   },
   "sim": {
     "allErrors": "All errors by category",
@@ -2092,7 +2138,7 @@
     "p2": "The CEFR level we return is an estimate produced by a language model. It is useful for tracking progress and finding weaknesses. It is not an official result, it does not predict your exam score, and it cannot be submitted anywhere as proof of proficiency.",
     "p3": "One account per person. Keep your password to yourself; you are responsible for what happens under your account. Tell us if you think someone else has access.",
     "p4": "Free accounts get a one-time trial of 3 AI writing corrections and 3 speaking evaluations, of which one may be the tâche 2 roleplay, plus a small monthly allowance for open-ended conversation practice. If a correction fails because the AI provider is unavailable, the attempt is returned automatically — you are never charged for work that was not delivered.",
-    "p5": "There is no payment processing yet. Nothing on the pricing page can be bought, and no card details are collected anywhere on the site. When paid plans open, these terms will be updated first.",
+    "p5": "prepfrancais sells timed access plans to the paid features. The price, the plan length and the payment processing fee are all shown on the pricing page before you pay, and the payment itself is taken by our payment provider — card details never reach our servers. A plan renews until you cancel it, and you can cancel at any time at no charge. What can be refunded, and how long it takes, is set out in the refund and cancellation policy; how access reaches you is set out in the delivery policy.",
     "p6": "What you write stays yours. You grant us only the permission needed to run it through grading and show you the result. We do not publish it, and we do not use it to train models.",
     "p7": "Do not scrape the exam material, resell access, or automate submissions. Rate limits apply and accounts that abuse them can be suspended.",
     "p8": "The service is provided as is. We work hard to keep grading accurate and available, but we cannot be liable for exam outcomes, missed sittings, or decisions taken on the basis of a practice score.",
