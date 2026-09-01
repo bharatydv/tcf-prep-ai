@@ -24,7 +24,9 @@ export const SUPPORT_EMAIL = 'bonjour@prepfrancais.com';
  * Both render only when set: an empty string leaves the row out entirely,
  * which is better than shipping a placeholder address to production. */
 export const BUSINESS_NAME = 'Prep Francais';
-export const BUSINESS_ADDRESS = 'Alwar, Rajasthan, India';
+export const BUSINESS_ADDRESS = `A25 Jahwar Nagar Mugashka
+Alwar, Rajasthan 301001
+India`;
 export const SUPPORT_PHONE = '+91 95095 63943';
 
 function Wordmark() {

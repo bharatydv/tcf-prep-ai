@@ -185,8 +185,8 @@ export function Contact() {
             <span>
               <span className="block text-xs font-semibold uppercase tracking-wide text-gray-500">{t('contact.addressH')}</span>
               <address className="mt-0.5 whitespace-pre-line font-heading text-[15px] font-bold not-italic leading-relaxed text-gray-900">
-                {BUSINESS_NAME ? `${BUSINESS_NAME}
-${BUSINESS_ADDRESS}` : BUSINESS_ADDRESS}
+                {BUSINESS_NAME && <span className="block">{BUSINESS_NAME}</span>}
+                {BUSINESS_ADDRESS}
               </address>
             </span>
           </div>
