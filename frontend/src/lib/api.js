@@ -3,7 +3,25 @@ import axios from "axios";
 
 // In production (GCP + Nginx), we use relative paths.
 // This tells the browser to append the endpoint to the current domain: https://prepfrancais.com/api/...
-const baseURL = "/api"; 
+//
+// Except while prerendering. react-snap serves the freshly built bundle from
+// its own localhost server and drives it with a headless browser, and there is
+// no backend behind that server — so every page whose content arrives over the
+// API rendered empty and was snapshotted empty. That is why /blog said "No
+// articles yet" with a post sitting in the database, why no post page was ever
+// discovered and prerendered, and why /recent-topics shipped a body with
+// nothing in it.
+//
+// Pointing the bundle at the deployed API during that pass does not work: the
+// API answers with `access-control-allow-origin` set to the site itself, so
+// every response is blocked by CORS on react-snap's localhost origin. Instead
+// scripts/prerender-snapshot.js writes the public endpoints to static files
+// under /prerender before the build, and requests are rewritten to those —
+// same origin, no network. react-snap identifies itself with this exact user
+// agent, so a real browser never takes this path.
+const isPrerender = typeof navigator !== "undefined"
+  && navigator.userAgent === "ReactSnap";
+const baseURL = "/api";
 
 export const api = axios.create({ 
   baseURL, 
@@ -16,6 +34,14 @@ export const api = axios.create({
 api.interceptors.request.use((config) => {
   if (config.url && config.url.startsWith('/api/')) {
     config.url = config.url.slice(4); // remove the leading '/api'
+  }
+  // Prerender only: /api/blog/some-slug becomes /prerender/blog/some-slug.json.
+  // An endpoint with no snapshot 404s and the component shows the same empty
+  // state it shows today, so a gap here degrades no further than the old
+  // behaviour did.
+  if (isPrerender && config.url) {
+    config.baseURL = '/prerender';
+    config.url = `${config.url.split('?')[0]}.json`;
   }
   return config;
 });

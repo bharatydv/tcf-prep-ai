@@ -50,6 +50,22 @@ RUN npm i -g npm@11.6.2 \
 
 COPY . .
 
+# Where the build reads published content from.
+#
+# Two steps need it and neither can reach the backend from inside this stage:
+# generate-sitemap.js, which lists blog slugs, and prerender-snapshot.js, which
+# freezes the public endpoints so react-snap has something to render. Left
+# unset, both skip silently — the sitemap carries no post URLs and every
+# API-backed page prerenders empty, which is the state this replaces.
+#
+# It points at the DEPLOYED site, not at the `backend` service: this stage has
+# no compose network, and a build that reads what is currently live is exactly
+# what a prerender wants. The first deploy of a new host therefore has nothing
+# to read, prerenders those pages empty, and is correct from the second build
+# onwards. Never fatal — see both scripts.
+ARG SITEMAP_API=https://prepfrancais.com
+ENV SITEMAP_API=$SITEMAP_API
+
 # Prerendering, with a fallback to the plain build.
 #
 # Without this the image shipped an empty shell that only fills in once

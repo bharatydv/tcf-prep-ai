@@ -91,7 +91,13 @@ services:
       start_period: 40s
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        # Read by generate-sitemap.js and prerender-snapshot.js at build time.
+        # Override on a staging host so its build does not prerender production
+        # content: SITEMAP_API=https://staging.example.com docker compose build
+        SITEMAP_API: ${SITEMAP_API:-https://prepfrancais.com}
     container_name: tcf_frontend
     restart: always
     logging: *logging
