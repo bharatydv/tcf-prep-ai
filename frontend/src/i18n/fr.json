@@ -1064,6 +1064,10 @@
       "desc": "Entraînement à la compréhension orale du TCF Canada, corrigé côté serveur et enregistré dans votre historique.",
       "title": "Entraînement à la compréhension orale"
     },
+    "listeningPractice": {
+      "desc": "Les 40 épreuves de compréhension orale du TCF Canada, à faire en entraînement libre ou en test chronométré, corrigées sur le serveur et conservées dans votre historique.",
+      "title": "Les 40 épreuves de compréhension orale"
+    },
     "login": {
       "desc": "Connectez-vous à prepfrancais pour poursuivre votre préparation au TEF/TCF Canada.",
       "title": "Connexion"
@@ -1086,6 +1090,10 @@
     "reading": {
       "desc": "Épreuves de compréhension écrite du TCF Canada en mode entraînement ou examen, corrigées avec l'explication de la bonne réponse.",
       "title": "Entraînement à la compréhension écrite"
+    },
+    "readingPractice": {
+      "desc": "Les 40 épreuves de compréhension écrite du TCF Canada, à faire en entraînement libre ou en test chronométré, chaque réponse expliquée.",
+      "title": "Les 40 épreuves de compréhension écrite"
     },
     "refund": {
       "desc": "Quand un forfait prepfrancais peut être annulé ou remboursé, comment le demander et en combien de temps l’argent revient.",

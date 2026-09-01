@@ -46,7 +46,7 @@ export default function ReadingTests() {
 
   return (
     <main className="overflow-x-clip bg-white">
-      <Seo titleKey="seo.reading.title" descKey="seo.reading.desc" path="/reading/practice" />
+      <Seo titleKey="seo.readingPractice.title" descKey="seo.readingPractice.desc" path="/reading/practice" />
       <section className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
         <BackLink to="/reading" className="!mb-6" testid="back-to-reading" />
 

@@ -13,6 +13,7 @@ import { useAuth } from '../context/AuthContext';
 import { BackLink } from '../components/shared';
 import ConversationModal from '../components/ConversationModal';
 import { useT } from '../i18n';
+import { useSeo } from '../lib/seo';
 
 /* Module-level, so the copy is held as translation keys and resolved with t()
    at render time rather than baked in at import time. */
@@ -638,6 +639,12 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
 
 export default function SpeakingTasks() {
   const t = useT();
+  /* This was the one public page with no SEO of any kind. It prerendered 35KB
+     of real content and then served the shell's own title and a canonical
+     pointing at "/", which tells a crawler the page is the home page and gets
+     it dropped rather than indexed. */
+  useSeo({ titleKey: 'seo.speakTasks.title', descKey: 'seo.speakTasks.desc',
+           path: '/speaking/tasks' });
   const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
 

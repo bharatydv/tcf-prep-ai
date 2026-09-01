@@ -47,7 +47,7 @@ export default function ListeningTests() {
 
   return (
     <main className="overflow-x-clip bg-white">
-      <Seo titleKey="seo.listening.title" descKey="seo.listening.desc" path="/listening/practice" />
+      <Seo titleKey="seo.listeningPractice.title" descKey="seo.listeningPractice.desc" path="/listening/practice" />
       <section className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
         <BackLink to="/listening" className="!mb-6" testid="back-to-listening" />
 

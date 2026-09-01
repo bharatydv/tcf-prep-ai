@@ -1064,6 +1064,10 @@
       "desc": "TCF Canada compréhension orale practice, graded on the server and recorded in your history.",
       "title": "Listening comprehension practice"
     },
+    "listeningPractice": {
+      "desc": "All 40 TCF Canada compréhension orale papers, each sittable as untimed practice or as a timed test, marked on the server and kept in your history.",
+      "title": "The 40 listening papers"
+    },
     "login": {
       "desc": "Log in to prepfrancais to continue your TEF/TCF Canada preparation.",
       "title": "Log in"
@@ -1086,6 +1090,10 @@
     "reading": {
       "desc": "TCF Canada compréhension écrite papers in practice and test mode, marked with the correct answer explained.",
       "title": "Reading comprehension practice"
+    },
+    "readingPractice": {
+      "desc": "All 40 TCF Canada compréhension écrite papers, each sittable as untimed practice or as a timed test, with every answer explained.",
+      "title": "The 40 reading papers"
     },
     "refund": {
       "desc": "When a prepfrancais plan can be cancelled or refunded, how to ask, and how long the money takes to come back.",
