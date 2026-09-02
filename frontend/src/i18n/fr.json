@@ -338,9 +338,10 @@
     "gradingP": "Envoyez le code de référence affiché avec l'erreur, ou la date et la tâche de la soumission. Cela suffit pour la retrouver dans les journaux.",
     "h": "Contact",
     "intro": "De vraies réponses, par une petite équipe. Choisissez la ligne qui correspond à votre besoin et nous vous répondrons.",
-    "phoneH": "Téléphone",
     "partnerH": "Écoles et partenariats",
     "partnerP": "Vous encadrez un groupe préparant le TEF ou le TCF Canada ? Indiquez-nous l'effectif et le calendrier.",
+    "phoneH": "Téléphone",
+    "proprietor": "Propriétaire : {{legal}}",
     "responseH": "Délai de réponse",
     "responseP": "En général sous deux jours ouvrés. Le courriel nous parvient le plus vite et laisse une trace pour vous comme pour nous.",
     "supportH": "Compte et facturation",
@@ -636,6 +637,7 @@
     "noCardSuffix": "— sans carte bancaire.",
     "offers": "Nos formules",
     "offersSub": "Des formules simples. Une préparation sérieuse.",
+    "operator": "{{name}} est exploité par {{legal}}.",
     "orFree": "commencez avec 6 corrections gratuites",
     "orPrefix": "Ou",
     "planBlurb": "Un plan de révision bâti sur vos erreurs enregistrées.",
@@ -682,6 +684,7 @@
     "backHome": "Retour à l'accueil",
     "operatorH": "Qui exploite ce service",
     "operatorP": "prepfrancais est un service exploité par {{name}}. Courrier, courriel et téléphone nous parviennent ici.",
+    "proprietorP": "{{name}} est le nom commercial de {{legal}}, qui est la partie avec laquelle vous contractez lorsque vous achetez un forfait.",
     "updated": "Dernière mise à jour : {{date}}"
   },
   "listen": {
