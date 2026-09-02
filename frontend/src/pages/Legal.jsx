@@ -23,7 +23,7 @@ import {
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
 import {
-  SUPPORT_EMAIL, SUPPORT_PHONE, BUSINESS_NAME, BUSINESS_ADDRESS,
+  SUPPORT_EMAIL, SUPPORT_PHONE, BUSINESS_NAME, BUSINESS_LEGAL_NAME, BUSINESS_ADDRESS,
 } from '../components/Footer';
 
 /* The date the wording last changed. Hardcoded on purpose: "last updated"
@@ -47,6 +47,12 @@ function Operator() {
     <section className="mt-12 rounded-2xl border border-gray-200 bg-gray-50 px-5 py-4 text-[13px] leading-relaxed text-gray-600">
       <p className="font-heading font-bold text-gray-900">{t('legal.operatorH')}</p>
       <p className="mt-1">{t('legal.operatorP', { name: BUSINESS_NAME })}</p>
+      {/* The trading name is not the name on the KYC. Naming the proprietor
+          is what lets a reader — or a reviewer — tell who the counterparty
+          to the contract actually is. */}
+      {BUSINESS_LEGAL_NAME && (
+        <p className="mt-1">{t('legal.proprietorP', { name: BUSINESS_NAME, legal: BUSINESS_LEGAL_NAME })}</p>
+      )}
       {BUSINESS_ADDRESS && (
         <address className="mt-2 whitespace-pre-line not-italic">{BUSINESS_ADDRESS}</address>
       )}
@@ -177,6 +183,7 @@ export function Contact() {
     mainEntity: {
       '@type': 'Organization',
       name: BUSINESS_NAME || 'prepfrancais',
+      ...(BUSINESS_LEGAL_NAME ? { legalName: BUSINESS_LEGAL_NAME } : {}),
       email: SUPPORT_EMAIL,
       ...(SUPPORT_PHONE ? { telephone: SUPPORT_PHONE } : {}),
       ...(BUSINESS_ADDRESS ? { address: { '@type': 'PostalAddress', streetAddress: BUSINESS_ADDRESS } } : {}),
@@ -225,6 +232,11 @@ export function Contact() {
               <span className="block text-xs font-semibold uppercase tracking-wide text-gray-500">{t('contact.addressH')}</span>
               <address className="mt-0.5 whitespace-pre-line font-heading text-[15px] font-bold not-italic leading-relaxed text-gray-900">
                 {BUSINESS_NAME && <span className="block">{BUSINESS_NAME}</span>}
+                {BUSINESS_LEGAL_NAME && (
+                  <span className="block font-sans text-[13px] font-semibold text-gray-600">
+                    {t('contact.proprietor', { legal: BUSINESS_LEGAL_NAME })}
+                  </span>
+                )}
                 {BUSINESS_ADDRESS}
               </address>
             </span>

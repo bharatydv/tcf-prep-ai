@@ -338,9 +338,10 @@
     "gradingP": "Send the reference code shown with the error, or the date and task of the submission. That is enough to find it in the logs.",
     "h": "Contact",
     "intro": "Real replies from a small team. Pick the line that matches what you need and we will get back to you.",
-    "phoneH": "Phone",
     "partnerH": "Schools and partnerships",
     "partnerP": "Teaching a group preparing for the TEF or TCF Canada? Tell us the size and timeline.",
+    "phoneH": "Phone",
+    "proprietor": "Owner: {{legal}}",
     "responseH": "Response time",
     "responseP": "Usually within two business days. Email reaches us fastest and leaves a record for both of us.",
     "supportH": "Account and billing",
@@ -636,6 +637,7 @@
     "noCardSuffix": "— no credit card required.",
     "offers": "Our plans",
     "offersSub": "Simple plans. Serious preparation.",
+    "operator": "{{name}} is operated by {{legal}}.",
     "orFree": "start with 6 free corrections",
     "orPrefix": "Or",
     "planBlurb": "A study plan built from your own recorded mistakes.",
@@ -682,6 +684,7 @@
     "backHome": "Back to home",
     "operatorH": "Who operates this service",
     "operatorP": "prepfrancais is a service operated by {{name}}. Post, email and phone all reach us here.",
+    "proprietorP": "{{name}} is the trading name of {{legal}}, who is the party you contract with when you buy a plan.",
     "updated": "Last updated {{date}}"
   },
   "listen": {

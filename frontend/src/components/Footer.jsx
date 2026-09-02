@@ -24,10 +24,29 @@ export const SUPPORT_EMAIL = 'contact@prepfrancais.com';
  * Both render only when set: an empty string leaves the row out entirely,
  * which is better than shipping a placeholder address to production. */
 export const BUSINESS_NAME = 'Prep Francais';
+
+/* The person the KYC is filed under, as distinct from the trading name.
+ *
+ * "Prep Francais" is the name the business trades under; this is the name it
+ * is registered under. The copy states that relationship and nothing more —
+ * it does not name a registration status, because the site is not the place
+ * to assert one.
+ *
+ * Cashfree's reviewer matches the website against the identity on the KYC
+ * form, and that form names an individual, not "Prep Francais" — so a site
+ * showing only the trading name reads to it as a site that never names its
+ * merchant, whatever else the policy pages say. It is published on every
+ * page rather than only in the policies, because the check starts at the
+ * home page. */
+export const BUSINESS_LEGAL_NAME = 'Bharat Yadav';
 export const BUSINESS_ADDRESS = `A25 Jahwar Nagar Mugashka
 Alwar, Rajasthan 301001
 India`;
-export const SUPPORT_PHONE = '+91 95095 63943';
+/* Digit for digit the number on the KYC form. It was published as
+   ...63943 — two digits transposed, so the site advertised a support line
+   that was not the merchant's, and the reviewer comparing it to the KYC
+   found no match. */
+export const SUPPORT_PHONE = '+91 95095 63643';
 
 function Wordmark() {
   return (
@@ -147,6 +166,11 @@ export default function Footer() {
       </div>
       <div className="border-t border-white/10 py-5 text-center text-[11px] text-violet-300/75">
         {t('land.copyright', { year: new Date().getFullYear() })}
+        {BUSINESS_LEGAL_NAME && (
+          <span className="mt-1 block">
+            {t('land.operator', { name: BUSINESS_NAME, legal: BUSINESS_LEGAL_NAME })}
+          </span>
+        )}
       </div>
     </footer>
   );
