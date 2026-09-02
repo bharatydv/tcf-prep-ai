@@ -90,6 +90,9 @@ export function useSeo({
     setMeta('property', 'og:image', img);
     setMeta('property', 'og:type', type);
     setMeta('property', 'og:locale', lang === 'fr' ? 'fr_CA' : 'en_CA');
+    /* The shell ships a static alternate, so whichever locale rendered, the
+       page claimed en_CA as both its locale and its only other one. */
+    setMeta('property', 'og:locale:alternate', lang === 'fr' ? 'en_CA' : 'fr_CA');
     setMeta('name', 'twitter:title', fullTitle);
     setMeta('name', 'twitter:description', desc);
     setMeta('name', 'twitter:image', img);
