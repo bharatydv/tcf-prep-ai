@@ -1061,7 +1061,7 @@
     },
     "home": {
       "desc": "Correction par IA pour le TEF et le TCF Canada : français écrit et oral évalué sur l'échelle du CECR, chaque erreur expliquée, et vos propres fautes transformées en exercices de révision. Essai gratuit : 3 corrections écrites et 3 orales.",
-      "title": "prepfrancais — Réussissez votre TEF/TCF Canada"
+      "title": "Préparation au TEF et au TCF Canada avec correction IA"
     },
     "listening": {
       "desc": "Entraînement à la compréhension orale du TCF Canada, corrigé côté serveur et enregistré dans votre historique.",
@@ -1084,7 +1084,7 @@
     },
     "pricing": {
       "desc": "Formules de préparation au TEF/TCF Canada avec prepfrancais. Commencez avec 3 corrections écrites et 3 évaluations orales gratuites — sans carte bancaire.",
-      "title": "Tarifs"
+      "title": "Formules et tarifs de préparation au TEF/TCF Canada"
     },
     "privacy": {
       "desc": "Ce que prepfrancais collecte, pourquoi, combien de temps c'est conservé, et comment le faire supprimer.",

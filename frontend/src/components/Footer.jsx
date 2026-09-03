@@ -46,7 +46,7 @@ India`;
    ...63943 — two digits transposed, so the site advertised a support line
    that was not the merchant's, and the reviewer comparing it to the KYC
    found no match. */
-export const SUPPORT_PHONE = '+91 95095 63643';
+export const SUPPORT_PHONE = '+91 9509563643';
 
 function Wordmark() {
   return (
