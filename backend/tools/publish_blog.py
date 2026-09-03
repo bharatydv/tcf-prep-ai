@@ -69,6 +69,15 @@ def main() -> None:
                     help="site root, e.g. http://localhost:8000")
     ap.add_argument("--email", required=True, help="admin account email")
     ap.add_argument("--only", help="publish just this slug")
+    # Retiring a post is the other half of curating a blog, and doing it by
+    # hand in the admin UI leaves no record of what was taken down or why.
+    # Unpublish rather than delete by default: it takes the post off the public
+    # listing and the sitemap while the row stays recoverable. --delete is
+    # separate and permanent.
+    ap.add_argument("--unpublish", action="append", metavar="SLUG", default=[],
+                    help="hide this slug from the public blog (repeatable)")
+    ap.add_argument("--delete", action="append", metavar="SLUG", default=[],
+                    help="permanently remove this slug (repeatable)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -79,6 +88,10 @@ def main() -> None:
         for p in posts:
             print(f"would publish {p['slug']}  ({len(p['content']):,} bytes)"
                   f"  {p['title']}")
+        for slug in args.unpublish:
+            print(f"would unpublish {slug}")
+        for slug in args.delete:
+            print(f"would DELETE {slug}")
         return
 
     password = os.environ.get("BLOG_ADMIN_PASSWORD") or getpass.getpass(
@@ -112,7 +125,29 @@ def main() -> None:
                      f"{r.text[:300]}")
         print(f"{verb}: {site}/blog/{slug}")
 
-    print("\nPublished. These pages are prerendered at build time, so run the "
+    # Removals run after the publishes, so a run that both adds and retires
+    # cannot leave the blog empty if the additions fail partway.
+    for slug in args.unpublish:
+        if slug not in existing:
+            print(f"unpublish: no post with slug {slug!r}, skipped")
+            continue
+        r = s.put(f"{site}/api/admin/blog/{existing[slug]}",
+                  json={"is_published": False}, timeout=30)
+        if r.status_code != 200:
+            sys.exit(f"{slug}: unpublish failed ({r.status_code}): "
+                     f"{r.text[:300]}")
+        print(f"unpublished: {slug}")
+
+    for slug in args.delete:
+        if slug not in existing:
+            print(f"delete: no post with slug {slug!r}, skipped")
+            continue
+        r = s.delete(f"{site}/api/admin/blog/{existing[slug]}", timeout=30)
+        if r.status_code not in (200, 204):
+            sys.exit(f"{slug}: delete failed ({r.status_code}): {r.text[:300]}")
+        print(f"deleted: {slug}")
+
+    print("\nDone. These pages are prerendered at build time, so run the "
           "frontend build again to get them into the sitemap and into the "
           "static HTML a crawler reads.")
 
