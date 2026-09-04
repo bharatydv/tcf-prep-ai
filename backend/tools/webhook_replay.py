@@ -29,6 +29,7 @@ import hmac
 import json
 import os
 import subprocess
+import shutil
 import sys
 import time
 import uuid
@@ -52,14 +53,53 @@ def sign(body: bytes, ts: str, secret: str) -> str:
 
 
 def psql(sql: str, container: str, user: str, db: str) -> str:
-    """One statement, through the database container."""
-    out = subprocess.run(
-        ["docker", "exec", "-i", container, "psql", "-U", user, "-d", db,
-         "-At", "-c", sql],
-        capture_output=True, text=True)
-    if out.returncode != 0:
-        raise RuntimeError(out.stderr.strip()[:200])
-    return out.stdout.strip()
+    """One statement, through the database container.
+
+    Falls back to a direct connection when there is no `docker` to shell out
+    to. The two places this script is convenient to run are the host, which
+    has docker but often no python, and the backend container, which has
+    python and the driver but no docker -- and it used to work in neither
+    without help. asyncpg is already a dependency of the app.
+    """
+    if shutil.which("docker"):
+        out = subprocess.run(
+            ["docker", "exec", "-i", container, "psql", "-U", user, "-d", db,
+             "-At", "-c", sql],
+            capture_output=True, text=True)
+        if out.returncode != 0:
+            raise RuntimeError(out.stderr.strip()[:200])
+        return out.stdout.strip()
+    return _query_direct(sql)
+
+
+def _query_direct(sql: str) -> str:
+    """The same statement over DATABASE_URL, formatted as psql -At would.
+
+    -At is "tuples only, unaligned", so one row of one column is the bare
+    value and an empty result is an empty string. The callers compare against
+    exactly that, so the shapes have to match or every check silently changes
+    meaning.
+    """
+    import asyncio
+    import asyncpg
+
+    url = os.environ.get("DATABASE_URL", "")
+    if not url:
+        raise RuntimeError("no docker on PATH and DATABASE_URL is not set")
+    # asyncpg wants the bare scheme, not SQLAlchemy's +asyncpg dialect form.
+    url = url.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+    async def run():
+        conn = await asyncpg.connect(url)
+        try:
+            rows = await conn.fetch(sql)
+        finally:
+            await conn.close()
+        return "\n".join(
+            "|".join("" if v is None else str(v) for v in row.values())
+            for row in rows)
+
+    return asyncio.run(run()).strip()
 
 
 def post_event(api, secret, kind, sub_id, payment_id):
