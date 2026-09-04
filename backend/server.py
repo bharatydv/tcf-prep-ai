@@ -19,6 +19,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone, date
+from pathlib import Path
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -3877,6 +3878,68 @@ async def seed_listening_questions(db) -> int:
     return len(rows)
 
 
+BLOG_CONTENT_DIR = Path(__file__).resolve().parent / "content" / "blog"
+
+
+async def seed_blog_posts(db) -> int:
+    """Publish the articles in content/blog that are not in the table yet.
+
+    The reading and listening seeders rebuild their tables from disk, which is
+    safe there because nothing else writes those rows. The blog is different:
+    /admin/blog edits these posts, so rebuilding would silently revert an
+    author's correction on the next restart. This inserts a post only when its
+    slug is absent, and leaves every existing row alone.
+
+    So the repo files are the first publish, and the admin UI owns the post
+    afterwards. To push a change from a file to a post that already exists, use
+    backend/tools/publish_blog.py, which is explicit about updating.
+    """
+    if not BLOG_CONTENT_DIR.is_dir():
+        return 0
+
+    added = 0
+    for meta_path in sorted(BLOG_CONTENT_DIR.glob("*.json")):
+        body_path = meta_path.with_suffix(".html")
+        if not body_path.exists():
+            log.warning("Blog seed: %s has no matching .html, skipped",
+                        meta_path.name)
+            continue
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            body = body_path.read_text(encoding="utf-8")
+        except (OSError, ValueError) as e:
+            # A malformed article must not take the whole boot down with it.
+            log.error("Blog seed: %s unreadable (%s), skipped",
+                      meta_path.name, e)
+            continue
+
+        slug = meta.get("slug") or slugify(meta.get("title", ""))
+        if not slug or not meta.get("title") or not body.strip():
+            log.warning("Blog seed: %s needs a title, a slug and a body, "
+                        "skipped", meta_path.name)
+            continue
+        if await db.scalar(select(BlogPost.id).where(BlogPost.slug == slug)):
+            continue
+
+        ts = now_utc()
+        db.add(BlogPost(
+            post_id=new_id("post"), slug=slug, title=meta["title"],
+            excerpt=meta.get("excerpt", ""), content=body,
+            cover_image=meta.get("cover_image", ""),
+            meta_description=meta.get("meta_description", ""),
+            author=meta.get("author", "prepfrancais"),
+            tags=meta.get("tags", []),
+            is_published=bool(meta.get("is_published", True)),
+            created_at=ts, updated_at=ts))
+        added += 1
+        log.info("Blog seed: publishing %s", slug)
+
+    if added:
+        await db.commit()
+        log.info("Seeded %d blog post(s)", added)
+    return added
+
+
 async def run_seeds():
     async with SessionLocal() as db:
         # Admin
@@ -3949,6 +4012,9 @@ async def run_seeds():
 
         # Compréhension orale papers
         await seed_listening_questions(db)
+
+        # Articles shipped in content/blog, published on first boot only
+        await seed_blog_posts(db)
 
         # Seed SPEAKING themes (skill='speaking') separately so they can be
         # added even if writing themes already exist.
