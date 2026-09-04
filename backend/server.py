@@ -6280,52 +6280,51 @@ async def billing_subscribe(body: SubscribeIn,
     charged = bill["total"]
 
     sub_id = new_id("sub")
-    # A payment link, not a mandate. Cashfree rejected the Subscriptions
-    # product for this business on 2026-09-04 ("Products rejected:
-    # Subscriptions") while activating the Payment Gateway, so a recurring
-    # authorisation cannot be opened at all - `cf_ensure_plan` and
-    # POST /subscriptions both answer for a product we do not have.
+    # One order, one payment, one fixed period.
     #
-    # Each purchase is now one payment for one fixed period. The learner buys
-    # a week, a month or a quarter, it expires, and they buy again. Nothing
-    # downstream changes: the webhook still grants from the PLAN rather than
-    # the amount, so access is the length that was bought and never a length
-    # inferred from what was charged.
+    # Cashfree activated the Payment Gateway for this account on 2026-09-04
+    # and rejected Subscriptions in the same message ("Products rejected:
+    # Subscriptions"), so no recurring mandate can be opened. Payment Links
+    # answered `feature_not_enabled` too. Orders is what this account actually
+    # has, and it was verified against the live API before this was written.
     #
-    # `link_id` is our own id, which is what lets a webhook find this row -
-    # see the order_id/link_id names in the webhook's lookup.
+    # So the learner buys a week, a month or a quarter, it expires, and they
+    # buy again. Nothing downstream moves: the webhook still grants from the
+    # PLAN and never from the amount, so access is the length that was bought
+    # rather than a length inferred from what was charged.
+    #
+    # `order_id` is our own id, and Cashfree echoes it back on the webhook,
+    # which is how the payment finds this row.
     payload = {
-        "link_id": sub_id,
-        "link_amount": charged,
-        "link_currency": BILLING_CURRENCY,
-        "link_purpose": f"prepfrancais {plan['name']}",
+        "order_id": sub_id,
+        "order_amount": charged,
+        "order_currency": BILLING_CURRENCY,
         "customer_details": {
+            "customer_id": user.user_id,
             "customer_name": user.name or "Learner",
             "customer_email": user.email,
             "customer_phone": user.phone,
         },
-        # One payment, and the link dies with it: a reusable link is a link
-        # that can be paid twice by someone who kept the tab open.
-        "link_partial_payments": False,
-        "link_auto_reminders": False,
-        "link_notify": {"send_email": False, "send_sms": False},
-        "link_meta": {
+        "order_meta": {
             "return_url": f"{ALLOWED_ORIGINS[0]}/billing/return?sub={sub_id}",
+            # Belt and braces with the dashboard webhook: an account whose
+            # dashboard entry is removed or mistyped still notifies us here,
+            # and a duplicate is dropped on the event key either way.
             "notify_url": f"{ALLOWED_ORIGINS[0]}/api/billing/webhook",
         },
     }
 
     try:
-        data = await cf_request("POST", "/links", payload)
+        data = await cf_request("POST", "/orders", payload)
     except Exception:  # noqa: BLE001
-        log.exception("Cashfree payment link failed for %s", user.user_id)
+        log.exception("Cashfree order create failed for %s", user.user_id)
         raise HTTPException(
             status_code=502,
             detail="Le prestataire de paiement n'a pas répondu. Réessayez.")
 
     # Logged whole: the field names move between Cashfree API versions, and
-    # without the raw reply a missing link is undiagnosable.
-    log.info("Cashfree payment link %s created: %s", sub_id, _scrub_secrets(data))
+    # without the raw reply a missing session is undiagnosable.
+    log.info("Cashfree order %s created: %s", sub_id, _scrub_secrets(data))
     now = now_utc()
     db.add(Subscription(
         subscription_id=sub_id, user_id=user.user_id,
@@ -6333,7 +6332,7 @@ async def billing_subscribe(body: SubscribeIn,
         currency=BILLING_CURRENCY, amount=charged,
         base_amount=bill["base_amount"], fee_percent=bill["fee_percent"],
         fee_amount=bill["fee_amount"], tax_amount=bill["tax_amount"],
-        cf_subscription_id=str(_dig(data, "cf_link_id", "link_id") or ""),
+        cf_subscription_id=str(_dig(data, "cf_order_id") or ""),
         created_at=now, updated_at=now))
     await db.commit()
     return {
@@ -6343,12 +6342,13 @@ async def billing_subscribe(body: SubscribeIn,
         "amount": charged,
         "breakdown": bill,
         "first_time": first_time,
-        # The browser is sent here. Named auth_link still because that is what
-        # the checkout page reads, and what it means -- the page where the
-        # learner authorises the payment -- has not changed.
-        "auth_link": _dig(data, "link_url", "authorization_link",
-                          "authorisation_link", "auth_link"),
+        # An order has no URL to redirect to: the browser opens Cashfree's
+        # checkout with this session id. auth_link stays in the reply and stays
+        # null, so an older cached bundle redirects nowhere rather than
+        # somewhere wrong.
+        "auth_link": None,
         "session_id": _dig(data, "payment_session_id"),
+        "order_id": sub_id,
     }
 
 
@@ -6876,7 +6876,7 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     # subscription events this once handled: `link_id` is the id we chose, and
     # `order_id` is the order Cashfree derived from the link. Both are tried,
     # `link_id` first because it is ours and matches a row exactly.
-    sub_id = _dig(event, "link_id", "subscription_id", "order_id")
+    sub_id = _dig(event, "order_id", "link_id", "subscription_id")
     status = str(_dig(event, "subscription_status", "payment_status") or "")
     # No single id is present on every event, so the key is built from what is.
     marker = (_dig(event, "cf_payment_id", "payment_id", "event_id",
