@@ -6269,7 +6269,6 @@ async def billing_subscribe(body: SubscribeIn,
             status_code=400,
             detail="Ajoutez un numéro de téléphone à votre compte avant de payer.")
 
-    plan_key = body.plan_id.strip().lower()
     # Decided here, from the database, and never from the request: a discount
     # the browser can ask for is a discount anyone can take twice.
     first_time = not await has_paid_before(db, user.user_id)
@@ -6279,46 +6278,54 @@ async def billing_subscribe(body: SubscribeIn,
     # nothing else, so there is no total for the browser to tamper with.
     bill = checkout_breakdown(amount)
     charged = bill["total"]
-    try:
-        cf_plan = await cf_ensure_plan(plan_key, plan, charged)
-    except Exception:  # noqa: BLE001
-        log.exception("Cashfree plan registration failed for %s", plan_key)
-        raise HTTPException(
-            status_code=502,
-            detail="La formule n'a pas pu être ouverte chez le prestataire.")
 
     sub_id = new_id("sub")
+    # A payment link, not a mandate. Cashfree rejected the Subscriptions
+    # product for this business on 2026-09-04 ("Products rejected:
+    # Subscriptions") while activating the Payment Gateway, so a recurring
+    # authorisation cannot be opened at all - `cf_ensure_plan` and
+    # POST /subscriptions both answer for a product we do not have.
+    #
+    # Each purchase is now one payment for one fixed period. The learner buys
+    # a week, a month or a quarter, it expires, and they buy again. Nothing
+    # downstream changes: the webhook still grants from the PLAN rather than
+    # the amount, so access is the length that was bought and never a length
+    # inferred from what was charged.
+    #
+    # `link_id` is our own id, which is what lets a webhook find this row -
+    # see the order_id/link_id names in the webhook's lookup.
     payload = {
-        "subscription_id": sub_id,
+        "link_id": sub_id,
+        "link_amount": charged,
+        "link_currency": BILLING_CURRENCY,
+        "link_purpose": f"prepfrancais {plan['name']}",
         "customer_details": {
             "customer_name": user.name or "Learner",
             "customer_email": user.email,
             "customer_phone": user.phone,
         },
-        # The plan is referenced, not described: sending the details inline
-        # fails with plan_not_found however complete they are.
-        "plan_details": {"plan_id": cf_plan},
-        "authorization_details": {
-            "authorization_amount": BILLING_AUTH_AMOUNT,
-            "authorization_amount_refund": True,
-            "payment_methods": ["card"],
-        },
-        "subscription_meta": {
+        # One payment, and the link dies with it: a reusable link is a link
+        # that can be paid twice by someone who kept the tab open.
+        "link_partial_payments": False,
+        "link_auto_reminders": False,
+        "link_notify": {"send_email": False, "send_sms": False},
+        "link_meta": {
             "return_url": f"{ALLOWED_ORIGINS[0]}/billing/return?sub={sub_id}",
+            "notify_url": f"{ALLOWED_ORIGINS[0]}/api/billing/webhook",
         },
     }
 
     try:
-        data = await cf_request("POST", "/subscriptions", payload)
+        data = await cf_request("POST", "/links", payload)
     except Exception:  # noqa: BLE001
-        log.exception("Cashfree subscription create failed for %s", user.user_id)
+        log.exception("Cashfree payment link failed for %s", user.user_id)
         raise HTTPException(
             status_code=502,
             detail="Le prestataire de paiement n'a pas répondu. Réessayez.")
 
     # Logged whole: the field names move between Cashfree API versions, and
     # without the raw reply a missing link is undiagnosable.
-    log.info("Cashfree subscription %s created: %s", sub_id, _scrub_secrets(data))
+    log.info("Cashfree payment link %s created: %s", sub_id, _scrub_secrets(data))
     now = now_utc()
     db.add(Subscription(
         subscription_id=sub_id, user_id=user.user_id,
@@ -6326,7 +6333,7 @@ async def billing_subscribe(body: SubscribeIn,
         currency=BILLING_CURRENCY, amount=charged,
         base_amount=bill["base_amount"], fee_percent=bill["fee_percent"],
         fee_amount=bill["fee_amount"], tax_amount=bill["tax_amount"],
-        cf_subscription_id=str(_dig(data, "cf_subscription_id") or ""),
+        cf_subscription_id=str(_dig(data, "cf_link_id", "link_id") or ""),
         created_at=now, updated_at=now))
     await db.commit()
     return {
@@ -6336,16 +6343,29 @@ async def billing_subscribe(body: SubscribeIn,
         "amount": charged,
         "breakdown": bill,
         "first_time": first_time,
-        "auth_link": _dig(data, "authorization_link", "authorisation_link",
-                          "auth_link", "subscription_link"),
-        "session_id": _dig(data, "subscription_session_id"),
+        # The browser is sent here. Named auth_link still because that is what
+        # the checkout page reads, and what it means -- the page where the
+        # learner authorises the payment -- has not changed.
+        "auth_link": _dig(data, "link_url", "authorization_link",
+                          "authorisation_link", "auth_link"),
+        "session_id": _dig(data, "payment_session_id"),
     }
 
 
 @app.post("/api/billing/cancel")
 async def billing_cancel(user: User = Depends(get_current_user),
                          db: AsyncSession = Depends(get_db)):
-    """Stop future charges. Premium already paid for runs to its expiry."""
+    """Stop the plan renewing. Access already paid for runs to its expiry.
+
+    There is nothing at the gateway to cancel any more. Each purchase is one
+    payment for one period, so no future charge exists to stop -- this used to
+    POST /subscriptions/{id}/manage, which now answers for a product this
+    account does not have and would fail every cancellation with a 502.
+
+    It still marks the row, because a learner who says "cancel" is saying they
+    do not want to be billed again, and a record of that is what stops a
+    renewal reminder being sent to someone who asked us not to.
+    """
     res = await db.execute(
         select(Subscription).where(Subscription.user_id == user.user_id,
                                    Subscription.status.in_(("pending", "active")))
@@ -6354,14 +6374,6 @@ async def billing_cancel(user: User = Depends(get_current_user),
     if not row:
         raise HTTPException(status_code=404,
                             detail="Aucun abonnement actif à résilier.")
-    try:
-        await cf_request("POST", f"/subscriptions/{row.subscription_id}/manage",
-                         {"action": "CANCEL"})
-    except Exception:  # noqa: BLE001
-        log.exception("Cashfree cancel failed for %s", row.subscription_id)
-        raise HTTPException(
-            status_code=502,
-            detail="La résiliation n'a pas pu être transmise. Réessayez.")
     row.status = "cancelled"
     row.cancelled_at = now_utc()
     row.updated_at = now_utc()
@@ -6860,7 +6872,11 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Malformed body")
 
     event_type = str(event.get("type") or _dig(event, "type") or "UNKNOWN")
-    sub_id = _dig(event, "subscription_id")
+    # Payment Gateway events name the payment differently from the
+    # subscription events this once handled: `link_id` is the id we chose, and
+    # `order_id` is the order Cashfree derived from the link. Both are tried,
+    # `link_id` first because it is ours and matches a row exactly.
+    sub_id = _dig(event, "link_id", "subscription_id", "order_id")
     status = str(_dig(event, "subscription_status", "payment_status") or "")
     # No single id is present on every event, so the key is built from what is.
     marker = (_dig(event, "cf_payment_id", "payment_id", "event_id",
@@ -6887,7 +6903,17 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
                            .where(Subscription.subscription_id == str(sub_id)))
     row = res.scalar_one_or_none()
     if not row:
-        log.warning("Cashfree webhook for unknown subscription %s", sub_id)
+        # Cashfree derives its own id for the order behind a payment link, and
+        # it is not always the link_id we chose. The id it gave us at creation
+        # is on the row, so try that before giving up -- otherwise a paid
+        # learner gets nothing and the only trace is this log line.
+        res = await db.execute(
+            select(Subscription)
+            .where(Subscription.cf_subscription_id == str(sub_id)))
+        row = res.scalar_one_or_none()
+    if not row:
+        log.warning("Cashfree webhook %s named payment %s, which matches no "
+                    "row by subscription_id or cf id", event_type, sub_id)
         return {"ok": True, "ignored": "unknown subscription"}
 
     res = await db.execute(select(User).where(User.user_id == row.user_id))
