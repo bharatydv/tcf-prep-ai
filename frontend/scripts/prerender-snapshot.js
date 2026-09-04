@@ -32,6 +32,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { readRepoPosts, mergeBySlug } = require('./repo-blog');
 
 const API = (process.env.SITEMAP_API || '').replace(/\/+$/, '');
 const OUT = path.join(__dirname, '..', 'public', 'prerender');
@@ -72,9 +73,9 @@ function clean() {
 
 async function snapshot() {
   if (!API) {
-    console.warn('[snapshot] SITEMAP_API is not set — API-backed pages will '
+    console.warn('[snapshot] SITEMAP_API is not set — only the articles that '
+      + 'ship in the repo will be snapshotted; other API-backed pages will '
       + 'prerender empty, exactly as they did before this script existed.');
-    return;
   }
   clean();
   let written = 0;
@@ -82,24 +83,49 @@ async function snapshot() {
   /* The blog index, and then every post it names. The index has to come first:
      its slugs are the only list of post URLs, and they are also what react-snap
      follows to discover the post pages at all. */
-  try {
-    const index = await getJson('/api/blog');
-    write('blog', index);
-    written += 1;
-    const posts = index.posts || [];
-    for (const post of posts) {
-      if (!post.slug) continue;
-      try {
-        write(`blog/${post.slug}`, await getJson(`/api/blog/${post.slug}`));
+  let apiPosts = [];
+  if (API) {
+    try {
+      apiPosts = (await getJson('/api/blog')).posts || [];
+    } catch (e) {
+      console.warn(`[snapshot] blog API unreachable: ${e.message}`);
+    }
+  }
+  /* Merged, so an article that ships in the repo is snapshotted whether or not
+     the API answered. A backend seeds these on boot, so a frontend built
+     beside a fresh one asks before they exist -- routine, and previously
+     indistinguishable from a build with no network at all. */
+  const repoPosts = readRepoPosts();
+  const posts = mergeBySlug(apiPosts, repoPosts);
+  const fromRepo = new Set(repoPosts.map((p) => p.slug));
+
+  // The index carries no bodies, matching what /api/blog actually returns.
+  write('blog', { posts: posts.map(({ content, ...rest }) => rest) });
+  written += 1;
+
+  for (const post of posts) {
+    if (!post.slug) continue;
+    try {
+      /* A post the API listed is fetched in full: it is the live row, and its
+         body may have been edited in /admin/blog since the file was seeded. */
+      const full = apiPosts.some((p) => p.slug === post.slug)
+        ? await getJson(`/api/blog/${post.slug}`)
+        : { post };
+      write(`blog/${post.slug}`, full);
+      written += 1;
+    } catch (e) {
+      if (fromRepo.has(post.slug)) {
+        write(`blog/${post.slug}`, { post });
         written += 1;
-      } catch (e) {
+        console.warn(`[snapshot] post ${post.slug}: API failed `
+          + `(${e.message}), using the repo copy`);
+      } else {
         console.warn(`[snapshot] post ${post.slug} skipped: ${e.message}`);
       }
     }
-    console.log(`[snapshot] blog: index + ${posts.length} post(s)`);
-  } catch (e) {
-    console.warn(`[snapshot] blog skipped: ${e.message}`);
   }
+  console.log(`[snapshot] blog: index + ${posts.length} post(s) `
+    + `(${apiPosts.length} from the API)`);
 
   /* The recent-topics listing only. A topic DETAIL needs a session and answers
      a signed-out visitor with "please log in", so there is nothing worth

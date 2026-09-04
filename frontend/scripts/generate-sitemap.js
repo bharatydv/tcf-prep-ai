@@ -73,6 +73,8 @@ function urlEntry(loc, priority, changefreq, lastmod) {
   ].filter(Boolean).join('\n');
 }
 
+const { readRepoPosts, mergeBySlug } = require('./repo-blog');
+
 async function fetchJson(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${res.status} ${url}`);
@@ -80,12 +82,23 @@ async function fetchJson(url) {
 }
 
 async function dynamicRoutes() {
-  if (!API) return [];
   const out = [];
-  try {
-    const { posts = [] } = await fetchJson(`${API}/api/blog`);
-    posts.forEach((p) => p.slug && out.push(urlEntry(`/blog/${p.slug}`, 0.8, 'monthly', p.updated_at || p.created_at)));
-  } catch (e) { console.warn('[sitemap] blog posts skipped:', e.message); }
+  /* The articles in the repo are the floor. Asking the API and taking whatever
+     came back meant a build that could not reach it -- or reached a backend
+     that had not seeded its posts yet -- shipped a sitemap with no post URL at
+     all, silently. */
+  let posts = [];
+  if (API) {
+    try {
+      ({ posts = [] } = await fetchJson(`${API}/api/blog`));
+    } catch (e) { console.warn('[sitemap] blog API unreachable:', e.message); }
+  }
+  const merged = mergeBySlug(posts, readRepoPosts());
+  if (merged.length > posts.length) {
+    console.warn(`[sitemap] blog: ${posts.length} from the API, `
+      + `${merged.length - posts.length} more from the repo`);
+  }
+  merged.forEach((p) => p.slug && out.push(urlEntry(`/blog/${p.slug}`, 0.8, 'monthly', p.updated_at || p.created_at)));
   /* Topic DETAIL pages are deliberately not listed.
    *
    * They used to be, at priority 0.7 each. /api/recent-topics/{id} requires a
