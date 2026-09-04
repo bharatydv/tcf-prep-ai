@@ -62,17 +62,48 @@ export default function Pricing() {
     }
   };
 
+  /* Cashfree's checkout script, fetched once and only when someone actually
+     buys. It is ~40 kB that a visitor reading the pricing table never needs,
+     and loading it on mount would put a third-party script on the page for
+     everyone to pay for a purchase most of them will not make. */
+  const loadCashfree = () => new Promise((resolve, reject) => {
+    if (window.Cashfree) return resolve(window.Cashfree);
+    const el = document.createElement('script');
+    el.src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
+    el.async = true;
+    el.onload = () => (window.Cashfree
+      ? resolve(window.Cashfree)
+      : reject(new Error('Cashfree SDK loaded without defining Cashfree')));
+    el.onerror = () => reject(new Error('Cashfree SDK failed to load'));
+    document.head.appendChild(el);
+  });
+
   const startCheckout = async (planId) => {
     const { data } = await api.post('/api/billing/subscribe', { plan_id: planId });
-    if (data?.auth_link) {
-      window.location.assign(data.auth_link);
-      return true;
+    /* An order is not a link. Cashfree rejected this account for
+       Subscriptions and for Payment Links, so checkout is the Orders API,
+       which answers with a session id and no URL to send anyone to. The
+       session is opened by their script instead. */
+    if (!data?.session_id) {
+      // Sending the learner nowhere silently is how "I paid and nothing
+      // happened" reports start.
+      toast.error(t('billing.noLink'));
+      return false;
     }
-    // A subscription with no authorisation link cannot be paid, and sending
-    // the learner nowhere silently is how "I paid and nothing happened"
-    // reports start.
-    toast.error(t('billing.noLink'));
-    return false;
+    try {
+      const Cashfree = await loadCashfree();
+      const cashfree = Cashfree({ mode: 'production' });
+      // _self, not a popup: a blocked popup is indistinguishable from a
+      // broken checkout to the person looking at the screen.
+      await cashfree.checkout({
+        paymentSessionId: data.session_id,
+        redirectTarget: '_self',
+      });
+      return true;
+    } catch (err) {
+      toast.error(t('billing.noLink'));
+      return false;
+    }
   };
 
   const subscribe = async (planId) => {
