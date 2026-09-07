@@ -21,7 +21,10 @@ export default function ListeningHome() {
   const t = useT();
   const navigate = useNavigate();
 
-  const startPractice = () => navigate('/listening/practice');
+  const startPractice = () => {
+    if (!user) return navigate('/login');
+    navigate('/listening/practice');
+  };
   const startTest = () => {
     if (!user) return navigate('/login');
     navigate('/listening/test');

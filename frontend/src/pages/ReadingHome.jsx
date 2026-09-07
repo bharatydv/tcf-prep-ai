@@ -16,7 +16,10 @@ export default function ReadingHome() {
   const t = useT();
   const navigate = useNavigate();
 
-  const startPractice = () => navigate('/reading/practice');
+  const startPractice = () => {
+    if (!user) return navigate('/login');
+    navigate('/reading/practice');
+  };
   const startTest = () => {
     if (!user) return navigate('/login');
     navigate('/reading/test');
