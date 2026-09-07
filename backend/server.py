@@ -5625,12 +5625,15 @@ def _reading_correction(q: ReadingQuestion, picked: Optional[str]) -> dict:
 
 
 @app.get("/api/reading/tests")
-async def reading_tests(db: AsyncSession = Depends(get_db)):
+async def reading_tests(user: User = Depends(get_current_user),
+                        db: AsyncSession = Depends(get_db)):
     """The ten papers, with how many questions each currently holds.
 
     Tests still being written are returned with question_count 0 so the page can
     show them as coming soon rather than hiding them — the learner sees the full
     programme either way.
+
+    Requires authentication.
     """
     res = await db.execute(
         select(ReadingQuestion.test_number,
@@ -5653,6 +5656,7 @@ async def reading_tests(db: AsyncSession = Depends(get_db)):
 
 @app.get("/api/reading/tests/{test_number}")
 async def reading_test_questions(test_number: int,
+                                 user: User = Depends(get_current_user),
                                  db: AsyncSession = Depends(get_db)):
     if test_number not in reading_bank.READING_TESTS:
         raise HTTPException(status_code=404, detail="Unknown test")
@@ -5672,13 +5676,13 @@ async def reading_test_questions(test_number: int,
 
 @app.post("/api/reading/questions/{reading_question_id}/check")
 async def reading_check_one(reading_question_id: str, body: ReadingCheckIn,
+                            user: User = Depends(get_current_user),
                             db: AsyncSession = Depends(get_db),
                             _rl=Depends(reading_check_rate_limit)):
     """Practice mode: mark a single question and explain it straight away.
 
-    Deliberately open to signed-out visitors — practice is the free surface, and
-    the answer key still never leaves the server unasked. Rate-limited all the
-    same: question ids are predictable, so this is the one endpoint from which
+    Requires authentication to access. Rate-limited to prevent answer enumeration:
+    question ids are predictable, so this is the one endpoint from which
     the whole 400-question key could be enumerated. See the limiter's comment.
     """
     res = await db.execute(
@@ -5810,8 +5814,12 @@ def _listening_correction(q: ListeningQuestion, picked: Optional[str]) -> dict:
 
 
 @app.get("/api/listening/tests")
-async def listening_tests(db: AsyncSession = Depends(get_db)):
-    """The forty papers, with how many questions each currently holds."""
+async def listening_tests(user: User = Depends(get_current_user),
+                          db: AsyncSession = Depends(get_db)):
+    """The forty papers, with how many questions each currently holds.
+
+    Requires authentication.
+    """
     res = await db.execute(
         select(ListeningQuestion.test_number,
                func.count(ListeningQuestion.id),
@@ -5833,6 +5841,7 @@ async def listening_tests(db: AsyncSession = Depends(get_db)):
 
 @app.get("/api/listening/tests/{test_number}")
 async def listening_test_questions(test_number: int,
+                                   user: User = Depends(get_current_user),
                                    db: AsyncSession = Depends(get_db)):
     if test_number not in listening_bank.LISTENING_TESTS:
         raise HTTPException(status_code=404, detail="Unknown test")
@@ -5852,9 +5861,13 @@ async def listening_test_questions(test_number: int,
 
 @app.post("/api/listening/questions/{listening_question_id}/check")
 async def listening_check_one(listening_question_id: str, body: ListeningCheckIn,
+                              user: User = Depends(get_current_user),
                               db: AsyncSession = Depends(get_db),
                               _rl=Depends(listening_check_rate_limit)):
-    """Practice mode: mark one question and explain it straight away."""
+    """Practice mode: mark one question and explain it straight away.
+
+    Requires authentication to access.
+    """
     res = await db.execute(
         select(ListeningQuestion).where(
             ListeningQuestion.listening_question_id == listening_question_id,

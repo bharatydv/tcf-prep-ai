@@ -25,15 +25,20 @@ export default function ListeningTests() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Require authentication for both practice and test modes
+    if (!user) {
+      navigate('/login');
+      return;
+    }
+
     api.get('/api/listening/tests')
       .then(({ data }) => setTests(data.tests || []))
       .catch(() => setTests([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [user, navigate]);
 
   const open = (paper) => {
     if (!paper.is_ready) return;
-    if (isTest && !user) return navigate('/login');
     navigate(`/listening/${isTest ? 'test' : 'practice'}/${paper.test_number}`);
   };
 
