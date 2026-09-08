@@ -97,11 +97,11 @@ export function useSeo({
     setMeta('name', 'twitter:description', desc);
     setMeta('name', 'twitter:image', img);
 
-    // Both locales still live at one address, so every page points its
-    // alternates at itself. When locale routing lands, only this block changes.
-    setLink('alternate', url, { hreflang: 'fr-CA' });
-    setLink('alternate', url, { hreflang: 'en' });
-    setLink('alternate', url, { hreflang: 'x-default' });
+    // Both locales live at one address, so hreflang tags are not applicable.
+    // When separate locale routing is implemented (/en/*, /fr-ca/*), hreflang
+    // tags can be added back to direct search engines to the correct locale version.
+    // For now, remove any stale hreflang tags to avoid conflicts with canonical.
+    document.head.querySelectorAll('link[rel="alternate"][hreflang]').forEach(el => el.remove());
 
     // Signed-in and utility pages should never enter an index.
     let robots = document.head.querySelector('meta[name="robots"]');
