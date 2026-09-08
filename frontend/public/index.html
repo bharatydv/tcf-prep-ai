@@ -9,11 +9,10 @@
     <meta name="description" content="Préparation IA au TEF et au TCF Canada : correction de l'expression écrite et orale, niveau CEFR expliqué, examens blancs et révision de vos propres erreurs. 6 corrections gratuites." />
     <link rel="canonical" href="https://prepfrancais.com/" />
 
-    <!-- Both languages exist at the same address until locale routing lands;
-         x-default points at the entry page either way. -->
-    <link rel="alternate" hreflang="fr-CA" href="https://prepfrancais.com/" />
-    <link rel="alternate" hreflang="en" href="https://prepfrancais.com/" />
-    <link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/" />
+    <!-- Hreflang tags removed: both languages exist at the same address until
+         locale routing lands. When locale routing is implemented (/en/*, /fr-ca/*),
+         hreflang tags will be added back to direct search engines to the correct
+         locale version. See frontend/src/lib/seo.jsx for more. -->
 
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="prepfrancais" />

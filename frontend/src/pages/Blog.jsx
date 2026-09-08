@@ -6,6 +6,7 @@ import {
 import { api } from '../lib/api';
 import { formatDate, useI18n } from '../i18n';
 import { useSeo } from '../lib/seo';
+import { PageIntro } from '../components/PageIntro';
 
 /* Sentinel for "no category filter". Kept separate from its label so the
    filter keeps working when the label is translated. */
@@ -128,6 +129,11 @@ export default function Blog() {
           )}
         </div>
       </section>
+
+      <PageIntro
+        title={t('blog.introTitle') || 'TCF and TEF Canada Blog'}
+        description={t('blog.introDesc') || 'Discover tips, strategies, and insights to help you prepare for and succeed in your TCF and TEF Canada exams. Our blog covers exam topics, test-taking techniques, and preparation advice.'}
+      />
 
       <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
         {loading ? (
