@@ -5,6 +5,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { useSeo } from '../lib/seo';
+import { PageIntro } from '../components/PageIntro';
 import { FREE_TRIAL_TOTAL } from '../lib/tcf';
 
 // The one-time trial: 3 written corrections plus 3 spoken ones. The server is
@@ -52,6 +53,11 @@ export default function ListeningHome() {
       </section>
 
       {/* MODE CHOICE */}
+      <PageIntro
+        title={t('listen.pageTitle') || 'Listening Comprehension Practice'}
+        description={t('listen.pageDesc') || 'Improve your TCF and TEF Canada listening skills with authentic practice exercises, replay options for practice mode, and detailed feedback on your performance.'}
+      />
+
       <section className="mx-auto max-w-5xl px-4 pt-10 sm:px-6">
         <div className="mb-6 text-center">
           <h1 className="font-heading text-2xl font-extrabold text-gray-900">{t('listen.chooseTitle')}</h1>

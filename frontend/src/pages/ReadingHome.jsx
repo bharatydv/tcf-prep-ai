@@ -5,6 +5,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
+import { PageIntro } from '../components/PageIntro';
 import { FREE_TRIAL_TOTAL } from '../lib/tcf';
 
 // The one-time trial: 3 written corrections plus 3 spoken ones. The server is
@@ -48,6 +49,11 @@ export default function ReadingHome() {
       </section>
 
       {/* MODE CHOICE */}
+      <PageIntro
+        title={t('read.pageTitle') || 'Reading Comprehension Practice'}
+        description={t('read.pageDesc') || 'Master TCF and TEF Canada reading comprehension with personalized practice exercises, instant feedback, and comprehensive explanations tailored to your level.'}
+      />
+
       <section className="mx-auto max-w-5xl px-4 pt-10 sm:px-6">
         <div className="mb-6 text-center">
           <h1 className="font-heading text-2xl font-extrabold text-gray-900">{t('read.chooseTitle')}</h1>

@@ -4,6 +4,7 @@ import {
 } from '@phosphor-icons/react';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
+import { PageIntro } from '../components/PageIntro';
 
 /* Copy lives as translation keys and is resolved with t() at render time. */
 const RESOURCE_CARDS = [
@@ -33,6 +34,11 @@ export default function Resources() {
           <p className="mx-auto mt-3 max-w-xl text-[15px] leading-relaxed text-gray-700">{t('res.heroSub')}</p>
         </div>
       </section>
+
+      <PageIntro
+        title={t('res.introTitle') || 'Learning Resources'}
+        description={t('res.introDesc') || 'Access comprehensive learning materials, guides, and FAQs to support your TCF and TEF Canada exam preparation journey.'}
+      />
 
       <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6">
         {/* RESOURCE CARDS */}
