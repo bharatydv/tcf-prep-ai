@@ -29,12 +29,20 @@ export default function ReadingTests() {
       navigate('/login');
       return;
     }
+    // Test mode is premium. The home page turns the button away too, but this
+    // path is reachable by typing /reading/test or following an old bookmark,
+    // and the picker is where a free account would otherwise choose a paper it
+    // will not be allowed to hand in.
+    if (isTest && !user.premium) {
+      navigate('/pricing');
+      return;
+    }
 
     api.get('/api/reading/tests')
       .then(({ data }) => setTests(data.tests || []))
       .catch(() => setTests([]))
       .finally(() => setLoading(false));
-  }, [user, navigate]);
+  }, [user, isTest, navigate]);
 
   const open = (paper) => {
     if (!paper.is_ready) return;

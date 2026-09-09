@@ -30,12 +30,18 @@ export default function ListeningTests() {
       navigate('/login');
       return;
     }
+    // Test mode is premium, and this path is reachable directly, so the home
+    // page's gate is repeated rather than relied on.
+    if (isTest && !user.premium) {
+      navigate('/pricing');
+      return;
+    }
 
     api.get('/api/listening/tests')
       .then(({ data }) => setTests(data.tests || []))
       .catch(() => setTests([]))
       .finally(() => setLoading(false));
-  }, [user, navigate]);
+  }, [user, isTest, navigate]);
 
   const open = (paper) => {
     if (!paper.is_ready) return;

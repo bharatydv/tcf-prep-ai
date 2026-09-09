@@ -1480,6 +1480,39 @@ def trial_exhausted(kind: str, user: User) -> HTTPException:
     })
 
 
+def require_premium(user: User, kind: str) -> None:
+    """Gate a surface that is premium outright, rather than trial-metered.
+
+    Distinct from trial_exhausted() on purpose. That one means "you had some and
+    spent them", and the honest answer to it is to show what is left. This means
+    "this was never included in free", so there is no allowance to report and no
+    number that counting could ever make go up. The frontend needs to tell those
+    apart to avoid promising a free attempt that does not exist, hence a `code`
+    of its own rather than a reused one.
+
+    Raises rather than returning the exception, unlike trial_exhausted(): there
+    is no work to unwind here, so there is nothing for a caller to do with it
+    except raise it immediately.
+    """
+    if is_premium(user):
+        return
+    raise HTTPException(status_code=402, detail={
+        "code": "premium_only",
+        "kind": kind,
+        "msg": _PREMIUM_ONLY_MSG.get(kind, _PREMIUM_ONLY_MSG["default"]),
+        "trial": trial_state(user),
+    })
+
+
+_PREMIUM_ONLY_MSG = {
+    "reading_test": "Le mode examen de compréhension écrite fait partie des "
+                    "formules payantes. Le mode entraînement reste gratuit.",
+    "listening_test": "Le mode examen de compréhension orale fait partie des "
+                      "formules payantes. Le mode entraînement reste gratuit.",
+    "default": "Cette fonctionnalité fait partie des formules payantes.",
+}
+
+
 async def enforce_free_conversation_limit(db: AsyncSession, user: User) -> User:
     """Free-conversation allowance, counted from the conversations already
     graded this month. Derived from the submissions table rather than a new
@@ -5768,7 +5801,18 @@ async def reading_check_one(reading_question_id: str, body: ReadingCheckIn,
 async def reading_submit(test_number: int, body: ReadingSubmitIn,
                          user: User = Depends(get_current_user),
                          db: AsyncSession = Depends(get_db)):
-    """Grade a whole paper, record it, and return every explanation."""
+    """Grade a whole paper, record it, and return every explanation.
+
+    Premium. This endpoint IS test mode -- practice marks a question at a time
+    through /check and never comes here, so gating it leaves the free surface
+    exactly as it was: all 40 papers, every question, every explanation, one
+    answer at a time. What is paid for is sitting the paper under the clock and
+    getting the score report at the end.
+
+    Checked before any work is done, so a free account is refused without the
+    server reading 40 rows to tell them so.
+    """
+    require_premium(user, "reading_test")
     if test_number not in reading_bank.READING_TESTS:
         raise HTTPException(status_code=404, detail="Unknown test")
     res = await db.execute(
@@ -5951,7 +5995,13 @@ async def listening_check_one(listening_question_id: str, body: ListeningCheckIn
 async def listening_submit(test_number: int, body: ListeningSubmitIn,
                            user: User = Depends(get_current_user),
                            db: AsyncSession = Depends(get_db)):
-    """Grade a whole paper, record it, and return every explanation."""
+    """Grade a whole paper, record it, and return every explanation.
+
+    Premium, for the same reason as its reading counterpart: this endpoint is
+    test mode, practice marks one question at a time through /check, so the
+    free surface keeps all 40 papers and loses only the timed sitting.
+    """
+    require_premium(user, "listening_test")
     if test_number not in listening_bank.LISTENING_TESTS:
         raise HTTPException(status_code=404, detail="Unknown test")
     res = await db.execute(

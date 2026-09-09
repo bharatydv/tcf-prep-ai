@@ -700,6 +700,7 @@
     "pageTitle": "Entraînement à la compréhension orale",
     "practiceBody": "Écoutez les documents audio un par un et vérifiez vos réponses immédiatement.",
     "practiceBullet": "Audio + questions à choix multiple",
+    "testPremium": "Le mode examen chronométré fait partie des formules payantes. Le mode entraînement reste gratuit, avec les 40 épreuves.",
     "soonBody": "Nous enregistrons les audios et rédigeons les banques de questions. L'expression écrite, l'expression orale et la compréhension écrite sont déjà disponibles.",
     "soonTitle": "La compréhension orale arrive bientôt"
   },
@@ -885,10 +886,10 @@
     "feeNote": "Les prix n'incluent pas les frais de traitement de {{pct}} %, detailles au moment du paiement.",
     "firstTime": "Tarif de bienvenue",
     "freeDuration": "gratuit, sans limite de durée",
-    "freeListening": "Les 40 tests de compréhension orale — entièrement gratuits",
+    "freeListening": "Les 40 épreuves de compréhension orale en mode entraînement — entièrement gratuites",
     "freeName": "Gratuit",
     "freeNoCard": "Sans carte bancaire",
-    "freeReading": "Les 40 tests de compréhension écrite — entièrement gratuits",
+    "freeReading": "Les 40 épreuves de compréhension écrite en mode entraînement — entièrement gratuites",
     "freeTrial": "3 corrections à l'écrit + 3 évaluations à l'oral",
     "goDashboard": "Aller au tableau de bord",
     "mostPopular": "LE PLUS CHOISI",
@@ -925,7 +926,8 @@
     "pageDesc": "Travaillez la compréhension écrite du TCF et du TEF Canada avec des épreuves classées par niveau, une correction immédiate et une explication pour chaque option.",
     "pageTitle": "Entraînement à la compréhension écrite",
     "practiceBody": "Travaillez les textes un par un et vérifiez vos réponses immédiatement.",
-    "practiceBullet": "Texte + questions à choix multiple"
+    "practiceBullet": "Texte + questions à choix multiple",
+    "testPremium": "Le mode examen chronométré fait partie des formules payantes. Le mode entraînement reste gratuit, avec les 40 épreuves."
   },
   "readTest": {
     "breakdown": "Le raisonnement",

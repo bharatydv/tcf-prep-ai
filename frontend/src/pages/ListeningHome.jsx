@@ -2,6 +2,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   Sparkle, Compass, Headphones, ClockCountdown, CheckCircle,
 } from '@phosphor-icons/react';
+import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { useSeo } from '../lib/seo';
@@ -28,6 +29,12 @@ export default function ListeningHome() {
   };
   const startTest = () => {
     if (!user) return navigate('/login');
+    // Premium, like its reading counterpart, and refused before the paper
+    // opens rather than after the sitting is spent.
+    if (!user.premium) {
+      toast.info(t('listen.testPremium'));
+      return navigate('/pricing');
+    }
     navigate('/listening/test');
   };
 
