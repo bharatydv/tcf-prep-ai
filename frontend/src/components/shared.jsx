@@ -660,50 +660,14 @@ export function ErrorHighlightedText({ text, errors }) {
   return <p className="whitespace-pre-wrap leading-8">{parts}</p>;
 }
 
-/* ------------------------------------------------------------ Heatmap ---- */
-/* The server buckets each day in the LEARNER's timezone — that is the whole
-   point of /api/dashboard/heatmap and of the timezone column behind it — so the
-   keys it returns are local calendar days. Building them here with
-   toISOString() read them back as UTC: for a candidate in Montréal practising
-   after 8pm, "today" serialises as tomorrow's UTC date, which is not a key the
-   server sent, and the square they had just earned rendered grey. */
-const dayKey = (d) => `${d.getFullYear()}-${
-  String(d.getMonth() + 1).padStart(2, '0')}-${
-  String(d.getDate()).padStart(2, '0')}`;
-
-export function Heatmap({ data }) {
-  const days = [];
-  const today = new Date();
-  for (let i = 364; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    days.push({ key: dayKey(d), count: data?.[dayKey(d)] || 0, date: d });
-  }
-  // pad so columns are full weeks starting Sunday. Read off the Date itself,
-  // not off a re-parsed 'YYYY-MM-DD' string — that parses as UTC midnight and
-  // names the wrong weekday west of Greenwich.
-  const firstDow = days[0].date.getDay();
-  const padded = Array(firstDow).fill(null).concat(days);
-  const weeks = [];
-  for (let i = 0; i < padded.length; i += 7) weeks.push(padded.slice(i, i + 7));
-  const color = (c) => (c === 0 ? '#F3F4F6' : c === 1 ? '#DDD6FE' : c === 2 ? '#A78BFA' : c <= 4 ? '#7C3AED' : '#5B21B6');
-  return (
-    <div className="overflow-x-auto pb-2" data-testid="heatmap">
-      <div className="flex gap-[3px]">
-        {weeks.map((w, wi) => (
-          <div key={wi} className="flex flex-col gap-[3px]">
-            {Array.from({ length: 7 }).map((_, di) => {
-              const d = w[di];
-              return <div key={di} title={d ? `${d.key}: ${d.count}` : ''}
-                className="h-[11px] w-[11px] rounded-[3px]"
-                style={{ background: d ? color(d.count) : 'transparent' }} />;
-            })}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+/* The Heatmap that lived here is gone — the dashboard was its only caller and
+   the owner did not want it. /api/dashboard/heatmap and the timezone column
+   behind it are untouched on the server, so restoring it is a git revert
+   rather than a rebuild. If it does come back, the reason it read the weekday
+   off the Date rather than a re-parsed 'YYYY-MM-DD' string is worth keeping:
+   that string parses as UTC midnight, so for a candidate in Montréal
+   practising after 8pm, "today" serialised as tomorrow and the square they had
+   just earned rendered grey. */
 
 /* useTextInsert: shared cursor-insert state helper for writing surfaces */
 export function useWritingBox(initial = '') {

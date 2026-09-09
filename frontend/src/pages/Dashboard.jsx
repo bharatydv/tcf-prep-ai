@@ -9,7 +9,6 @@ import {
   BarChart, Bar, Cell, LineChart, Line,
 } from 'recharts';
 import { api, errMsg, CATEGORY_META } from '../lib/api';
-import { Heatmap } from '../components/shared';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
 
@@ -65,7 +64,6 @@ function NotForSkill({ children }) {
 export default function Dashboard() {
   const t = useT();
   const [stats, setStats] = useState(null);
-  const [heatmap, setHeatmap] = useState({});
   const [mistakes, setMistakes] = useState(null);
   const [subs, setSubs] = useState([]);
   const [reading, setReading] = useState([]);
@@ -82,7 +80,6 @@ export default function Dashboard() {
     api.get('/api/dashboard/stats')
       .then(({ data }) => setStats(data))
       .catch((e) => setError(errMsg(e, t('dash.loadError'))));
-    api.get('/api/dashboard/heatmap').then(({ data }) => setHeatmap(data.heatmap)).catch(() => {});
     api.get('/api/mistakes/summary').then(({ data }) => setMistakes(data)).catch(() => {});
     api.get('/api/submissions').then(({ data }) => setSubs(data.submissions || [])).catch(() => {});
     // Reading and listening live in their own tables, not in submissions, so a
@@ -401,11 +398,6 @@ export default function Dashboard() {
           </div>
         </section>
       )}
-
-      <section className="card mt-5 p-6">
-        <Head title={t('dash.heatmap')} note={t('dash.allTime')} />
-        <Heatmap data={heatmap} />
-      </section>
 
       {/* HISTORY — now covers all four papers, so which paper an attempt was
           is a column rather than something the reader has to infer. */}
