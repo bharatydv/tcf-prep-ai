@@ -4,7 +4,7 @@ import { Fire, SignOut, List, X, SquaresFour, ArrowLeft } from '@phosphor-icons/
 import { useAuth } from '../context/AuthContext';
 import { ACCENTS, CATEGORY_META, announcePaywall, paywallDetail } from '../lib/api';
 import { FREE_TRIAL_TOTAL, FREE_WRITING, WRITING_TASKS, countWords, freeWordStatus, wordStatus } from '../lib/tcf';
-import { LANGUAGES, useI18n, useT } from '../i18n';
+import { LANGUAGES, formatDate, useI18n, useT } from '../i18n';
 
 /* --------------------------------------------------------- ComingSoon ---- */
 /* A skill that is not ready yet. Deliberately a full replacement for the page
@@ -671,7 +671,27 @@ const dayKey = (d) => `${d.getFullYear()}-${
   String(d.getMonth() + 1).padStart(2, '0')}-${
   String(d.getDate()).padStart(2, '0')}`;
 
+const HEAT_STEPS = ['#F3F4F6', '#DDD6FE', '#A78BFA', '#7C3AED', '#5B21B6'];
+const heatColor = (c) => (c === 0 ? HEAT_STEPS[0] : c === 1 ? HEAT_STEPS[1]
+  : c === 2 ? HEAT_STEPS[2] : c <= 4 ? HEAT_STEPS[3] : HEAT_STEPS[4]);
+
+/* A year of practice: one column per week, one row per weekday.
+ *
+ * The grid was unlabelled, which made it decoration rather than data — you
+ * could see that some days were darker without being able to say which days.
+ * It now carries the three things that make a square readable: the month it
+ * sits in, the weekday it sits on, and, on hover, its date and count.
+ *
+ * Month names go above the week where the month first appears, not spread
+ * evenly: at 11px per column an evenly-spaced label points at the wrong week.
+ * Weekdays are labelled every other row, which is the only way three-letter
+ * names fit beside 11px cells without overlapping each other.
+ */
 export function Heatmap({ data }) {
+  const { lang } = useI18n();
+  const t = useT();
+  const locale = lang === 'fr' ? 'fr-CA' : 'en-US';
+
   const days = [];
   const today = new Date();
   for (let i = 364; i >= 0; i--) {
@@ -686,20 +706,88 @@ export function Heatmap({ data }) {
   const padded = Array(firstDow).fill(null).concat(days);
   const weeks = [];
   for (let i = 0; i < padded.length; i += 7) weeks.push(padded.slice(i, i + 7));
-  const color = (c) => (c === 0 ? '#F3F4F6' : c === 1 ? '#DDD6FE' : c === 2 ? '#A78BFA' : c <= 4 ? '#7C3AED' : '#5B21B6');
+
+  /* One label per month, at the first week containing it — and suppressed if
+     the previous label is closer than three columns, because "janv." and
+     "févr." at 14px apart overlap into an unreadable smear. */
+  const monthAt = [];
+  let lastLabelled = -99;
+  let prevMonth = null;
+  weeks.forEach((w, wi) => {
+    monthAt[wi] = '';
+    const first = w.find(Boolean);
+    if (!first) return;
+    const m = first.date.getMonth();
+    if (m === prevMonth) return;
+    prevMonth = m;
+    if (wi - lastLabelled >= 3) {
+      monthAt[wi] = first.date.toLocaleDateString(locale, { month: 'short' });
+      lastLabelled = wi;
+    }
+  });
+
+  /* Rows 1, 3 and 5 — Monday, Wednesday, Friday. 2024-01-07 was a Sunday, so
+     adding the row index lands on that row's weekday in any locale, rather
+     than hardcoding names that would then only be right in English. */
+  const weekdayName = (row) => new Date(2024, 0, 7 + row)
+    .toLocaleDateString(locale, { weekday: 'short' });
+
+  const titleFor = (d) => (d.count
+    ? t('dash.heatCount', { date: formatDate(d.date, lang), n: d.count })
+    : t('dash.heatNone', { date: formatDate(d.date, lang) }));
+
   return (
-    <div className="overflow-x-auto pb-2" data-testid="heatmap">
-      <div className="flex gap-[3px]">
-        {weeks.map((w, wi) => (
-          <div key={wi} className="flex flex-col gap-[3px]">
-            {Array.from({ length: 7 }).map((_, di) => {
-              const d = w[di];
-              return <div key={di} title={d ? `${d.key}: ${d.count}` : ''}
-                className="h-[11px] w-[11px] rounded-[3px]"
-                style={{ background: d ? color(d.count) : 'transparent' }} />;
-            })}
+    <div data-testid="heatmap">
+      <div className="overflow-x-auto pb-1">
+        <div className="inline-flex gap-2">
+          {/* weekday rail, pushed down by the height of the month row */}
+          <div className="flex shrink-0 flex-col gap-[3px]" style={{ marginTop: 16 }}
+            aria-hidden="true">
+            {Array.from({ length: 7 }).map((_, row) => (
+              <div key={row}
+                className="flex h-[11px] items-center text-[9px] leading-none text-gray-400">
+                {row === 1 || row === 3 || row === 5 ? weekdayName(row) : ''}
+              </div>
+            ))}
           </div>
+
+          <div>
+            {/* month rail. Each cell is one column wide and lets its label
+                spill to the right, so the name starts exactly at the week the
+                month starts in. */}
+            <div className="flex gap-[3px]" style={{ height: 16 }} aria-hidden="true">
+              {weeks.map((_, wi) => (
+                <div key={wi}
+                  className="w-[11px] overflow-visible whitespace-nowrap text-[9px] leading-none text-gray-400">
+                  {monthAt[wi]}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-[3px]">
+              {weeks.map((w, wi) => (
+                <div key={wi} className="flex flex-col gap-[3px]">
+                  {Array.from({ length: 7 }).map((_, di) => {
+                    const d = w[di];
+                    return (
+                      <div key={di} title={d ? titleFor(d) : ''}
+                        className="h-[11px] w-[11px] rounded-[3px]"
+                        style={{ background: d ? heatColor(d.count) : 'transparent' }} />
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center justify-end gap-1.5 text-[10px] text-gray-400">
+        <span>{t('dash.heatLess')}</span>
+        {HEAT_STEPS.map((c) => (
+          <span key={c} className="h-[10px] w-[10px] rounded-[3px]" style={{ background: c }} />
         ))}
+        <span>{t('dash.heatMore')}</span>
       </div>
     </div>
   );
