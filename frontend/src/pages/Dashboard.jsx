@@ -66,6 +66,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [mistakes, setMistakes] = useState(null);
   const [subs, setSubs] = useState([]);
+  const [comprehension, setComprehension] = useState(null);
   const [reading, setReading] = useState([]);
   const [listening, setListening] = useState([]);
   const [error, setError] = useState('');
@@ -81,6 +82,9 @@ export default function Dashboard() {
       .then(({ data }) => setStats(data))
       .catch((e) => setError(errMsg(e, t('dash.loadError'))));
     api.get('/api/mistakes/summary').then(({ data }) => setMistakes(data)).catch(() => {});
+    // Where reading and listening answers go wrong, by CEFR level. The AI
+    // error analysis cannot speak for these papers, but the level can.
+    api.get('/api/dashboard/comprehension').then(({ data }) => setComprehension(data)).catch(() => {});
     api.get('/api/submissions').then(({ data }) => setSubs(data.submissions || [])).catch(() => {});
     // Reading and listening live in their own tables, not in submissions, so a
     // dashboard that read only /api/submissions could never show two of the
@@ -182,6 +186,11 @@ export default function Dashboard() {
     name: CATEGORY_META[k]?.label || k, count: v, color: CATEGORY_META[k]?.color || '#ddd',
   }));
   const tone = TONE[skill];
+  /* Levels ordered A1→C2, not alphabetically by chance: the whole point of the
+     chart is reading where the wall is, which only works if the axis climbs. */
+  const levelData = (comprehension?.[skill] || [])
+    .filter((r) => r.asked > 0)
+    .sort((a, b) => a.level.localeCompare(b.level));
   const skillName = t(SKILLS.find((s) => s.id === skill).key);
   const aiGraded = AI_GRADED.has(skill);
 
@@ -301,8 +310,34 @@ export default function Dashboard() {
         </section>
 
         <section className="card p-6">
-          <Head title={t('dash.errorsByCategory')} note={t('dash.allTime')} />
-          {!aiGraded ? <NotForSkill>{t('dash.aiGradedOnly', { skill: skillName })}</NotForSkill> : breakdownData.some((d) => d.count > 0) ? (
+          <Head title={aiGraded ? t('dash.errorsByCategory') : t('dash.wrongByLevel')}
+            note={t('dash.allTime')} />
+          {/* A comprehension paper has no category of mistake, but every one of
+              its questions has a level — and which level a candidate starts
+              losing marks at is the number their result is capped by. */}
+          {!aiGraded ? (levelData.length ? (
+            <div className="h-64">
+              <ResponsiveContainer>
+                <BarChart data={levelData} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#EFEDF3" vertical={false} />
+                  <XAxis dataKey="level" tick={{ fontSize: 11, fill: '#9CA3AF' }}
+                    axisLine={false} tickLine={false} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#9CA3AF' }}
+                    axisLine={false} tickLine={false} width={44} />
+                  <Tooltip cursor={{ fill: '#F7F5FB' }}
+                    contentStyle={{ borderRadius: 10, border: '1px solid #E7E2F0', fontSize: 12 }}
+                    formatter={(v, _n, p) => [
+                      t('dash.wrongOfAsked', { wrong: v, asked: p.payload.asked }),
+                      t('dash.wrongLabel')]} />
+                  <Bar dataKey="wrong" radius={[5, 5, 0, 0]} fill={tone} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <p className="rounded-xl bg-gray-50 px-4 py-10 text-center text-sm text-gray-500">
+              {t('dash.noDataPeriod')}
+            </p>
+          )) : breakdownData.some((d) => d.count > 0) ? (
             <div className="h-64">
               <ResponsiveContainer>
                 <BarChart data={breakdownData} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>

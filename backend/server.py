@@ -5254,6 +5254,57 @@ async def dashboard_stats(user: User = Depends(get_current_user),
     }
 
 
+_COMPREHENSION_BY_LEVEL = """
+SELECT q.level,
+       COUNT(*) AS asked,
+       COUNT(*) FILTER (WHERE a.value IS DISTINCT FROM q.correct_answer) AS wrong
+FROM {attempts} ra
+CROSS JOIN LATERAL jsonb_each_text(COALESCE(ra.answers, '{{}}'::jsonb)) AS a(key, value)
+JOIN {questions} q ON q.{qid} = a.key
+WHERE ra.user_id = :uid
+GROUP BY q.level
+ORDER BY q.level
+"""
+
+
+@app.get("/api/dashboard/comprehension")
+async def dashboard_comprehension(user: User = Depends(get_current_user),
+                                  db: AsyncSession = Depends(get_db)):
+    """Where a learner's reading and listening answers go wrong, by CEFR level.
+
+    The dashboard's error analysis is built on AI grading, so it has nothing to
+    say about the two comprehension papers -- a right answer has no category of
+    mistake. It does have a level, though, and "solid to B1, collapses at B2"
+    is the single most useful sentence you can tell a TCF candidate, because it
+    names the band their result is actually capped by.
+
+    Recomputed from the stored answers rather than read from a column. The
+    submit endpoints already work this out and hand it to the browser, and
+    storing it there would have been cheaper to read -- but it would only ever
+    describe attempts taken after the column existed. The level lives on the
+    question and the pick lives on the attempt, so this join is the only place
+    the two have ever met, and it reaches every attempt already on record.
+
+    IS DISTINCT FROM rather than <>: an unanswered question is stored as JSON
+    null, and `null <> 'b'` is null, not true -- so a plain comparison counts
+    skipped questions as correct, which flatters exactly the level a candidate
+    is struggling with most.
+    """
+    from sqlalchemy import text as sa_text
+
+    out = {}
+    for kind, attempts, questions, qid in (
+            ("reading", "reading_attempts", "reading_questions", "reading_question_id"),
+            ("listening", "listening_attempts", "listening_questions", "listening_question_id")):
+        rows = await db.execute(
+            sa_text(_COMPREHENSION_BY_LEVEL.format(
+                attempts=attempts, questions=questions, qid=qid)),
+            {"uid": user.user_id})
+        out[kind] = [{"level": lvl, "asked": int(asked or 0), "wrong": int(wrong or 0)}
+                     for lvl, asked, wrong in rows.all()]
+    return out
+
+
 @app.get("/api/dashboard/heatmap")
 async def dashboard_heatmap(user: User = Depends(get_current_user),
                             db: AsyncSession = Depends(get_db)):
