@@ -22,7 +22,10 @@ export default function Pricing() {
   const { user, refreshUser } = useAuth();
   const t = useT();
   const navigate = useNavigate();
-  const { plans, currency, configured, loading } = useBillingPlans();
+  // `currency` is not destructured: the card stopped itemising the fee, and
+  // that breakdown was its only reader. Each plan's own price is formatted
+  // from the catalogue, so nothing here needs the catalogue-level code.
+  const { plans, configured, loading } = useBillingPlans();
   const [busy, setBusy] = useState('');
   const [prompt, promptDialog] = usePrompt();
 
