@@ -23,6 +23,10 @@ export default function ReadingHome() {
   };
   const startTest = () => {
     if (!user) return navigate('/login');
+    // No allowance check here: a free account has one sitting, and whether it
+    // is still unspent is known to the picker, which fetches the catalogue and
+    // is served free_tests_left with it. Guessing at it here would mean a
+    // second request for an answer the next screen already has.
     navigate('/reading/test');
   };
 
@@ -50,8 +54,8 @@ export default function ReadingHome() {
 
       {/* MODE CHOICE */}
       <PageIntro
-        title={t('read.pageTitle') || 'Reading Comprehension Practice'}
-        description={t('read.pageDesc') || 'Master TCF and TEF Canada reading comprehension with personalized practice exercises, instant feedback, and comprehensive explanations tailored to your level.'}
+        title={t('read.pageTitle')}
+        description={t('read.pageDesc')}
       />
 
       <section className="mx-auto max-w-5xl px-4 pt-10 sm:px-6">

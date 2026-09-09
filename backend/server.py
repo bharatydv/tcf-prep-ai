@@ -245,6 +245,20 @@ FREE_SPEAKING_LIMIT = 3
 FREE_SPEAKING_TACHE2_LIMIT = 1
 FREE_TRIAL_TOTAL = FREE_WRITING_LIMIT + FREE_SPEAKING_LIMIT
 FREE_MODEL_ANSWER_LIMIT = 3
+# One timed sitting of each comprehension paper, so a free account can find out
+# what test mode is before deciding whether it is worth paying for. Practice
+# mode is unmetered and stays that way: marking a multiple-choice answer costs
+# a database lookup, and the thing being rationed here is the timed sitting and
+# its score report, not the questions.
+#
+# Split per skill for the same reason the writing and speaking trial is split:
+# spending the reading sitting must not cost the listening one.
+#
+# NOT counted in FREE_TRIAL_TOTAL. That number is the AI-graded allowance and
+# is rendered as "corrections left" all over the frontend; adding a paper that
+# costs no AI call to it would misreport what a credit buys.
+FREE_READING_TEST_LIMIT = 1
+FREE_LISTENING_TEST_LIMIT = 1
 # Cost controls. The longest TCF tâche is 180 words, so 6000 characters is far
 # above any legitimate answer while still bounding what one credit can spend.
 MAX_TEXT_CHARS = 6000
@@ -1088,9 +1102,18 @@ def _send_email_sync(to: str, subject: str, body: str, attachments=None):
     in to follow.
     """
     if not SMTP_HOST:
-        # Development convenience. In production the boot check below refuses
-        # to start without SMTP, so this branch cannot silently swallow a
-        # password reset in front of real users.
+        # Development convenience -- and read the next sentence before relying
+        # on it. This claimed the boot check "refuses to start without SMTP".
+        # It does not: the check near the top only calls log.error() and the
+        # process starts anyway. So this branch CAN swallow a verification mail
+        # in front of real users, and it did -- registration on an SMTP-less
+        # deployment succeeds, email_verified stays False, and nobody is told,
+        # because returning here (rather than raising) makes send_email answer
+        # True to a caller that never checks it.
+        #
+        # The link is written to the log in full, token included. That is what
+        # makes this usable locally, and what makes it unsafe anywhere logs are
+        # readable by more people than can already reset a password.
         log.warning("SMTP not configured - %s link for %s:%s%s",
                     subject, to, NEWLINE, body)
         return
@@ -1499,6 +1522,56 @@ async def free_conversations_left(db: AsyncSession, user: User) -> int:
             Submission.created_at >= month_start,
         ))
     return max(0, FREE_CONVERSATION_LIMIT - (used or 0))
+
+
+async def free_comprehension_tests_left(db: AsyncSession, user: User,
+                                        kind: str) -> int:
+    """Timed sittings of `kind` still free to this account, once and for all.
+
+    Counted from the attempts already recorded rather than from a new column on
+    users -- the same trick free_conversations_left() uses, and for the same
+    reason: it needs no migration and cannot disagree with the history the
+    learner can see. The attempt row is written when a paper is graded, so the
+    count is exactly the number of sittings taken.
+
+    Not reset monthly, unlike conversations. This is a "see what test mode is"
+    allowance, not a recurring ration.
+    """
+    model, limit = ((ReadingAttempt, FREE_READING_TEST_LIMIT) if kind == "reading"
+                    else (ListeningAttempt, FREE_LISTENING_TEST_LIMIT))
+    used = await db.scalar(
+        select(func.count()).select_from(model)
+        .where(model.user_id == user.user_id))
+    return max(0, limit - (used or 0))
+
+
+async def enforce_comprehension_test_limit(db: AsyncSession, user: User,
+                                           kind: str) -> None:
+    """402 once the free sitting of `kind` has been used.
+
+    Deliberately checked before the paper is graded and NOT unwound afterwards:
+    unlike an AI credit there is no provider call to fail, so a sitting that
+    reaches here always produces a score. The attempt row is the counter, so
+    grading and counting cannot drift apart.
+    """
+    if is_premium(user):
+        return
+    if await free_comprehension_tests_left(db, user, kind) > 0:
+        return
+    raise HTTPException(status_code=402, detail={
+        "code": "comprehension_test_limit",
+        "kind": f"{kind}_test",
+        "msg": _COMPREHENSION_TEST_MSG.get(kind, _COMPREHENSION_TEST_MSG["reading"]),
+        "trial": trial_state(user),
+    })
+
+
+_COMPREHENSION_TEST_MSG = {
+    "reading": ("Vous avez utilisé votre examen blanc de compréhension écrite "
+                "gratuit. Le mode entraînement reste illimité."),
+    "listening": ("Vous avez utilisé votre examen blanc de compréhension orale "
+                  "gratuit. Le mode entraînement reste illimité."),
+}
 
 
 async def enforce_turn_budget(db: AsyncSession, user: User) -> None:
@@ -3958,6 +4031,14 @@ async def run_seeds():
                 current_streak=0, longest_streak=0,
                 last_activity_date=None, xp=0, badges=[],
                 model_answers_read=0, model_answer_topic_ids=[],
+                # Confirmed on creation, and it has to be. Login refuses an
+                # unconfirmed address, this row is seeded from ADMIN_EMAIL and
+                # ADMIN_PASSWORD rather than by anyone signing up, and the
+                # default address is on a domain that need not receive mail at
+                # all -- so without this the operator is locked out of their own
+                # admin panel by a confirmation link nobody can open.
+                email_verified=True,
+                email_verified_at=now_utc(),
             ))
             await db.commit()
             log.info("Seeded admin account %s", ADMIN_EMAIL)
@@ -4098,12 +4179,30 @@ MIGRATIONS = [
     "ALTER TABLE theme_questions ADD COLUMN IF NOT EXISTS doc_2 TEXT",
     # Refresh-token revocation. Existing sessions start at 0 and stay valid.
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER DEFAULT 0",
-    # Email confirmation. Accounts that predate it are treated as unverified,
-    # which only shows a banner — it never blocks anyone from working.
+    # Email confirmation. This once said "it never blocks anyone from working",
+    # and that was true while the flag only drove a banner. Login now refuses an
+    # unconfirmed address, so DEFAULT FALSE would block every account that
+    # predates the requirement at its next sign-in.
     "ALTER TABLE users "
     "ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE",
     "ALTER TABLE users "
     "ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ",
+    # Accounts that predate the requirement are grandfathered in: confirmation
+    # is asked once, at registration, and nobody who signed up under the old
+    # rule is made to pass a check that did not exist when they joined.
+    #
+    # The date is the cutoff rather than a marker column, and it is doing real
+    # work: `WHERE email_verified = FALSE` alone would be unconditional, so it
+    # would re-confirm every new unverified account on every later boot and
+    # quietly delete the whole requirement. Bounded by created_at it matches
+    # only rows that existed when this shipped, and is a no-op from the second
+    # boot onwards.
+    #
+    # Anyone registering between this being written and it being deployed is
+    # also grandfathered, which is correct: they signed up while the old rule
+    # was still the one running.
+    "UPDATE users SET email_verified = TRUE, email_verified_at = NOW() "
+    "WHERE email_verified = FALSE AND created_at < TIMESTAMPTZ '2026-09-10'",
     # SMS confirmation, the second channel.
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(32)",
     "ALTER TABLE users "
@@ -4406,11 +4505,23 @@ async def register(body: RegisterIn, response: Response,
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    set_auth_cookies(response, user.user_id, user.token_version or 0)
-    # Confirmation is offered, never enforced: blocking practice behind a link
-    # that may land in spam would cost more accounts than it protects.
-    await _send_verification_email(db, user)
-    return {"user": public_user(user)}
+    # No session is opened here. Confirmation used to be offered and never
+    # enforced -- the reasoning was that a link landing in spam costs more
+    # accounts than it protects, which was true while nothing could be bought.
+    # It stopped being true when checkout opened: an address nobody confirmed
+    # is an address the invoice never reaches and a chargeback nobody can
+    # rebut. Signing the new account straight in would put it past the very
+    # check that now exists, so the cookies are not set and login is where the
+    # requirement is enforced.
+    #
+    # `email_sent` is reported rather than swallowed. send_email answers False
+    # on a delivery failure AND True when SMTP is simply not configured (it
+    # logs the link instead), so this tells the caller whether we believe a
+    # message went out -- not that one arrived.
+    sent = await _send_verification_email(db, user)
+    return {"user": public_user(user),
+            "verification_required": True,
+            "email_sent": bool(sent)}
 
 
 async def _send_verification_email(db: AsyncSession, user: User) -> bool:
@@ -4433,6 +4544,28 @@ async def login(body: LoginIn, response: Response,
                       user.password_hash if user else _DUMMY_PASSWORD_HASH)
     if not user or not ok:
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    # Confirmation is enforced, and enforced HERE rather than a line earlier,
+    # which is the whole security argument for this block: the password has
+    # already been checked, so only someone who owns the credentials ever sees
+    # this reply. Moving it above the bcrypt call would turn login into an
+    # address-enumeration oracle -- "not verified" for a real account and
+    # "invalid password" for one that does not exist.
+    #
+    # A fresh link is sent on every blocked attempt, because the alternative is
+    # a dead end: resend-verification needs a session, and the whole point of
+    # this branch is that there isn't one. Someone whose first mail expired or
+    # went to spam gets a new one by doing the obvious thing -- trying to log
+    # in again -- rather than by finding a page they cannot reach.
+    if not user.email_verified:
+        await _send_verification_email(db, user)
+        raise HTTPException(status_code=403, detail={
+            "code": "email_not_verified",
+            # errMsg() renders detail.msg, so this stays readable in a toast
+            # for any caller that does not know about the code.
+            "msg": "Confirm your email address before signing in. "
+                   "We have just sent you a new link.",
+            "email": user.email,
+        })
     set_auth_cookies(response, user.user_id, user.token_version or 0)
     return {"user": public_user(user)}
 
@@ -5121,6 +5254,57 @@ async def dashboard_stats(user: User = Depends(get_current_user),
     }
 
 
+_COMPREHENSION_BY_LEVEL = """
+SELECT q.level,
+       COUNT(*) AS asked,
+       COUNT(*) FILTER (WHERE a.value IS DISTINCT FROM q.correct_answer) AS wrong
+FROM {attempts} ra
+CROSS JOIN LATERAL jsonb_each_text(COALESCE(ra.answers, '{{}}'::jsonb)) AS a(key, value)
+JOIN {questions} q ON q.{qid} = a.key
+WHERE ra.user_id = :uid
+GROUP BY q.level
+ORDER BY q.level
+"""
+
+
+@app.get("/api/dashboard/comprehension")
+async def dashboard_comprehension(user: User = Depends(get_current_user),
+                                  db: AsyncSession = Depends(get_db)):
+    """Where a learner's reading and listening answers go wrong, by CEFR level.
+
+    The dashboard's error analysis is built on AI grading, so it has nothing to
+    say about the two comprehension papers -- a right answer has no category of
+    mistake. It does have a level, though, and "solid to B1, collapses at B2"
+    is the single most useful sentence you can tell a TCF candidate, because it
+    names the band their result is actually capped by.
+
+    Recomputed from the stored answers rather than read from a column. The
+    submit endpoints already work this out and hand it to the browser, and
+    storing it there would have been cheaper to read -- but it would only ever
+    describe attempts taken after the column existed. The level lives on the
+    question and the pick lives on the attempt, so this join is the only place
+    the two have ever met, and it reaches every attempt already on record.
+
+    IS DISTINCT FROM rather than <>: an unanswered question is stored as JSON
+    null, and `null <> 'b'` is null, not true -- so a plain comparison counts
+    skipped questions as correct, which flatters exactly the level a candidate
+    is struggling with most.
+    """
+    from sqlalchemy import text as sa_text
+
+    out = {}
+    for kind, attempts, questions, qid in (
+            ("reading", "reading_attempts", "reading_questions", "reading_question_id"),
+            ("listening", "listening_attempts", "listening_questions", "listening_question_id")):
+        rows = await db.execute(
+            sa_text(_COMPREHENSION_BY_LEVEL.format(
+                attempts=attempts, questions=questions, qid=qid)),
+            {"uid": user.user_id})
+        out[kind] = [{"level": lvl, "asked": int(asked or 0), "wrong": int(wrong or 0)}
+                     for lvl, asked, wrong in rows.all()]
+    return out
+
+
 @app.get("/api/dashboard/heatmap")
 async def dashboard_heatmap(user: User = Depends(get_current_user),
                             db: AsyncSession = Depends(get_db)):
@@ -5645,13 +5829,22 @@ async def reading_tests(user: User = Depends(get_current_user),
     counts = {row[0]: {"question_count": row[1],
                        "level_from": row[2], "level_to": row[3]}
               for row in res.all()}
-    return {"tests": [
-        {"test_number": n,
-         "question_count": counts.get(n, {}).get("question_count", 0),
-         "level_from": counts.get(n, {}).get("level_from") or "A1",
-         "level_to": counts.get(n, {}).get("level_to") or "C2",
-         "is_ready": counts.get(n, {}).get("question_count", 0) > 0}
-        for n in sorted(reading_bank.READING_TESTS)]}
+    return {
+        "tests": [
+            {"test_number": n,
+             "question_count": counts.get(n, {}).get("question_count", 0),
+             "level_from": counts.get(n, {}).get("level_from") or "A1",
+             "level_to": counts.get(n, {}).get("level_to") or "C2",
+             "is_ready": counts.get(n, {}).get("question_count", 0) > 0}
+            for n in sorted(reading_bank.READING_TESTS)],
+        # Served with the catalogue so the picker knows the allowance BEFORE a
+        # paper is opened. Refusing at hand-in would be correct and useless:
+        # the learner has already spent the sitting by then. None means
+        # unlimited, matching credits_remaining in public_user().
+        "free_tests_left": (None if is_premium(user)
+                            else await free_comprehension_tests_left(
+                                db, user, "reading")),
+    }
 
 
 @app.get("/api/reading/tests/{test_number}")
@@ -5699,7 +5892,18 @@ async def reading_check_one(reading_question_id: str, body: ReadingCheckIn,
 async def reading_submit(test_number: int, body: ReadingSubmitIn,
                          user: User = Depends(get_current_user),
                          db: AsyncSession = Depends(get_db)):
-    """Grade a whole paper, record it, and return every explanation."""
+    """Grade a whole paper, record it, and return every explanation.
+
+    This endpoint IS test mode -- practice marks a question at a time through
+    /check and never comes here -- so metering it leaves the free surface
+    untouched: all 40 papers, every question, every explanation, one answer at
+    a time. What is rationed is the timed sitting and its score report, and a
+    free account gets one of those.
+
+    Checked before any work is done, so an account past its allowance is
+    refused without the server reading 40 rows to tell them so.
+    """
+    await enforce_comprehension_test_limit(db, user, "reading")
     if test_number not in reading_bank.READING_TESTS:
         raise HTTPException(status_code=404, detail="Unknown test")
     res = await db.execute(
@@ -5830,13 +6034,20 @@ async def listening_tests(user: User = Depends(get_current_user),
     counts = {row[0]: {"question_count": row[1],
                        "level_from": row[2], "level_to": row[3]}
               for row in res.all()}
-    return {"tests": [
-        {"test_number": n,
-         "question_count": counts.get(n, {}).get("question_count", 0),
-         "level_from": counts.get(n, {}).get("level_from") or "A1",
-         "level_to": counts.get(n, {}).get("level_to") or "C2",
-         "is_ready": counts.get(n, {}).get("question_count", 0) > 0}
-        for n in sorted(listening_bank.LISTENING_TESTS)]}
+    return {
+        "tests": [
+            {"test_number": n,
+             "question_count": counts.get(n, {}).get("question_count", 0),
+             "level_from": counts.get(n, {}).get("level_from") or "A1",
+             "level_to": counts.get(n, {}).get("level_to") or "C2",
+             "is_ready": counts.get(n, {}).get("question_count", 0) > 0}
+            for n in sorted(listening_bank.LISTENING_TESTS)],
+        # Counted separately from reading: one allowance must not spend the
+        # other. None means unlimited.
+        "free_tests_left": (None if is_premium(user)
+                            else await free_comprehension_tests_left(
+                                db, user, "listening")),
+    }
 
 
 @app.get("/api/listening/tests/{test_number}")
@@ -5882,7 +6093,12 @@ async def listening_check_one(listening_question_id: str, body: ListeningCheckIn
 async def listening_submit(test_number: int, body: ListeningSubmitIn,
                            user: User = Depends(get_current_user),
                            db: AsyncSession = Depends(get_db)):
-    """Grade a whole paper, record it, and return every explanation."""
+    """Grade a whole paper, record it, and return every explanation.
+
+    Metered like its reading counterpart, and counted separately: spending the
+    reading sitting must not cost the listening one.
+    """
+    await enforce_comprehension_test_limit(db, user, "listening")
     if test_number not in listening_bank.LISTENING_TESTS:
         raise HTTPException(status_code=404, detail="Unknown test")
     res = await db.execute(

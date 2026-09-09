@@ -84,6 +84,20 @@ export function AuthProvider({ children }) {
       markAnonymous(false);
       return { ok: true, user: data.user };
     } catch (e) {
+      // An unconfirmed address is not a failed login, and showing it as one
+      // ("Login failed") sends someone to reset a password that was right.
+      // The server answers 403 with a code so this branch can say what is
+      // actually wrong, and it has already sent a fresh link by the time we
+      // get here.
+      const detail = e?.response?.data?.detail;
+      if (detail?.code === 'email_not_verified') {
+        return {
+          ok: false,
+          verificationRequired: true,
+          email: detail.email || email,
+          error: errMsg(e, 'Login failed'),
+        };
+      }
       return { ok: false, error: errMsg(e, 'Login failed') };
     }
   };
@@ -91,6 +105,19 @@ export function AuthProvider({ children }) {
   const register = async (name, email, password) => {
     try {
       const { data } = await api.post('/auth/register', { name, email, password });
+      // The account exists but has no session: the server no longer sets
+      // cookies at registration, because confirmation is required first.
+      // Calling setUser() here would render a signed-in shell on top of
+      // requests that carry no cookie, so every call behind it would 401 and
+      // the failure would look like a broken app rather than a pending step.
+      if (data.verification_required) {
+        return {
+          ok: true,
+          verificationRequired: true,
+          email: data.user?.email || email,
+          emailSent: data.email_sent !== false,
+        };
+      }
       setUser(data.user);
       markAnonymous(false);
       return { ok: true, user: data.user };

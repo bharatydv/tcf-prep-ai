@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import {
   ClockCountdown, CheckCircle, Lock, CaretRight, Lightning,
 } from '@phosphor-icons/react';
+import { toast } from 'sonner';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
@@ -22,6 +23,7 @@ export default function ReadingTests() {
 
   const [tests, setTests] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [freeTestsLeft, setFreeTestsLeft] = useState(null);
 
   useEffect(() => {
     // Require authentication for both practice and test modes
@@ -31,13 +33,25 @@ export default function ReadingTests() {
     }
 
     api.get('/api/reading/tests')
-      .then(({ data }) => setTests(data.tests || []))
+      .then(({ data }) => {
+        setTests(data.tests || []);
+        // null is unlimited (premium); a number is what a free account has
+        // left. Taken from the server rather than inferred from the user row,
+        // because the count lives in reading_attempts and nowhere else.
+        setFreeTestsLeft(data.free_tests_left ?? null);
+      })
       .catch(() => setTests([]))
       .finally(() => setLoading(false));
   }, [user, navigate]);
 
   const open = (paper) => {
     if (!paper.is_ready) return;
+    // One free timed sitting. Refused here rather than at hand-in, where the
+    // learner has already spent the hour it takes to earn the refusal.
+    if (isTest && freeTestsLeft === 0) {
+      toast.info(t('read.testUsed'));
+      return navigate('/pricing');
+    }
     navigate(`/reading/${isTest ? 'test' : 'practice'}/${paper.test_number}`);
   };
 

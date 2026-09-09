@@ -36,8 +36,8 @@ export default function Resources() {
       </section>
 
       <PageIntro
-        title={t('res.introTitle') || 'Learning Resources'}
-        description={t('res.introDesc') || 'Access comprehensive learning materials, guides, and FAQs to support your TCF and TEF Canada exam preparation journey.'}
+        title={t('res.introTitle')}
+        description={t('res.introDesc')}
       />
 
       <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6">

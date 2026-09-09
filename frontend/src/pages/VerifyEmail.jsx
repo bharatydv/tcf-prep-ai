@@ -15,7 +15,7 @@ import { Seo } from '../lib/seo';
 export default function VerifyEmail() {
   const t = useT();
   const [params] = useSearchParams();
-  const { refreshUser } = useAuth();
+  const { refreshUser, user } = useAuth();
   const token = params.get('token') || '';
   const [state, setState] = useState('working'); // working | ok | failed
   // React 18+ mounts effects twice in development; without this the token is
@@ -52,8 +52,14 @@ export default function VerifyEmail() {
             <h1 className="mt-4 font-heading text-2xl font-bold text-gray-900" data-testid="verify-result">
               {ok ? t('auth.verifyOk') : t('auth.verifyFail')}
             </h1>
-            <Link to={ok ? '/practice' : '/dashboard'} className="btn-primary mt-7 w-full">
-              {ok ? t('nav.writing') : t('nav.dashboard')}
+            {/* Registration no longer opens a session, so the usual arrival
+                here is someone confirming from their mail client with no
+                cookie at all. Both of the old destinations were behind the
+                auth guard, which bounced them to /login one click later and
+                made a successful confirmation feel like a failure. Send them
+                straight there unless refreshUser() found a live session. */}
+            <Link to={ok && user ? '/practice' : '/login'} className="btn-primary mt-7 w-full">
+              {ok && user ? t('nav.writing') : t('nav.login')}
             </Link>
           </>
         )}

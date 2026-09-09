@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Lightning, PenNib, Sparkle, BookOpen, ArrowRight,
+  Lightning, PenNib, Sparkle, BookOpen, ArrowRight, Info, X,
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, BACKEND_URL } from '../lib/api';
-import { FREE_WRITING, WRITING_TASKS, clampWords, wordStatus } from '../lib/tcf';
+import { FREE_WRITING, WRITING_TASKS, countWords, wordStatus } from '../lib/tcf';
 import { useAuth } from '../context/AuthContext';
 import { AnalysisProgress, BackLink, CreditsBadge, WordCountBar, streamAnalysis, useConfirm } from '../components/shared';
 import { useT } from '../i18n';
@@ -29,7 +29,9 @@ export default function PracticeWrite() {
   const tacheNum = parseInt(tacheParam, 10) || 1;
   const themeId = searchParams.get('theme');
   // Bare /practice/write — no tâche, no theme — is free writing: no tâche
-  // header, no test list, and the 180/200 ceiling instead of a tâche's range.
+  // header, no test list, and a 180-word advisory instead of a tâche's range.
+  // Advisory, not a ceiling — see FREE_WRITING in lib/tcf.js for why the old
+  // 200-word cap had to go.
   const freeWriting = !tacheParam && !themeId;
   // Free writing has no official length; a tâche does.
   const taskType = freeWriting ? null : (WRITING_TASKS[tacheNum] ? tacheNum : null);
@@ -43,6 +45,8 @@ export default function PracticeWrite() {
   const [activeTopicId, setActiveTopicId] = useState(null);
   const [ownQuestion, setOwnQuestion] = useState('');
   const [text, setText] = useState('');
+  // Closed for the rest of the sitting, not just until the next keystroke.
+  const [lengthNoticeClosed, setLengthNoticeClosed] = useState(false);
   const [stage, setStage] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const taRef = useRef(null);
@@ -316,11 +320,13 @@ export default function PracticeWrite() {
               <textarea
                 ref={taRef}
                 value={text}
-                /* Free writing stops dead at 200 words: the exam's longest
-                   tâche asks for 180, so there is nothing to gain past that. */
-                onChange={(e) => setText(freeWriting
-                  ? clampWords(e.target.value, FREE_WRITING.maxWords)
-                  : e.target.value)}
+                /* No clamp. Free writing used to truncate at 200 words on
+                   every keystroke, which quietly ate the second half of a
+                   spoken answer someone had typed up to be marked. The counter
+                   below warns past 180 and the server still refuses anything
+                   over 6000 characters, so length is reported rather than
+                   enforced by deletion. */
+                onChange={(e) => setText(e.target.value)}
                 onDrop={(e) => e.preventDefault()}
                 lang="fr"
                 className="input paper-textarea min-h-[340px] p-6 shadow-card"
@@ -328,6 +334,28 @@ export default function PracticeWrite() {
                 data-testid="writing-textarea"
               />
             </div>
+
+            {/* Dismissible, and dismissed for good once closed. Past 180 words
+                a learner is usually typing up a spoken answer on purpose, so
+                the notice explains itself once and then gets out of the way —
+                re-raising it on every submission would be nagging someone
+                about a decision they have already made. Nothing here blocks:
+                the button below stays live whether this is open or closed. */}
+            {freeWriting && !lengthNoticeClosed
+              && countWords(text) > FREE_WRITING.warnWords && (
+              <div className="mt-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3"
+                data-testid="length-notice">
+                <Info size={17} weight="duotone" className="mt-0.5 shrink-0 text-amber-600" />
+                <p className="flex-1 text-[13px] leading-relaxed text-amber-900">
+                  {t('write.longNotice', { warn: FREE_WRITING.warnWords })}
+                </p>
+                <button type="button" onClick={() => setLengthNoticeClosed(true)}
+                  aria-label={t('common.dismiss')}
+                  className="-m-1 shrink-0 rounded-lg p-1 text-amber-600 transition hover:bg-amber-100">
+                  <X size={15} weight="bold" />
+                </button>
+              </div>
+            )}
 
             <WordCountBar text={text} taskType={taskType} free={freeWriting} className="mt-4" />
 

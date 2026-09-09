@@ -18,6 +18,9 @@ export default function Register() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  // The address a link was sent to. Set only on the confirmation path, and it
+  // is what swaps the form for the "check your inbox" panel below.
+  const [sentTo, setSentTo] = useState('');
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
   const submit = async (e) => {
@@ -28,11 +31,42 @@ export default function Register() {
     setBusy(true);
     const res = await register(form.name, form.email, form.password);
     setBusy(false);
+    if (res.ok && res.verificationRequired) {
+      // No session was opened, so there is nowhere to navigate to -- and
+      // res.user is undefined on this path, which is why the old
+      // `res.user.role` line could not stay.
+      setSentTo(res.email);
+      return;
+    }
     if (res.ok) {
       toast.success(t('auth.created'));
-      navigate(res.user.role === 'admin' ? '/admin' : '/practice');
+      navigate(res.user?.role === 'admin' ? '/admin' : '/practice');
     } else { setError(res.error); toast.error(res.error); }
   };
+
+  if (sentTo) {
+    return (
+      <main className="flex min-h-[calc(100dvh-4rem)] items-center justify-center bg-gradient-to-br from-violet-50 via-white to-violet-100 px-4 py-12">
+        <Seo titleKey="seo.register.title" descKey="seo.register.desc" path="/register" />
+        <div className="card w-full max-w-md p-8 text-center" data-testid="verify-sent">
+          <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-50 text-primary">
+            <EnvelopeSimple size={28} weight="duotone" />
+          </span>
+          <h1 className="mt-4 font-heading text-2xl font-bold text-gray-900">
+            {t('auth.checkInboxTitle')}
+          </h1>
+          <p className="mt-3 text-sm leading-relaxed text-gray-600">
+            {t('auth.checkInboxBody')}
+          </p>
+          <p className="mt-2 break-all font-semibold text-gray-900">{sentTo}</p>
+          <p className="mt-4 text-xs leading-relaxed text-gray-500">
+            {t('auth.checkInboxSpam')}
+          </p>
+          <Link to="/login" className="btn-primary mt-7 w-full">{t('nav.login')}</Link>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="flex min-h-[calc(100dvh-4rem)] items-center justify-center bg-gradient-to-br from-violet-50 via-white to-violet-100 px-4 py-12">
