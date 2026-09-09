@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import {
   ClockCountdown, Lock, CaretRight, Lightning, Headphones,
 } from '@phosphor-icons/react';
+import { toast } from 'sonner';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
@@ -23,6 +24,7 @@ export default function ListeningTests() {
 
   const [tests, setTests] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [freeTestsLeft, setFreeTestsLeft] = useState(null);
 
   useEffect(() => {
     // Require authentication for both practice and test modes
@@ -30,21 +32,23 @@ export default function ListeningTests() {
       navigate('/login');
       return;
     }
-    // Test mode is premium, and this path is reachable directly, so the home
-    // page's gate is repeated rather than relied on.
-    if (isTest && !user.premium) {
-      navigate('/pricing');
-      return;
-    }
 
     api.get('/api/listening/tests')
-      .then(({ data }) => setTests(data.tests || []))
+      .then(({ data }) => {
+        setTests(data.tests || []);
+        setFreeTestsLeft(data.free_tests_left ?? null);
+      })
       .catch(() => setTests([]))
       .finally(() => setLoading(false));
-  }, [user, isTest, navigate]);
+  }, [user, navigate]);
 
   const open = (paper) => {
     if (!paper.is_ready) return;
+    // One free timed sitting, counted separately from the reading one.
+    if (isTest && freeTestsLeft === 0) {
+      toast.info(t('listen.testUsed'));
+      return navigate('/pricing');
+    }
     navigate(`/listening/${isTest ? 'test' : 'practice'}/${paper.test_number}`);
   };
 

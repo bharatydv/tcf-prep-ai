@@ -245,6 +245,20 @@ FREE_SPEAKING_LIMIT = 3
 FREE_SPEAKING_TACHE2_LIMIT = 1
 FREE_TRIAL_TOTAL = FREE_WRITING_LIMIT + FREE_SPEAKING_LIMIT
 FREE_MODEL_ANSWER_LIMIT = 3
+# One timed sitting of each comprehension paper, so a free account can find out
+# what test mode is before deciding whether it is worth paying for. Practice
+# mode is unmetered and stays that way: marking a multiple-choice answer costs
+# a database lookup, and the thing being rationed here is the timed sitting and
+# its score report, not the questions.
+#
+# Split per skill for the same reason the writing and speaking trial is split:
+# spending the reading sitting must not cost the listening one.
+#
+# NOT counted in FREE_TRIAL_TOTAL. That number is the AI-graded allowance and
+# is rendered as "corrections left" all over the frontend; adding a paper that
+# costs no AI call to it would misreport what a credit buys.
+FREE_READING_TEST_LIMIT = 1
+FREE_LISTENING_TEST_LIMIT = 1
 # Cost controls. The longest TCF tâche is 180 words, so 6000 characters is far
 # above any legitimate answer while still bounding what one credit can spend.
 MAX_TEXT_CHARS = 6000
@@ -1480,39 +1494,6 @@ def trial_exhausted(kind: str, user: User) -> HTTPException:
     })
 
 
-def require_premium(user: User, kind: str) -> None:
-    """Gate a surface that is premium outright, rather than trial-metered.
-
-    Distinct from trial_exhausted() on purpose. That one means "you had some and
-    spent them", and the honest answer to it is to show what is left. This means
-    "this was never included in free", so there is no allowance to report and no
-    number that counting could ever make go up. The frontend needs to tell those
-    apart to avoid promising a free attempt that does not exist, hence a `code`
-    of its own rather than a reused one.
-
-    Raises rather than returning the exception, unlike trial_exhausted(): there
-    is no work to unwind here, so there is nothing for a caller to do with it
-    except raise it immediately.
-    """
-    if is_premium(user):
-        return
-    raise HTTPException(status_code=402, detail={
-        "code": "premium_only",
-        "kind": kind,
-        "msg": _PREMIUM_ONLY_MSG.get(kind, _PREMIUM_ONLY_MSG["default"]),
-        "trial": trial_state(user),
-    })
-
-
-_PREMIUM_ONLY_MSG = {
-    "reading_test": "Le mode examen de compréhension écrite fait partie des "
-                    "formules payantes. Le mode entraînement reste gratuit.",
-    "listening_test": "Le mode examen de compréhension orale fait partie des "
-                      "formules payantes. Le mode entraînement reste gratuit.",
-    "default": "Cette fonctionnalité fait partie des formules payantes.",
-}
-
-
 async def enforce_free_conversation_limit(db: AsyncSession, user: User) -> User:
     """Free-conversation allowance, counted from the conversations already
     graded this month. Derived from the submissions table rather than a new
@@ -1541,6 +1522,56 @@ async def free_conversations_left(db: AsyncSession, user: User) -> int:
             Submission.created_at >= month_start,
         ))
     return max(0, FREE_CONVERSATION_LIMIT - (used or 0))
+
+
+async def free_comprehension_tests_left(db: AsyncSession, user: User,
+                                        kind: str) -> int:
+    """Timed sittings of `kind` still free to this account, once and for all.
+
+    Counted from the attempts already recorded rather than from a new column on
+    users -- the same trick free_conversations_left() uses, and for the same
+    reason: it needs no migration and cannot disagree with the history the
+    learner can see. The attempt row is written when a paper is graded, so the
+    count is exactly the number of sittings taken.
+
+    Not reset monthly, unlike conversations. This is a "see what test mode is"
+    allowance, not a recurring ration.
+    """
+    model, limit = ((ReadingAttempt, FREE_READING_TEST_LIMIT) if kind == "reading"
+                    else (ListeningAttempt, FREE_LISTENING_TEST_LIMIT))
+    used = await db.scalar(
+        select(func.count()).select_from(model)
+        .where(model.user_id == user.user_id))
+    return max(0, limit - (used or 0))
+
+
+async def enforce_comprehension_test_limit(db: AsyncSession, user: User,
+                                           kind: str) -> None:
+    """402 once the free sitting of `kind` has been used.
+
+    Deliberately checked before the paper is graded and NOT unwound afterwards:
+    unlike an AI credit there is no provider call to fail, so a sitting that
+    reaches here always produces a score. The attempt row is the counter, so
+    grading and counting cannot drift apart.
+    """
+    if is_premium(user):
+        return
+    if await free_comprehension_tests_left(db, user, kind) > 0:
+        return
+    raise HTTPException(status_code=402, detail={
+        "code": "comprehension_test_limit",
+        "kind": f"{kind}_test",
+        "msg": _COMPREHENSION_TEST_MSG.get(kind, _COMPREHENSION_TEST_MSG["reading"]),
+        "trial": trial_state(user),
+    })
+
+
+_COMPREHENSION_TEST_MSG = {
+    "reading": ("Vous avez utilisé votre examen blanc de compréhension écrite "
+                "gratuit. Le mode entraînement reste illimité."),
+    "listening": ("Vous avez utilisé votre examen blanc de compréhension orale "
+                  "gratuit. Le mode entraînement reste illimité."),
+}
 
 
 async def enforce_turn_budget(db: AsyncSession, user: User) -> None:
@@ -5747,13 +5778,22 @@ async def reading_tests(user: User = Depends(get_current_user),
     counts = {row[0]: {"question_count": row[1],
                        "level_from": row[2], "level_to": row[3]}
               for row in res.all()}
-    return {"tests": [
-        {"test_number": n,
-         "question_count": counts.get(n, {}).get("question_count", 0),
-         "level_from": counts.get(n, {}).get("level_from") or "A1",
-         "level_to": counts.get(n, {}).get("level_to") or "C2",
-         "is_ready": counts.get(n, {}).get("question_count", 0) > 0}
-        for n in sorted(reading_bank.READING_TESTS)]}
+    return {
+        "tests": [
+            {"test_number": n,
+             "question_count": counts.get(n, {}).get("question_count", 0),
+             "level_from": counts.get(n, {}).get("level_from") or "A1",
+             "level_to": counts.get(n, {}).get("level_to") or "C2",
+             "is_ready": counts.get(n, {}).get("question_count", 0) > 0}
+            for n in sorted(reading_bank.READING_TESTS)],
+        # Served with the catalogue so the picker knows the allowance BEFORE a
+        # paper is opened. Refusing at hand-in would be correct and useless:
+        # the learner has already spent the sitting by then. None means
+        # unlimited, matching credits_remaining in public_user().
+        "free_tests_left": (None if is_premium(user)
+                            else await free_comprehension_tests_left(
+                                db, user, "reading")),
+    }
 
 
 @app.get("/api/reading/tests/{test_number}")
@@ -5803,16 +5843,16 @@ async def reading_submit(test_number: int, body: ReadingSubmitIn,
                          db: AsyncSession = Depends(get_db)):
     """Grade a whole paper, record it, and return every explanation.
 
-    Premium. This endpoint IS test mode -- practice marks a question at a time
-    through /check and never comes here, so gating it leaves the free surface
-    exactly as it was: all 40 papers, every question, every explanation, one
-    answer at a time. What is paid for is sitting the paper under the clock and
-    getting the score report at the end.
+    This endpoint IS test mode -- practice marks a question at a time through
+    /check and never comes here -- so metering it leaves the free surface
+    untouched: all 40 papers, every question, every explanation, one answer at
+    a time. What is rationed is the timed sitting and its score report, and a
+    free account gets one of those.
 
-    Checked before any work is done, so a free account is refused without the
-    server reading 40 rows to tell them so.
+    Checked before any work is done, so an account past its allowance is
+    refused without the server reading 40 rows to tell them so.
     """
-    require_premium(user, "reading_test")
+    await enforce_comprehension_test_limit(db, user, "reading")
     if test_number not in reading_bank.READING_TESTS:
         raise HTTPException(status_code=404, detail="Unknown test")
     res = await db.execute(
@@ -5943,13 +5983,20 @@ async def listening_tests(user: User = Depends(get_current_user),
     counts = {row[0]: {"question_count": row[1],
                        "level_from": row[2], "level_to": row[3]}
               for row in res.all()}
-    return {"tests": [
-        {"test_number": n,
-         "question_count": counts.get(n, {}).get("question_count", 0),
-         "level_from": counts.get(n, {}).get("level_from") or "A1",
-         "level_to": counts.get(n, {}).get("level_to") or "C2",
-         "is_ready": counts.get(n, {}).get("question_count", 0) > 0}
-        for n in sorted(listening_bank.LISTENING_TESTS)]}
+    return {
+        "tests": [
+            {"test_number": n,
+             "question_count": counts.get(n, {}).get("question_count", 0),
+             "level_from": counts.get(n, {}).get("level_from") or "A1",
+             "level_to": counts.get(n, {}).get("level_to") or "C2",
+             "is_ready": counts.get(n, {}).get("question_count", 0) > 0}
+            for n in sorted(listening_bank.LISTENING_TESTS)],
+        # Counted separately from reading: one allowance must not spend the
+        # other. None means unlimited.
+        "free_tests_left": (None if is_premium(user)
+                            else await free_comprehension_tests_left(
+                                db, user, "listening")),
+    }
 
 
 @app.get("/api/listening/tests/{test_number}")
@@ -5997,11 +6044,10 @@ async def listening_submit(test_number: int, body: ListeningSubmitIn,
                            db: AsyncSession = Depends(get_db)):
     """Grade a whole paper, record it, and return every explanation.
 
-    Premium, for the same reason as its reading counterpart: this endpoint is
-    test mode, practice marks one question at a time through /check, so the
-    free surface keeps all 40 papers and loses only the timed sitting.
+    Metered like its reading counterpart, and counted separately: spending the
+    reading sitting must not cost the listening one.
     """
-    require_premium(user, "listening_test")
+    await enforce_comprehension_test_limit(db, user, "listening")
     if test_number not in listening_bank.LISTENING_TESTS:
         raise HTTPException(status_code=404, detail="Unknown test")
     res = await db.execute(

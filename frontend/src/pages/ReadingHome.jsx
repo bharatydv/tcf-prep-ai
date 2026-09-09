@@ -2,7 +2,6 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   Sparkle, Compass, BookOpen, ClockCountdown, CheckCircle,
 } from '@phosphor-icons/react';
-import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
@@ -24,14 +23,10 @@ export default function ReadingHome() {
   };
   const startTest = () => {
     if (!user) return navigate('/login');
-    // Test mode is premium; practice is not. The server refuses the submission
-    // too, which is what actually enforces this -- but letting a free account
-    // sit 40 questions under the clock and only then be told costs them the
-    // whole sitting, so the same answer is given before the paper opens.
-    if (!user.premium) {
-      toast.info(t('read.testPremium'));
-      return navigate('/pricing');
-    }
+    // No allowance check here: a free account has one sitting, and whether it
+    // is still unspent is known to the picker, which fetches the catalogue and
+    // is served free_tests_left with it. Guessing at it here would mean a
+    // second request for an answer the next screen already has.
     navigate('/reading/test');
   };
 

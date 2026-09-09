@@ -700,7 +700,7 @@
     "pageTitle": "Listening Comprehension Practice",
     "practiceBody": "Listen to audio passages one at a time and check your answers instantly.",
     "practiceBullet": "Audio + multiple-choice questions",
-    "testPremium": "Timed test mode is part of the paid plans. Practice mode stays free, with all 40 papers.",
+    "testUsed": "You have used your free timed listening test. Practice mode stays free, with all 40 papers.",
     "soonBody": "We are recording the audio and writing the question banks. Writing, Speaking and Reading are ready in the meantime.",
     "soonTitle": "Listening is coming soon"
   },
@@ -886,10 +886,10 @@
     "feeNote": "Prices exclude a {{pct}}% payment processing fee, itemised at checkout before you pay.",
     "firstTime": "First-time price",
     "freeDuration": "always free",
-    "freeListening": "All 40 listening papers in practice mode — completely free",
+    "freeListening": "All 40 listening papers in practice mode, plus one timed test",
     "freeName": "Free",
     "freeNoCard": "No credit card required",
-    "freeReading": "All 40 reading papers in practice mode — completely free",
+    "freeReading": "All 40 reading papers in practice mode, plus one timed test",
     "freeTrial": "3 writing corrections + 3 speaking evaluations",
     "goDashboard": "Go to dashboard",
     "mostPopular": "MOST POPULAR",
@@ -927,7 +927,7 @@
     "pageTitle": "Reading Comprehension Practice",
     "practiceBody": "Work through reading passages one at a time and check your answers instantly.",
     "practiceBullet": "Passage + multiple-choice questions",
-    "testPremium": "Timed test mode is part of the paid plans. Practice mode stays free, with all 40 papers."
+    "testUsed": "You have used your free timed reading test. Practice mode stays free, with all 40 papers."
   },
   "readTest": {
     "breakdown": "How to get there",
