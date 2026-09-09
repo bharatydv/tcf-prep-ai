@@ -19,19 +19,28 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  // Set when the password was right but the address is unconfirmed. The server
+  // has already sent a fresh link by then, so this panel reports what happened
+  // rather than offering a button that would ask for a second one.
+  const [needsVerify, setNeedsVerify] = useState('');
 
 const submit = async (e) => {
   e.preventDefault();
-  setError(''); 
+  setError('');
+  setNeedsVerify('');
   setBusy(true);
-  
+
   const res = await login(email, password);  // ✅ This is the function from useAuth
-  
+
   setBusy(false);
   if (res.ok) {
     toast.success(t('auth.welcomeToast', { name: res.user.name }));
     const fallback = res.user.role === 'admin' ? '/admin' : '/practice';
     navigate(from && from !== '/login' ? from : fallback, { replace: true });
+  } else if (res.verificationRequired) {
+    // Deliberately not setError(): a red "login failed" box next to correct
+    // credentials is what makes someone reset a password that was fine.
+    setNeedsVerify(res.email);
   } else {
     setError(res.error);
     toast.error(res.error);
@@ -45,6 +54,15 @@ const submit = async (e) => {
         <h1 className="text-2xl font-bold">{t('auth.welcomeBack')}</h1>
         <p className="mt-1 text-sm text-gray-500">{t('auth.loginSub')}</p>
         {error && <div className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700" data-testid="login-error">{error}</div>}
+        {needsVerify && (
+          <div className="mt-4 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-gray-700"
+            data-testid="login-needs-verify">
+            <p className="font-semibold text-gray-900">{t('auth.checkInboxTitle')}</p>
+            <p className="mt-1 leading-relaxed">{t('auth.mustVerifyBody')}</p>
+            <p className="mt-1 break-all font-semibold text-gray-900">{needsVerify}</p>
+            <p className="mt-2 text-xs leading-relaxed text-gray-500">{t('auth.checkInboxSpam')}</p>
+          </div>
+        )}
         <form onSubmit={submit} className="mt-6 space-y-4">
           <div className="relative">
             <EnvelopeSimple size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />

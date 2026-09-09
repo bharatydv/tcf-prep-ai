@@ -54,8 +54,8 @@ export default function ListeningHome() {
 
       {/* MODE CHOICE */}
       <PageIntro
-        title={t('listen.pageTitle') || 'Listening Comprehension Practice'}
-        description={t('listen.pageDesc') || 'Improve your TCF and TEF Canada listening skills with authentic practice exercises, replay options for practice mode, and detailed feedback on your performance.'}
+        title={t('listen.pageTitle')}
+        description={t('listen.pageDesc')}
       />
 
       <section className="mx-auto max-w-5xl px-4 pt-10 sm:px-6">

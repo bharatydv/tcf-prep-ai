@@ -50,8 +50,8 @@ export default function ReadingHome() {
 
       {/* MODE CHOICE */}
       <PageIntro
-        title={t('read.pageTitle') || 'Reading Comprehension Practice'}
-        description={t('read.pageDesc') || 'Master TCF and TEF Canada reading comprehension with personalized practice exercises, instant feedback, and comprehensive explanations tailored to your level.'}
+        title={t('read.pageTitle')}
+        description={t('read.pageDesc')}
       />
 
       <section className="mx-auto max-w-5xl px-4 pt-10 sm:px-6">

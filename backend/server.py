@@ -3967,6 +3967,14 @@ async def run_seeds():
                 current_streak=0, longest_streak=0,
                 last_activity_date=None, xp=0, badges=[],
                 model_answers_read=0, model_answer_topic_ids=[],
+                # Confirmed on creation, and it has to be. Login refuses an
+                # unconfirmed address, this row is seeded from ADMIN_EMAIL and
+                # ADMIN_PASSWORD rather than by anyone signing up, and the
+                # default address is on a domain that need not receive mail at
+                # all -- so without this the operator is locked out of their own
+                # admin panel by a confirmation link nobody can open.
+                email_verified=True,
+                email_verified_at=now_utc(),
             ))
             await db.commit()
             log.info("Seeded admin account %s", ADMIN_EMAIL)
@@ -4107,12 +4115,30 @@ MIGRATIONS = [
     "ALTER TABLE theme_questions ADD COLUMN IF NOT EXISTS doc_2 TEXT",
     # Refresh-token revocation. Existing sessions start at 0 and stay valid.
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER DEFAULT 0",
-    # Email confirmation. Accounts that predate it are treated as unverified,
-    # which only shows a banner — it never blocks anyone from working.
+    # Email confirmation. This once said "it never blocks anyone from working",
+    # and that was true while the flag only drove a banner. Login now refuses an
+    # unconfirmed address, so DEFAULT FALSE would block every account that
+    # predates the requirement at its next sign-in.
     "ALTER TABLE users "
     "ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE",
     "ALTER TABLE users "
     "ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ",
+    # Accounts that predate the requirement are grandfathered in: confirmation
+    # is asked once, at registration, and nobody who signed up under the old
+    # rule is made to pass a check that did not exist when they joined.
+    #
+    # The date is the cutoff rather than a marker column, and it is doing real
+    # work: `WHERE email_verified = FALSE` alone would be unconditional, so it
+    # would re-confirm every new unverified account on every later boot and
+    # quietly delete the whole requirement. Bounded by created_at it matches
+    # only rows that existed when this shipped, and is a no-op from the second
+    # boot onwards.
+    #
+    # Anyone registering between this being written and it being deployed is
+    # also grandfathered, which is correct: they signed up while the old rule
+    # was still the one running.
+    "UPDATE users SET email_verified = TRUE, email_verified_at = NOW() "
+    "WHERE email_verified = FALSE AND created_at < TIMESTAMPTZ '2026-09-10'",
     # SMS confirmation, the second channel.
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(32)",
     "ALTER TABLE users "
@@ -4415,11 +4441,23 @@ async def register(body: RegisterIn, response: Response,
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    set_auth_cookies(response, user.user_id, user.token_version or 0)
-    # Confirmation is offered, never enforced: blocking practice behind a link
-    # that may land in spam would cost more accounts than it protects.
-    await _send_verification_email(db, user)
-    return {"user": public_user(user)}
+    # No session is opened here. Confirmation used to be offered and never
+    # enforced -- the reasoning was that a link landing in spam costs more
+    # accounts than it protects, which was true while nothing could be bought.
+    # It stopped being true when checkout opened: an address nobody confirmed
+    # is an address the invoice never reaches and a chargeback nobody can
+    # rebut. Signing the new account straight in would put it past the very
+    # check that now exists, so the cookies are not set and login is where the
+    # requirement is enforced.
+    #
+    # `email_sent` is reported rather than swallowed. send_email answers False
+    # on a delivery failure AND True when SMTP is simply not configured (it
+    # logs the link instead), so this tells the caller whether we believe a
+    # message went out -- not that one arrived.
+    sent = await _send_verification_email(db, user)
+    return {"user": public_user(user),
+            "verification_required": True,
+            "email_sent": bool(sent)}
 
 
 async def _send_verification_email(db: AsyncSession, user: User) -> bool:
@@ -4442,6 +4480,28 @@ async def login(body: LoginIn, response: Response,
                       user.password_hash if user else _DUMMY_PASSWORD_HASH)
     if not user or not ok:
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    # Confirmation is enforced, and enforced HERE rather than a line earlier,
+    # which is the whole security argument for this block: the password has
+    # already been checked, so only someone who owns the credentials ever sees
+    # this reply. Moving it above the bcrypt call would turn login into an
+    # address-enumeration oracle -- "not verified" for a real account and
+    # "invalid password" for one that does not exist.
+    #
+    # A fresh link is sent on every blocked attempt, because the alternative is
+    # a dead end: resend-verification needs a session, and the whole point of
+    # this branch is that there isn't one. Someone whose first mail expired or
+    # went to spam gets a new one by doing the obvious thing -- trying to log
+    # in again -- rather than by finding a page they cannot reach.
+    if not user.email_verified:
+        await _send_verification_email(db, user)
+        raise HTTPException(status_code=403, detail={
+            "code": "email_not_verified",
+            # errMsg() renders detail.msg, so this stays readable in a toast
+            # for any caller that does not know about the code.
+            "msg": "Confirm your email address before signing in. "
+                   "We have just sent you a new link.",
+            "email": user.email,
+        })
     set_auth_cookies(response, user.user_id, user.token_version or 0)
     return {"user": public_user(user)}
 

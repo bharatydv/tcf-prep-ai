@@ -131,8 +131,8 @@ export default function Blog() {
       </section>
 
       <PageIntro
-        title={t('blog.introTitle') || 'TCF and TEF Canada Blog'}
-        description={t('blog.introDesc') || 'Discover tips, strategies, and insights to help you prepare for and succeed in your TCF and TEF Canada exams. Our blog covers exam topics, test-taking techniques, and preparation advice.'}
+        title={t('blog.introTitle')}
+        description={t('blog.introDesc')}
       />
 
       <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">

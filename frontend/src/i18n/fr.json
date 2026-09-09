@@ -131,6 +131,9 @@
     "changeEmailBtn": "Modifier mon adresse",
     "changeEmailHint": "Modifiez-la : la confirmation partira vers la nouvelle.",
     "codeLabel": "Code à 6 chiffres",
+    "checkInboxBody": "Votre compte est créé. Ouvrez le lien que nous venons de vous envoyer par courriel pour confirmer votre adresse, puis connectez-vous.",
+    "checkInboxSpam": "Le lien est valable 48 heures. S'il n'arrive pas d'ici quelques minutes, vérifiez vos indésirables — une nouvelle tentative de connexion en renvoie un.",
+    "checkInboxTitle": "Consultez votre boîte de réception",
     "codeSent": "Code envoyé par SMS.",
     "confirmPassword": "Confirmez le mot de passe",
     "confirmed": "Confirmé",
@@ -156,6 +159,7 @@
     "loginButton": "Se connecter",
     "loginSub": "Connectez-vous pour poursuivre votre préparation TEF/TCF.",
     "mismatch": "Les mots de passe ne correspondent pas",
+    "mustVerifyBody": "Votre mot de passe est correct, mais cette adresse n'a pas encore été confirmée. Nous venons d'envoyer un nouveau lien à :",
     "newEmail": "Nouvelle adresse e-mail",
     "newPassword": "Nouveau mot de passe",
     "noAccount": "Commencer gratuitement",
@@ -181,7 +185,7 @@
     "verifyByEmail": "Par e-mail",
     "verifyBySms": "Par SMS",
     "verifyCode": "Confirmer mon numéro",
-    "verifyFail": "Ce lien de confirmation a expiré. Demandez-en un nouveau depuis votre tableau de bord.",
+    "verifyFail": "Ce lien de confirmation a expiré ou a déjà été utilisé. Reconnectez-vous et nous vous en enverrons un nouveau par courriel.",
     "verifyIntro": "Confirmez votre adresse e-mail ou votre numéro de téléphone. L'un des deux suffit — et vous pouvez corriger ce que vous avez saisi à l'inscription.",
     "verifyManage": "Changer d'adresse ou utiliser un SMS",
     "verifyOk": "Adresse confirmée. Merci.",
@@ -216,6 +220,8 @@
   },
   "blog": {
     "allArticles": "Tous les articles",
+    "introDesc": "Conseils, stratégies et analyses pour préparer et réussir vos examens TCF et TEF Canada : sujets d'examen, techniques et conseils de préparation.",
+    "introTitle": "Blogue TCF et TEF Canada",
     "allCategories": "Tout",
     "backToBlog": "Retour au blog",
     "badge": "Blog",
@@ -690,6 +696,8 @@
   "listen": {
     "chooseSub": "Entraînez-vous sur les documents audio un par un, ou passez un test de compréhension orale complet et chronométré.",
     "chooseTitle": "Compréhension orale — choisissez votre façon de travailler",
+    "pageDesc": "Travaillez la compréhension orale du TCF et du TEF Canada avec des exercices authentiques, la réécoute en mode entraînement et une correction détaillée de chaque réponse.",
+    "pageTitle": "Entraînement à la compréhension orale",
     "practiceBody": "Écoutez les documents audio un par un et vérifiez vos réponses immédiatement.",
     "practiceBullet": "Audio + questions à choix multiple",
     "soonBody": "Nous enregistrons les audios et rédigeons les banques de questions. L'expression écrite, l'expression orale et la compréhension écrite sont déjà disponibles.",
@@ -914,6 +922,8 @@
   "read": {
     "chooseSub": "Entraînez-vous sur les textes un par un, ou passez un test de compréhension écrite complet et chronométré.",
     "chooseTitle": "Compréhension écrite — choisissez votre façon de travailler",
+    "pageDesc": "Travaillez la compréhension écrite du TCF et du TEF Canada avec des épreuves classées par niveau, une correction immédiate et une explication pour chaque option.",
+    "pageTitle": "Entraînement à la compréhension écrite",
     "practiceBody": "Travaillez les textes un par un et vérifiez vos réponses immédiatement.",
     "practiceBullet": "Texte + questions à choix multiple"
   },
@@ -979,6 +989,8 @@
   },
   "res": {
     "badge": "Ressources",
+    "introDesc": "Guides, articles et réponses pour accompagner votre préparation au TCF et au TEF Canada, de la méthode d'expression écrite aux tableaux de scores.",
+    "introTitle": "Ressources d'apprentissage",
     "blogCta": "Lire le blog",
     "blogDesc": "Conseils, stratégies et guides de révision pour atteindre le NCLC 7 et au-delà aux examens TEF et TCF.",
     "blogTitle": "Blog",

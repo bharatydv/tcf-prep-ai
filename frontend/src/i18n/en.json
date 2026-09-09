@@ -131,6 +131,9 @@
     "changeEmailBtn": "Change my address",
     "changeEmailHint": "Change it and we will send the confirmation to the new one.",
     "codeLabel": "6-digit code",
+    "checkInboxBody": "Your account is created. Open the link we just emailed to confirm your address, then sign in.",
+    "checkInboxSpam": "The link is valid for 48 hours. If it has not arrived in a few minutes, check your spam folder — signing in again sends a fresh one.",
+    "checkInboxTitle": "Check your inbox",
     "codeSent": "Code sent by SMS.",
     "confirmPassword": "Confirm password",
     "confirmed": "Confirmed",
@@ -156,6 +159,7 @@
     "loginButton": "Log in",
     "loginSub": "Log in to continue your TEF/TCF preparation.",
     "mismatch": "Passwords do not match",
+    "mustVerifyBody": "Your password is correct, but this address has not been confirmed yet. We have just sent a new link to:",
     "newEmail": "New e-mail address",
     "newPassword": "New password",
     "noAccount": "Start free",
@@ -181,7 +185,7 @@
     "verifyByEmail": "By e-mail",
     "verifyBySms": "By SMS",
     "verifyCode": "Confirm my number",
-    "verifyFail": "That confirmation link has expired. Ask for a new one from your dashboard.",
+    "verifyFail": "That confirmation link has expired or has already been used. Sign in again and we will email you a fresh one.",
     "verifyIntro": "Confirm your e-mail address or your phone number. Either one is enough — you can always change what you typed at sign-up.",
     "verifyManage": "Change address or use SMS",
     "verifyOk": "Email confirmed. Thank you.",
@@ -235,7 +239,9 @@
     "notFoundBody": "This post may have been moved or unpublished.",
     "notFoundTitle": "Article not found",
     "read": "Read",
-    "searchPlaceholder": "Search articles…"
+    "searchPlaceholder": "Search articles…",
+    "introTitle": "TCF and TEF Canada Blog",
+    "introDesc": "Discover tips, strategies, and insights to help you prepare for and succeed in your TCF and TEF Canada exams. Our blog covers exam topics, test-taking techniques, and preparation advice."
   },
   "blogAdmin": {
     "allPosts": "All posts ({{n}})",
@@ -690,6 +696,8 @@
   "listen": {
     "chooseSub": "Practice audio passages one at a time, or sit a full timed listening test.",
     "chooseTitle": "Listening — choose how you want to work",
+    "pageDesc": "Improve your TCF and TEF Canada listening skills with authentic practice exercises, replay in practice mode, and detailed feedback on every answer.",
+    "pageTitle": "Listening Comprehension Practice",
     "practiceBody": "Listen to audio passages one at a time and check your answers instantly.",
     "practiceBullet": "Audio + multiple-choice questions",
     "soonBody": "We are recording the audio and writing the question banks. Writing, Speaking and Reading are ready in the meantime.",
@@ -914,6 +922,8 @@
   "read": {
     "chooseSub": "Practice comprehension passages one at a time, or sit a full timed reading test.",
     "chooseTitle": "Reading — choose how you want to work",
+    "pageDesc": "Master TCF and TEF Canada reading comprehension with practice papers graded by level, instant marking, and an explanation for every option.",
+    "pageTitle": "Reading Comprehension Practice",
     "practiceBody": "Work through reading passages one at a time and check your answers instantly.",
     "practiceBullet": "Passage + multiple-choice questions"
   },
@@ -979,6 +989,8 @@
   },
   "res": {
     "badge": "Resources",
+    "introDesc": "Guides, articles and answers to support your TCF and TEF Canada preparation, from the writing method to the score tables.",
+    "introTitle": "Learning Resources",
     "blogCta": "Read the blog",
     "blogDesc": "Tips, strategies and study guides to help you reach CLB 7 and beyond on the TEF and TCF exams.",
     "blogTitle": "Blog",
