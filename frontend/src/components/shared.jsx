@@ -335,7 +335,10 @@ export function WordCountBar({ text, taskType, free = false, className = '' }) {
   const { words, state, key: msgKey, vars, capped } = free
     ? { ...freeWordStatus(text), capped: false }
     : wordStatus(text, taskType);
-  const spec = free ? { minWords: 0, maxWords: FREE_WRITING.maxWords } : WRITING_TASKS[taskType];
+  /* Free writing has no maximum any more, so the bar fills toward the 180-word
+     advisory and then simply stays full — a progress bar against a limit that
+     does not exist would be reporting a rule nobody is enforcing. */
+  const spec = free ? { minWords: 0, maxWords: FREE_WRITING.warnWords } : WRITING_TASKS[taskType];
   if (!spec) {
     return (
       <p className={`text-xs text-gray-500 ${className}`} data-testid="word-count">
@@ -358,7 +361,7 @@ export function WordCountBar({ text, taskType, free = false, className = '' }) {
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-xs">
         <span className={`font-semibold tabular-nums ${tone}`}>
           {free
-            ? t('words.freeRange', { n: words, max: spec.maxWords })
+            ? t('words.freeCount', { n: words })
             : t('words.range', { n: words, min: spec.minWords, max: spec.maxWords })}
         </span>
         <span className={tone}>{msgKey ? t(msgKey, vars) : ''}</span>

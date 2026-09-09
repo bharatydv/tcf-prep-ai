@@ -22,9 +22,19 @@ export const WRITING_TOTAL_SECONDS = 60 * 60;
 export const FREE_TRIAL_TOTAL = 6;
 
 /* Free writing sits outside the three tâches, so it has no official range.
- * Its ceiling is tâche 3's — the exam never asks for more than 180 words — so
- * past 180 the editor warns, and at 200 it stops accepting input entirely. */
-export const FREE_WRITING = { warnWords: 180, maxWords: 200 };
+ *
+ * It used to stop accepting input at 200 words, on the reasoning that the exam
+ * never asks for more than 180. That reasoning missed who actually uses this
+ * box: someone typing up a SPOKEN answer to have it marked. Tâche 3 of the
+ * oral is 150 seconds of speech, which is 300 to 400 words written out — so
+ * the cap silently truncated the middle of their answer and graded the part
+ * that survived.
+ *
+ * Past 180 the editor now says so and carries on. The real ceiling is the
+ * server's, which rejects a submission over MAX_TEXT_CHARS (6000) — that is
+ * what bounds the grading cost, and it always did; the word cap was never
+ * what stood between us and an expensive request. */
+export const FREE_WRITING = { warnWords: 180, maxChars: 6000 };
 
 export const SPEAKING_TASKS = {
   1: { prepSeconds: 0, speakSeconds: 120, name: 'Tâche 1 — Entretien dirigé' },
@@ -75,13 +85,22 @@ export function clampWords(text, max) {
   return text;
 }
 
-/* Word count against the free-writing ceiling. No `capped` flag: with no
- * tâche there is no official range for the grader to penalise against. */
+/* Word count for free writing. No `capped` flag: with no tâche there is no
+ * official range for the grader to penalise against — being long here costs
+ * the learner nothing, which is why nothing below blocks.
+ *
+ * `over` is the one state that still refuses, and it counts CHARACTERS rather
+ * than words, because that is the limit the server actually enforces. Warning
+ * on a word count while the server rejects on a character count is how you get
+ * a green editor and a 422. */
 export function freeWordStatus(text) {
-  const { warnWords: warn, maxWords: max } = FREE_WRITING;
+  const { warnWords: warn, maxChars } = FREE_WRITING;
   const words = countWords(text);
+  const chars = (text || '').length;
   if (words === 0) return { words, state: 'empty', key: null, vars: null };
-  if (words >= max) return { words, state: 'over', key: 'words.freeMax', vars: { max } };
+  if (chars > maxChars) {
+    return { words, state: 'over', key: 'words.freeTooLong', vars: { max: maxChars, n: chars } };
+  }
   if (words > warn) return { words, state: 'warn', key: 'words.freeOver', vars: { n: words - warn, warn } };
   return { words, state: 'ok', key: null, vars: null };
 }

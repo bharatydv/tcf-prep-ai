@@ -5,7 +5,7 @@ import {
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, BACKEND_URL } from '../lib/api';
-import { FREE_WRITING, WRITING_TASKS, clampWords, wordStatus } from '../lib/tcf';
+import { WRITING_TASKS, wordStatus } from '../lib/tcf';
 import { useAuth } from '../context/AuthContext';
 import { AnalysisProgress, BackLink, CreditsBadge, WordCountBar, streamAnalysis, useConfirm } from '../components/shared';
 import { useT } from '../i18n';
@@ -316,11 +316,13 @@ export default function PracticeWrite() {
               <textarea
                 ref={taRef}
                 value={text}
-                /* Free writing stops dead at 200 words: the exam's longest
-                   tâche asks for 180, so there is nothing to gain past that. */
-                onChange={(e) => setText(freeWriting
-                  ? clampWords(e.target.value, FREE_WRITING.maxWords)
-                  : e.target.value)}
+                /* No clamp. Free writing used to truncate at 200 words on
+                   every keystroke, which quietly ate the second half of a
+                   spoken answer someone had typed up to be marked. The counter
+                   below warns past 180 and the server still refuses anything
+                   over 6000 characters, so length is reported rather than
+                   enforced by deletion. */
+                onChange={(e) => setText(e.target.value)}
                 onDrop={(e) => e.preventDefault()}
                 lang="fr"
                 className="input paper-textarea min-h-[340px] p-6 shadow-card"

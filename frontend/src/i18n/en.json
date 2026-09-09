@@ -2247,9 +2247,9 @@
   },
   "words": {
     "cappedWarning": "At the real exam this length lowers the score however good the French is.",
-    "freeMax": "{{max}}-word maximum reached",
-    "freeOver": "{{n}} words over the {{warn}}-word TCF limit",
-    "freeRange": "{{n}} / {{max}} words max",
+    "freeCount": "{{n}} words",
+    "freeOver": "{{n}} past the {{warn}}-word exam length — still graded in full",
+    "freeTooLong": "Too long to send: {{n}} of {{max}} characters. Trim it a little.",
     "count": "{{n}} words",
     "ok": "Within range ({{min}}–{{max}})",
     "over": "{{n}} words over the {{max}} maximum",

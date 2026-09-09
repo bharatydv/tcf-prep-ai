@@ -2247,9 +2247,9 @@
   },
   "words": {
     "cappedWarning": "À l'examen, cette longueur fait baisser la note quelle que soit la qualité du français.",
-    "freeMax": "Maximum de {{max}} mots atteint",
-    "freeOver": "{{n}} mots au-dessus de la limite TCF de {{warn}} mots",
-    "freeRange": "{{n}} / {{max}} mots max",
+    "freeCount": "{{n}} mots",
+    "freeOver": "{{n}} mots au-delà des {{warn}} mots de l'examen — corrigé quand même en entier",
+    "freeTooLong": "Trop long pour être envoyé : {{n}} caractères sur {{max}}. Raccourcissez un peu.",
     "count": "{{n}} mots",
     "ok": "Dans la fourchette ({{min}}–{{max}})",
     "over": "{{n}} mots au-dessus du maximum ({{max}})",
