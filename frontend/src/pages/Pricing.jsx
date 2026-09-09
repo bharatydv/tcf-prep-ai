@@ -6,7 +6,7 @@ import { api, errMsg } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
-import { CheckoutBreakdown, useBillingPlans } from '../lib/plans';
+import { useBillingPlans } from '../lib/plans';
 import { usePrompt } from '../components/shared';
 import { track } from '../lib/api';
 
@@ -190,9 +190,12 @@ export default function Pricing() {
               )}
               <p className="mt-1 text-sm font-semibold text-white/90">+ {t('pricing.bonus', { n: p.bonus })}</p>
             </div>
-            {/* The fee is shown here, above the button, because a charge the
-                customer meets after paying is a charge they did not agree to. */}
-            <CheckoutBreakdown plan={p} currency={currency} />
+            {/* The processing fee is deliberately not itemised on the card any
+                more: the plan price stands on its own, and the fee is added to
+                the order, so the figure the customer confirms is the one on
+                Cashfree's payment page. Nothing about what is charged changed
+                -- checkout_breakdown() on the server still computes it, and
+                the order is still created for the total including the fee. */}
             <ul className="space-y-3 p-6 text-sm">
               {FEATURE_KEYS.map((k) => (
                 <li key={k} className="flex items-start gap-2">
