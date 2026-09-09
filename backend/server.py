@@ -2617,7 +2617,7 @@ SPEAKING_GRADER_SYSTEM = """You are a certified TEF/TCF Canada examiner evaluati
 You receive the QUESTION (the task) and the TRANSCRIPT of what the candidate said. The transcript may contain small transcription errors; judge the language charitably where a word is clearly a transcription artifact, not a learner error.
 
 Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
-{"answers_question": true, "relevance_comment": "one sentence (English) on whether and how well the answer addresses the task", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"]}
+{"answers_question": true, "relevance_comment": "one sentence (English) on whether and how well the answer addresses the task", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French"}
 
 Evaluate TWO things:
 1. RELEVANCE - does the spoken answer actually address the question/task? Set answers_question true/false and explain in relevance_comment. An off-topic or incomplete answer should lower the score even if the French is correct.
@@ -2627,7 +2627,14 @@ CEFR scoring (overall_score 0-100, tcf_level one of A1,A2,B1,B2,C1,C2):
 - A1 (5-19) A2 (20-39) B1 (40-54) B2 (55-69) C1 (70-84) C2 (85-100).
 If the answer does not address the task, cap the score at B1.
 
-suggestions: 3-5 concrete English tips to improve THIS spoken answer. vocabulary_suggestions: French words/phrases to enrich it. You are grading a transcript, so do NOT comment on pronunciation or accent."""
+suggestions: 3-5 concrete English tips to improve THIS spoken answer. vocabulary_suggestions: French words/phrases to enrich it. You are grading a transcript, so do NOT comment on pronunciation or accent.
+
+enhanced_version - THE CANDIDATE'S OWN ANSWER, rewritten as a strong version of itself, in French. This is a model they can hear and copy, so:
+- Keep THEIR ideas, THEIR examples and THEIR opinion. Rewriting it into a different, better answer teaches nothing, because it is no longer about anything they said.
+- Fix every error, and raise the register by roughly one level: better connectors, more precise verbs, fuller sentences.
+- Keep it the length someone actually speaks in this task. Do not return three times what they said.
+- It is read aloud by a speech synthesiser, so punctuate it the way it should be spoken and never use brackets, asterisks, or notes to the reader.
+- French only, and nothing but the answer itself."""
 
 
 # ----------------------------------------------------------------------------
@@ -2671,7 +2678,7 @@ INTERACTION_GRADER_SYSTEM = """You are a certified TCF Canada examiner grading T
 You receive the CONSIGNE (the scenario) and the full DIALOGUE. Grade ONLY the candidate's turns. The transcript comes from speech recognition, so judge charitably where a word is clearly a transcription artifact rather than a learner error.
 
 Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
-{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate obtained the information the consigne asked for", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "missed_questions":[{"question":"question in French the candidate should have asked","why":"what it would have obtained (English)"}]}
+{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate obtained the information the consigne asked for", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French", "missed_questions":[{"question":"question in French the candidate should have asked","why":"what it would have obtained (English)"}]}
 
 Because this task is INTERACTION, weigh these alongside grammar and vocabulary:
 1. QUESTION QUALITY - did the candidate actually ask questions, and were they well formed? Flat statements, or questions built only by raising intonation ("vous avez des places ?") where inversion or est-ce que is expected, are the single most common Tâche 2 weakness. Report them as errors.
@@ -2687,14 +2694,21 @@ suggestions: 3-5 concrete English tips for THIS conversation. vocabulary_suggest
 
 missed_questions - "What more could you have asked?". List 2 to 5 questions, WORD FOR WORD IN FRENCH and ready to speak, that the candidate did not ask but should have. Draw them first from the points the consigne lists and the candidate skipped, then from the openings the agent left unexplored (a price mentioned without conditions, a date without a deadline). Never repeat a question the candidate already asked, even in other words. If the candidate genuinely covered everything, return the questions that would have deepened the exchange rather than an empty list.
 
-You are grading a transcript, so do NOT comment on pronunciation or accent."""
+You are grading a transcript, so do NOT comment on pronunciation or accent.
+
+enhanced_version - THE CANDIDATE'S OWN ANSWER, rewritten as a strong version of itself, in French. This is a model they can hear and copy, so:
+- Keep THEIR ideas, THEIR examples and THEIR opinion. Rewriting it into a different, better answer teaches nothing, because it is no longer about anything they said.
+- Fix every error, and raise the register by roughly one level: better connectors, more precise verbs, fuller sentences.
+- Keep it the length someone actually speaks in this task. Do not return three times what they said.
+- It is read aloud by a speech synthesiser, so punctuate it the way it should be spoken and never use brackets, asterisks, or notes to the reader.
+- French only, and nothing but the answer itself."""
 
 INTERVIEW_GRADER_SYSTEM = """You are a certified TCF Canada examiner grading Tâche 1 (Entretien dirigé) - a guided interview in which the EXAMINER asks and the CANDIDATE answers questions about themselves: who they are, their studies or work, their daily life, their interests and their plans.
 
 You receive the BRIEF and the full DIALOGUE. Grade ONLY the candidate's turns. The transcript comes from speech recognition, so judge charitably where a word is clearly a transcription artifact rather than a learner error.
 
 Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
-{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate answered what was asked", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"]}
+{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate answered what was asked", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French"}
 
 This task is a PRESENTATION, not an interaction. The candidate is NOT expected to ask questions, and must never be penalised for not asking any. Weigh instead:
 1. ANSWERING - did the candidate actually answer each question, rather than talking past it?
@@ -2706,7 +2720,14 @@ CEFR scoring (overall_score 0-100, tcf_level one of A1,A2,B1,B2,C1,C2):
 - A1 (5-19) A2 (20-39) B1 (40-54) B2 (55-69) C1 (70-84) C2 (85-100).
 Cap the score at B1 if the candidate answered only in short bare phrases with no development.
 
-suggestions: 3-5 concrete English tips for THIS interview. vocabulary_suggestions: French words and phrases that would have made the self-presentation richer. You are grading a transcript, so do NOT comment on pronunciation or accent."""
+suggestions: 3-5 concrete English tips for THIS interview. vocabulary_suggestions: French words and phrases that would have made the self-presentation richer. You are grading a transcript, so do NOT comment on pronunciation or accent.
+
+enhanced_version - THE CANDIDATE'S OWN ANSWER, rewritten as a strong version of itself, in French. This is a model they can hear and copy, so:
+- Keep THEIR ideas, THEIR examples and THEIR opinion. Rewriting it into a different, better answer teaches nothing, because it is no longer about anything they said.
+- Fix every error, and raise the register by roughly one level: better connectors, more precise verbs, fuller sentences.
+- Keep it the length someone actually speaks in this task. Do not return three times what they said.
+- It is read aloud by a speech synthesiser, so punctuate it the way it should be spoken and never use brackets, asterisks, or notes to the reader.
+- French only, and nothing but the answer itself."""
 
 # Keeps one exchange bounded so a runaway session cannot grow the prompt forever.
 MAX_DIALOGUE_TURNS = 40
@@ -2947,6 +2968,11 @@ def _validate_speaking(data: dict) -> dict:
     base["answers_question"] = bool(data.get("answers_question", False))
     base["relevance_comment"] = str(data.get("relevance_comment", ""))[:400]
     base["suggestions"] = [str(x) for x in (data.get("suggestions") or [])][:8]
+    # The candidate's own answer rewritten well, for them to hear and copy.
+    # Length-capped like every other free-text field here: a model that ignores
+    # "do not return three times what they said" must not be able to write an
+    # essay into the page, and this one is also read aloud.
+    base["enhanced_version"] = str(data.get("enhanced_version", "")).strip()[:1500]
     # "What more could you have asked?" — tâche 2 only, empty elsewhere. Models
     # sometimes return bare strings instead of the {question, why} object, so
     # both shapes are accepted rather than dropping the whole section.

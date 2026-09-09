@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { api, errMsg } from '../lib/api';
 import { startRecording as startCapture, appendAudio, isRecordingSupported } from '../lib/recorder';
 import { SPEAKING_TASKS } from '../lib/tcf';
+import { pickFrenchVoice } from '../lib/speak';
 import { useT } from '../i18n';
 
 /* Tache 2 is a live roleplay: the candidate asks, an examiner answers. This
@@ -52,24 +53,11 @@ const chunkDeadline = (chunk) => 2000 + chunk.length * 140;
 const SILENCE_MS = 2000;
 
 // Voices differ wildly in quality and the first French one in the list is
-// usually the flat local fallback. Score by the names the good ones carry.
-const VOICE_HINTS = [/natural/i, /neural/i, /google/i, /online/i,
-  /denise|d[ée]nise|am[ée]lie|audrey|julie|thomas|paul|c[ée]line/i];
-
-const pickFrenchVoice = () => {
-  let voices = [];
-  try { voices = window.speechSynthesis?.getVoices?.() || []; } catch (e) { return null; }
-  const fr = voices.filter((v) => (v.lang || '').toLowerCase().startsWith('fr'));
-  if (!fr.length) return null;
-  const score = (v) => {
-    let s = 0;
-    VOICE_HINTS.forEach((re, i) => { if (re.test(v.name || '')) s += (VOICE_HINTS.length - i) * 2; });
-    if ((v.lang || '').toLowerCase().replace('_', '-') === 'fr-fr') s += 3;  // the exam plays metropolitan French
-    if (v.localService) s -= 1;
-    return s;
-  };
-  return fr.slice().sort((a, b) => score(b) - score(a))[0] || null;
-};
+// usually the flat local fallback, and a French locale alone does not pick the
+// good one. That scoring now lives in lib/speak.js, because the speaking result
+// page needs the same voice and a second copy of this would drift: the
+// FREE_TRIAL_TOTAL comment in lib/tcf.js is what five copies of one constant
+// looks like once they disagree.
 
 const splitForSpeech = (text) => {
   const pieces = text.match(/[^.!?…,;:]+[.!?…,;:]*/g) || [text];

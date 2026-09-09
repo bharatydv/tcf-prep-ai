@@ -11,6 +11,8 @@ import { SPEAKING_TASKS, fmtClock } from '../lib/tcf';
 import { saveTask } from '../lib/speakingExam';
 import { useAuth } from '../context/AuthContext';
 import { BackLink, CreditsBadge } from '../components/shared';
+import { SpeakButton } from '../components/SpeakButton';
+import { useSpeak } from '../lib/speak';
 import { useT } from '../i18n';
 import { useSeo } from '../lib/seo';
 
@@ -27,6 +29,9 @@ const CAT_LABELS = {
 };
 
 export default function SpeakingRecord() {
+  // One synthesiser for the page: pressing a second play button stops the
+  // first rather than layering two French voices over each other.
+  const tts = useSpeak();
   // A hook rather than an element, so no early return — loading, empty,
   // or "coming soon" — can skip it and leave the page inheriting the
   // shell's canonical, which points at the homepage.
@@ -391,12 +396,39 @@ export default function SpeakingRecord() {
                         <span className="text-red-500 line-through">{e.error}</span>
                         <span className="text-gray-400">→</span>
                         <span className="font-semibold text-green-600">{e.correction}</span>
+                        {/* Reading that « Elle peut accepter » is right does not
+                            tell you how it sounds, which is the whole subject
+                            of a speaking test. */}
+                        <SpeakButton text={e.correction} id={`fix-${i}`} {...tts} />
                         <span className="ml-auto rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase text-primary">{CAT_LABELS[e.category] || e.category}</span>
                       </div>
                       <p className="mt-1 text-xs text-gray-500">{e.explanation}</p>
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* The candidate's own answer, rewritten well. Deliberately after
+                the corrections: the errors say what went wrong one line at a
+                time, and this is the same answer as a whole, which is the thing
+                worth listening to twice. */}
+            {(result.enhanced_version || '').trim() && (
+              <div className="rounded-3xl border border-emerald-100 bg-emerald-50/40 p-6 shadow-soft"
+                data-testid="enhanced-version">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="flex items-center gap-2 font-heading text-sm font-bold text-emerald-900">
+                    <Sparkle size={16} weight="fill" className="text-emerald-600" />
+                    {t('speak.enhancedTitle')}
+                  </p>
+                  <SpeakButton text={result.enhanced_version} id="enhanced" {...tts} />
+                </div>
+                <p className="mt-3 text-sm leading-relaxed text-gray-800">
+                  {result.enhanced_version}
+                </p>
+                <p className="mt-3 text-xs leading-relaxed text-emerald-800/80">
+                  {t('speak.enhancedNote')}
+                </p>
               </div>
             )}
 
