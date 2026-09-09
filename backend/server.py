@@ -1088,9 +1088,18 @@ def _send_email_sync(to: str, subject: str, body: str, attachments=None):
     in to follow.
     """
     if not SMTP_HOST:
-        # Development convenience. In production the boot check below refuses
-        # to start without SMTP, so this branch cannot silently swallow a
-        # password reset in front of real users.
+        # Development convenience -- and read the next sentence before relying
+        # on it. This claimed the boot check "refuses to start without SMTP".
+        # It does not: the check near the top only calls log.error() and the
+        # process starts anyway. So this branch CAN swallow a verification mail
+        # in front of real users, and it did -- registration on an SMTP-less
+        # deployment succeeds, email_verified stays False, and nobody is told,
+        # because returning here (rather than raising) makes send_email answer
+        # True to a caller that never checks it.
+        #
+        # The link is written to the log in full, token included. That is what
+        # makes this usable locally, and what makes it unsafe anywhere logs are
+        # readable by more people than can already reset a password.
         log.warning("SMTP not configured - %s link for %s:%s%s",
                     subject, to, NEWLINE, body)
         return
