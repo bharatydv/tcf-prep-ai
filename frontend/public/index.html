@@ -5,15 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#7C3AED" />
 
-    <!-- Google Analytics (gtag.js) -->
+    <!-- Google Analytics (gtag.js). The config block lives in /gtag-init.js
+         rather than inline: script-src has no 'unsafe-inline', so an inline
+         block is dropped and no data is ever collected. Both hosts are named
+         in security-headers.conf. -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-E829Q86M96"></script>
-    <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
-
-      gtag('config', 'G-E829Q86M96');
-    </script>
+    <script defer src="/gtag-init.js"></script>
 
     <title>TEF &amp; TCF Canada practice with AI correction | prepfrancais</title>
     <meta name="description" content="Préparation IA au TEF et au TCF Canada : correction de l'expression écrite et orale, niveau CEFR expliqué, examens blancs et révision de vos propres erreurs. 6 corrections gratuites." />
