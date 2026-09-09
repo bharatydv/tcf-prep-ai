@@ -2415,27 +2415,69 @@ async def analyze_text_with_ai(text: str, topic: Optional[str] = None, db=None,
     return result
 
 
-STATIC_DISTRACTORS = {
-    "prepositions": "à la maison de",
-    "spelling": "ortographe",
-    "conjugation": "ils a fait",
-    "gender_number": "une problème",
-    "anglicism": "prendre une décision finale éventuellement",
-    "improvement": "C'est bien.",
+# The distractors this used to fall back to, kept only so that rows already
+# carrying them can be recognised and regenerated. Nothing writes these now.
+_LEGACY_DISTRACTORS = {
+    "à la maison de", "ortographe", "ils a fait", "une problème",
+    "prendre une décision finale éventuellement", "C'est bien.",
+    "réponse incorrecte",
+}
+
+# What a wrong option has to be wrong ABOUT, per category.
+#
+# Without this the prompt asked only for "a plausible but incorrect
+# alternative", and got one that was incorrect about something else entirely:
+# against « Elle accepter un emploi » it offered « ils a fait » — a different
+# verb, a different subject, a different tense. There is nothing to choose
+# between, because only one of the options is even about the sentence on screen.
+#
+# A distractor is only a question if it is wrong in the way the learner was
+# wrong. For conjugation that means another form of the SAME verb.
+_DISTRACTOR_RULE = {
+    "conjugation": ("Give a DIFFERENT CONJUGATED FORM OF THE SAME VERB — wrong "
+                    "person, wrong tense, or wrong auxiliary. Keep the rest of "
+                    "the sentence identical to the correction."),
+    "prepositions": ("Change ONLY the preposition, to another one a learner "
+                     "confuses with it. Keep every other word identical."),
+    "gender_number": ("Change ONLY the gender or number agreement — the "
+                      "article, the adjective ending, or the participle. Keep "
+                      "every other word identical."),
+    "spelling": ("Misspell THE SAME WORD a different plausible way — a missing "
+                 "double letter, a wrong accent. Keep every other word "
+                 "identical."),
+    "anglicism": ("Give another anglicism a French learner would produce for "
+                  "the same idea."),
+    "improvement": ("Give a weaker but grammatical rephrasing of the same "
+                    "sentence."),
 }
 
 
 async def generate_distractor(error_text: str, correction: str,
                               category: str, db=None) -> str:
-    """Batch-time MCQ distractor; falls back to a static map.
+    """Batch-time MCQ distractor. Empty string when none can be made.
 
     Uses the active grader provider (e.g. Groq) rather than a hardcoded slow
     model, so it doesn't bottleneck speaking/writing analysis.
+
+    It used to fall back to one hardcoded string per category, which is worse
+    than having no third option at all. One constant per category means every
+    conjugation card in the product carried « ils a fait », so the learner
+    stopped reading it after the second card -- and a distractor you can
+    eliminate without reading the sentence is not a distractor, it is a
+    two-option question wearing a third option. Answering "not that one" scored
+    as well as knowing the grammar.
+
+    So: no fallback. The caller already renders two options when this is empty,
+    which is an honest question rather than a padded one.
     """
-    prompt = (f'A French learner wrote: "{error_text}". The correction is '
-              f'"{correction}". Produce ONE plausible but INCORRECT alternative '
-              f"a learner might choose (same length/style). Return ONLY the "
-              f"alternative text, nothing else.")
+    rule = _DISTRACTOR_RULE.get(category, "Keep it wrong in the same way the "
+                                          "learner's own version was wrong.")
+    prompt = (f'A French learner wrote: "{error_text}"\n'
+              f'The correction is: "{correction}"\n\n'
+              f"Write ONE wrong alternative to the correction. {rule}\n"
+              f"It must be wrong, must differ from both sentences above, and "
+              f"must be the same length and register as the correction.\n"
+              f"Return ONLY the sentence.")
     try:
         provider = (await get_provider("writing_grader_provider")
                     if db is not None else WRITING_GRADER_PROVIDER)
@@ -2444,11 +2486,16 @@ async def generate_distractor(error_text: str, correction: str,
             prompt)
         if raw:
             raw = _strip_fences(raw).strip().strip('"')
-            if raw and raw.lower() != correction.lower():
+            # Matching either sentence makes it useless in a different way: as
+            # the correction it gives two right answers, as the error it is a
+            # duplicate of an option already on screen.
+            if (raw and raw.lower() != correction.lower()
+                    and raw.lower() != (error_text or "").lower()):
                 return raw[:200]
     except Exception:  # noqa: BLE001
-        pass
-    return STATIC_DISTRACTORS.get(category, "réponse incorrecte")
+        log.warning("Distractor generation failed for a %s mistake; the card "
+                    "will show two options.", category)
+    return ""
 
 
 def normalize_error_text(text: str) -> str:
@@ -2493,8 +2540,10 @@ async def record_mistakes(db: AsyncSession, user_id: str, source: str,
             existing.times_repeated = (existing.times_repeated or 0) + 1
             existing.last_seen_at = seen
             continue
-        distractor = STATIC_DISTRACTORS.get(err["category"],
-                                            "réponse incorrecte")
+        # Empty when not generating here: /api/review/queue fills it in before
+        # the card is ever shown, and an empty one renders as two options
+        # rather than as a constant a learner learns to ignore.
+        distractor = ""
         if generate_distractors:
             distractor = await generate_distractor(
                 err["error"], err["correction"], err["category"], db=db)
@@ -5491,9 +5540,17 @@ async def review_queue(category: Optional[str] = None,
     res = await db.execute(stmt)
     due = res.scalars().all()
     # Fill in any missing MCQ distractors now, concurrently, rather than one at
-    # a time inside the grading request. The static fallback keeps this fast.
-    pending = [m for m in due if not (m.distractor or "").strip()
-               or m.distractor == "réponse incorrecte"]
+    # a time inside the grading request.
+    #
+    # _LEGACY_DISTRACTORS are the old per-category constants. They are already
+    # written into existing rows, so retiring the fallback in code is not
+    # enough — without this, every conjugation card an established learner has
+    # would keep offering « ils a fait » forever. Listed rather than dropped in
+    # a migration because a regeneration that fails should leave the row alone
+    # and try again next time, not blank it.
+    pending = [m for m in due
+               if not (m.distractor or "").strip()
+               or m.distractor in _LEGACY_DISTRACTORS]
     if pending:
         generated = await asyncio.gather(*[
             generate_distractor(m.error_text, m.correction, m.category, db=db)

@@ -313,13 +313,43 @@ export default function Review() {
             return (
               <button key={opt} disabled={picked != null}
                 className={`block w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-left text-sm transition hover:border-primary ${state}`}
-                onClick={() => { setPicked(opt); setTimeout(() => answer({ picked: opt }), 900); }}>
+                /* MCQ waits to be dismissed; the sprint still advances itself.
+                   Every card used to move on 900ms after the pick — less time
+                   than it takes to find the explanation on the page, let alone
+                   read it, so the one sentence saying WHY the answer was wrong
+                   went unread. But the sprint is two minutes against the clock
+                   and says so on the card that starts it: a button to press
+                   between questions is the one thing that mode must not have. */
+                onClick={() => {
+                  setPicked(opt);
+                  if (mode === 'sprint') setTimeout(() => answer({ picked: opt }), 700);
+                }}>
                 {opt}
               </button>
             );
           })}
         </div>
-        {picked != null && <p className="mt-4 text-sm text-gray-600">{m.explanation}</p>}
+
+        {picked != null && mode !== 'sprint' && (
+          <div className="mt-6 border-t border-gray-100 pt-5">
+            <p className={`text-sm font-bold ${
+              picked === m.correction ? 'text-green-700' : 'text-red-600'}`}>
+              {picked === m.correction ? t('rev.answerRight') : t('rev.answerWrong')}
+            </p>
+            {picked !== m.correction && (
+              <p className="mt-1.5 text-sm text-gray-700">
+                {t('rev.theAnswerIs')} <span className="font-semibold text-green-700">{m.correction}</span>
+              </p>
+            )}
+            {m.explanation && (
+              <p className="mt-2.5 text-sm leading-relaxed text-gray-600">{m.explanation}</p>
+            )}
+            <button className="btn-primary mt-5 w-full justify-center"
+              onClick={() => answer({ picked })} data-testid="review-next">
+              {idx + 1 >= items.length ? t('rev.finish') : t('rev.next')}
+            </button>
+          </div>
+        )}
       </div>
     </main>
   );
