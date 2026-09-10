@@ -29,6 +29,15 @@ const TACHE_INFO = {
 // is advice you cannot act on until you have heard the vowel done right.
 const ISSUE_KEYS = ['vowel', 'nasal', 'liaison', 'consonant', 'stress', 'rhythm'];
 
+/* How much an error costs, mirroring VALID_SEVERITIES in backend/server.py.
+   Absent on a correction the grader did not weigh, which is why there is no
+   default entry here to fall back to. */
+const SEVERITY_TONE = {
+  major: 'bg-rose-100 text-rose-700',
+  moderate: 'bg-amber-100 text-amber-700',
+  minor: 'bg-gray-100 text-gray-500',
+};
+
 const CAT_LABELS = {
   prepositions: 'Prépositions', spelling: 'Orthographe', conjugation: 'Conjugaison',
   gender_number: 'Accord', anglicism: 'Anglicismes', improvement: 'Améliorations C1',
@@ -362,6 +371,28 @@ export default function SpeakingRecord() {
                 {t('speak.backToSitting')}
               </button>
             )}
+            {result.language_mix?.detected && (
+              <div className="flex items-start gap-3 rounded-3xl border border-amber-200 bg-amber-50 p-4"
+                data-testid="language-mix">
+                <XCircle size={20} weight="fill" className="mt-0.5 shrink-0 text-amber-500" />
+                <div>
+                  <p className="font-heading text-sm font-bold text-amber-900">
+                    {t('speak.mixedTitle', {
+                      languages: (result.language_mix.languages || []).join(', '),
+                    })}
+                  </p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-amber-800/80">
+                    {t('speak.mixedBody')}
+                  </p>
+                  {result.language_mix.sample && (
+                    <p className="mt-1 text-xs italic text-amber-800/70">
+                      « {result.language_mix.sample} »
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
@@ -391,6 +422,29 @@ export default function SpeakingRecord() {
               <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-gray-700">
                 {result.transcript || t('speak.noSpeechLine')}
               </p>
+
+              {/* The same answer with the mistakes taken out and nothing else
+                  changed. It sits in this card rather than its own because it
+                  is only worth anything read against the line above it: every
+                  difference between the two is a mistake that was made. The
+                  better-written version is further down and is a different
+                  question — not what went wrong, but what could have been. */}
+              {(result.corrected_version || '').trim() && (
+                <div className="mt-4 border-t border-violet-50 pt-4" data-testid="corrected-version">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-heading text-sm font-bold text-gray-900">
+                      {t('speak.correctedTitle')}
+                    </p>
+                    <SpeakButton text={result.corrected_version} id="corrected" {...tts} />
+                  </div>
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-gray-700">
+                    {result.corrected_version}
+                  </p>
+                  <p className="mt-2 text-xs leading-relaxed text-gray-400">
+                    {t('speak.correctedNote')}
+                  </p>
+                </div>
+              )}
             </div>
 
             {Array.isArray(result.errors) && result.errors.length > 0 && (
@@ -407,7 +461,14 @@ export default function SpeakingRecord() {
                             tell you how it sounds, which is the whole subject
                             of a speaking test. */}
                         <SpeakButton text={e.correction} id={`fix-${i}`} {...tts} />
-                        <span className="ml-auto rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase text-primary">{CAT_LABELS[e.category] || e.category}</span>
+                        <span className="ml-auto flex items-center gap-1.5">
+                          {SEVERITY_TONE[e.severity] && (
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${SEVERITY_TONE[e.severity]}`}>
+                              {t(`speak.severity.${e.severity}`)}
+                            </span>
+                          )}
+                          <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase text-primary">{CAT_LABELS[e.category] || e.category}</span>
+                        </span>
                       </div>
                       <p className="mt-1 text-xs text-gray-500">{e.explanation}</p>
                     </div>

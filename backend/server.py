@@ -1887,6 +1887,13 @@ def _clamp_criteria_to_level(analysis: dict) -> dict:
 VALID_CATEGORIES = {"prepositions", "spelling", "conjugation",
                     "gender_number", "anglicism", "improvement"}
 
+# How much one error actually costs the candidate. Not every mistake is worth
+# the same: a wrong article is noise a listener corrects for, and a verb in the
+# wrong person can change who did what. Presented as three named weights rather
+# than a number, because "moderate" is a judgement an examiner makes and 0.6 is
+# a precision nobody has.
+VALID_SEVERITIES = ("major", "moderate", "minor")
+
 # The official TCF Canada expression orale grid, in the order an examiner reads
 # it. Phonology is first on the real grid and is deliberately in this tuple
 # even though nothing fills it yet: we transcribe and then grade the text, so
@@ -2354,12 +2361,19 @@ def _validate_analysis(data: dict) -> dict:
         cat = e.get("category", "spelling")
         if cat not in VALID_CATEGORIES:
             cat = "spelling"
-        errors.append({
+        entry = {
             "error": str(e.get("error", "")),
             "correction": str(e.get("correction", "")),
             "explanation": str(e.get("explanation", "")),
             "category": cat,
-        })
+        }
+        # Optional, and absent rather than guessed. Only the speaking graders
+        # are asked for it; a writing correction that does not carry one must
+        # not be labelled "moderate" by a default nobody chose.
+        severity = str(e.get("severity", "")).strip().lower()
+        if severity in VALID_SEVERITIES:
+            entry["severity"] = severity
+        errors.append(entry)
     # A missing score or level means the model did not really grade the text.
     # Defaulting to 0/A1 would tell a learner they are a beginner because of a
     # malformed response, so treat it as a parse failure instead.
@@ -2665,7 +2679,7 @@ SPEAKING_GRADER_SYSTEM = """You are a certified TEF/TCF Canada examiner evaluati
 You receive the QUESTION (the task) and the TRANSCRIPT of what the candidate said. The transcript may contain small transcription errors; judge the language charitably where a word is clearly a transcription artifact, not a learner error.
 
 Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
-{"answers_question": true, "relevance_comment": "one sentence (English) on whether and how well the answer addresses the task", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French"}
+{"answers_question": true, "relevance_comment": "one sentence (English) on whether and how well the answer addresses the task", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement","severity":"major|moderate|minor"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "corrected_version":"what they said, with the mistakes fixed and nothing else changed", "language_mix":{"detected":false,"languages":[],"sample":""}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French"}
 
 Evaluate TWO things:
 1. RELEVANCE - does the spoken answer actually address the question/task? Set answers_question true/false and explain in relevance_comment. An off-topic or incomplete answer should lower the score even if the French is correct.
@@ -2691,7 +2705,17 @@ criteria - THE EXAMINER'S GRID. The official TCF Canada expression orale result 
 Never invent a phonological or pronunciation score. You are reading a transcript and cannot hear the candidate, so return exactly these three criteria and no fourth one.
 
 strengths: 1-3 short English bullets naming what the candidate genuinely did well. Do not pad it with a compliment the answer does not support - a weak answer earns one honest line, not three.
-focus_areas: 1-3 short English bullets naming what to work on next. Each is a thing to practise, not a restatement of an error already listed above."""
+focus_areas: 1-3 short English bullets naming what to work on next. Each is a thing to practise, not a restatement of an error already listed above.
+
+severity - how much each error actually costs the candidate, not how easy it was to spot:
+- major: it changes the meaning, or a listener has to stop and work out what was meant (wrong person on a verb, a negation dropped, a word that means something else).
+- moderate: plainly wrong and noticed, but the meaning survives (gender and agreement, most preposition choices, a tense that is nearly right).
+- minor: a slip a native speaker also makes, or a small awkwardness (a missing liaison in writing, a slightly odd but understandable turn of phrase).
+An "improvement" entry is a style upgrade on a correct sentence and is always "minor".
+
+corrected_version - EXACTLY what the candidate said, with the mistakes taken out and NOTHING else changed. Same ideas, same words, same register, same length; fix the errors and stop. This is deliberately not enhanced_version: read side by side, every difference between the transcript and this one is a mistake they made, and every difference between this one and enhanced_version is a way they could have said it better. Blurring the two loses both. French only.
+
+language_mix - did the candidate speak anything other than French? Set detected true only when they actually produced words in another language (finishing a sentence in English, an untranslated phrase from their first language) - NOT for a French word used wrongly, which is an anglicism and belongs in errors. List the languages, and quote a short sample of what they said. The Expression orale paper marks French: language produced in another one cannot be marked at all, and saying so is more use to the candidate than quietly scoring the gap."""
 
 
 # ----------------------------------------------------------------------------
@@ -2735,7 +2759,7 @@ INTERACTION_GRADER_SYSTEM = """You are a certified TCF Canada examiner grading T
 You receive the CONSIGNE (the scenario) and the full DIALOGUE. Grade ONLY the candidate's turns. The transcript comes from speech recognition, so judge charitably where a word is clearly a transcription artifact rather than a learner error.
 
 Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
-{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate obtained the information the consigne asked for", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French", "missed_questions":[{"question":"question in French the candidate should have asked","why":"what it would have obtained (English)"}]}
+{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate obtained the information the consigne asked for", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement","severity":"major|moderate|minor"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "corrected_version":"what they said, with the mistakes fixed and nothing else changed", "language_mix":{"detected":false,"languages":[],"sample":""}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French", "missed_questions":[{"question":"question in French the candidate should have asked","why":"what it would have obtained (English)"}]}
 
 Because this task is INTERACTION, weigh these alongside grammar and vocabulary:
 1. QUESTION QUALITY - did the candidate actually ask questions, and were they well formed? Flat statements, or questions built only by raising intonation ("vous avez des places ?") where inversion or est-ce que is expected, are the single most common Tâche 2 weakness. Report them as errors.
@@ -2767,14 +2791,24 @@ criteria - THE EXAMINER'S GRID. The official TCF Canada expression orale result 
 Never invent a phonological or pronunciation score. You are reading a transcript and cannot hear the candidate, so return exactly these three criteria and no fourth one.
 
 strengths: 1-3 short English bullets naming what the candidate genuinely did well. Do not pad it with a compliment the answer does not support - a weak answer earns one honest line, not three.
-focus_areas: 1-3 short English bullets naming what to work on next. Each is a thing to practise, not a restatement of an error already listed above."""
+focus_areas: 1-3 short English bullets naming what to work on next. Each is a thing to practise, not a restatement of an error already listed above.
+
+severity - how much each error actually costs the candidate, not how easy it was to spot:
+- major: it changes the meaning, or a listener has to stop and work out what was meant (wrong person on a verb, a negation dropped, a word that means something else).
+- moderate: plainly wrong and noticed, but the meaning survives (gender and agreement, most preposition choices, a tense that is nearly right).
+- minor: a slip a native speaker also makes, or a small awkwardness (a missing liaison in writing, a slightly odd but understandable turn of phrase).
+An "improvement" entry is a style upgrade on a correct sentence and is always "minor".
+
+corrected_version - EXACTLY what the candidate said, with the mistakes taken out and NOTHING else changed. Same ideas, same words, same register, same length; fix the errors and stop. This is deliberately not enhanced_version: read side by side, every difference between the transcript and this one is a mistake they made, and every difference between this one and enhanced_version is a way they could have said it better. Blurring the two loses both. French only.
+
+language_mix - did the candidate speak anything other than French? Set detected true only when they actually produced words in another language (finishing a sentence in English, an untranslated phrase from their first language) - NOT for a French word used wrongly, which is an anglicism and belongs in errors. List the languages, and quote a short sample of what they said. The Expression orale paper marks French: language produced in another one cannot be marked at all, and saying so is more use to the candidate than quietly scoring the gap."""
 
 INTERVIEW_GRADER_SYSTEM = """You are a certified TCF Canada examiner grading Tâche 1 (Entretien dirigé) - a guided interview in which the EXAMINER asks and the CANDIDATE answers questions about themselves: who they are, their studies or work, their daily life, their interests and their plans.
 
 You receive the BRIEF and the full DIALOGUE. Grade ONLY the candidate's turns. The transcript comes from speech recognition, so judge charitably where a word is clearly a transcription artifact rather than a learner error.
 
 Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
-{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate answered what was asked", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French"}
+{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate answered what was asked", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement","severity":"major|moderate|minor"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "corrected_version":"what they said, with the mistakes fixed and nothing else changed", "language_mix":{"detected":false,"languages":[],"sample":""}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French"}
 
 This task is a PRESENTATION, not an interaction. The candidate is NOT expected to ask questions, and must never be penalised for not asking any. Weigh instead:
 1. ANSWERING - did the candidate actually answer each question, rather than talking past it?
@@ -2802,7 +2836,17 @@ criteria - THE EXAMINER'S GRID. The official TCF Canada expression orale result 
 Never invent a phonological or pronunciation score. You are reading a transcript and cannot hear the candidate, so return exactly these three criteria and no fourth one.
 
 strengths: 1-3 short English bullets naming what the candidate genuinely did well. Do not pad it with a compliment the answer does not support - a weak answer earns one honest line, not three.
-focus_areas: 1-3 short English bullets naming what to work on next. Each is a thing to practise, not a restatement of an error already listed above."""
+focus_areas: 1-3 short English bullets naming what to work on next. Each is a thing to practise, not a restatement of an error already listed above.
+
+severity - how much each error actually costs the candidate, not how easy it was to spot:
+- major: it changes the meaning, or a listener has to stop and work out what was meant (wrong person on a verb, a negation dropped, a word that means something else).
+- moderate: plainly wrong and noticed, but the meaning survives (gender and agreement, most preposition choices, a tense that is nearly right).
+- minor: a slip a native speaker also makes, or a small awkwardness (a missing liaison in writing, a slightly odd but understandable turn of phrase).
+An "improvement" entry is a style upgrade on a correct sentence and is always "minor".
+
+corrected_version - EXACTLY what the candidate said, with the mistakes taken out and NOTHING else changed. Same ideas, same words, same register, same length; fix the errors and stop. This is deliberately not enhanced_version: read side by side, every difference between the transcript and this one is a mistake they made, and every difference between this one and enhanced_version is a way they could have said it better. Blurring the two loses both. French only.
+
+language_mix - did the candidate speak anything other than French? Set detected true only when they actually produced words in another language (finishing a sentence in English, an untranslated phrase from their first language) - NOT for a French word used wrongly, which is an anglicism and belongs in errors. List the languages, and quote a short sample of what they said. The Expression orale paper marks French: language produced in another one cannot be marked at all, and saying so is more use to the candidate than quietly scoring the gap."""
 
 # Keeps one exchange bounded so a runaway session cannot grow the prompt forever.
 MAX_DIALOGUE_TURNS = 40
@@ -3240,7 +3284,29 @@ def _validate_speaking(data: dict) -> dict:
     base["criteria"] = criteria
     base["strengths"] = _short_lines(data.get("strengths"))
     base["focus_areas"] = _short_lines(data.get("focus_areas"))
+    # What the candidate said, with the mistakes taken out and nothing else
+    # touched. Not the same thing as enhanced_version, which is a better answer
+    # written at a higher register: this one is theirs, so the two can be read
+    # side by side and every difference is an error they made.
+    base["corrected_version"] = str(data.get("corrected_version", "")).strip()[:2000]
+    base["language_mix"] = _validate_language_mix(data.get("language_mix"))
     return base
+
+
+def _validate_language_mix(value) -> dict:
+    """Whether the candidate spoke something other than French, and what.
+
+    Only the exam board's own rule matters here: the Expression orale paper
+    marks French. A candidate who finishes a sentence in English has not made
+    a vocabulary error, they have produced language that cannot be marked, and
+    saying so plainly is more use than silently scoring the gap.
+    """
+    if not isinstance(value, dict) or not value.get("detected"):
+        return {}
+    languages = [str(x).strip()[:40] for x in (value.get("languages") or [])
+                 if str(x).strip()][:4]
+    return {"detected": True, "languages": languages,
+            "sample": str(value.get("sample", "")).strip()[:200]}
 
 
 def _short_lines(value) -> list:

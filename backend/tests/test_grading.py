@@ -179,6 +179,89 @@ class TestSpeakingGrid:
         assert out["criteria"]["adequacy"]["score"] == 68
 
 
+class TestSeverity:
+    """How much an error costs, as three named weights.
+
+    Absent rather than defaulted: only the speaking graders are asked for it,
+    and a writing correction that carries none must not be labelled "moderate"
+    by a default nobody chose.
+    """
+    def _reply(self, **error_extra):
+        return {"errors": [{"error": "je vous ecrit", "correction": "je vous ecris",
+                            "explanation": "first person", "category": "conjugation",
+                            **error_extra}],
+                "overall_score": 60, "tcf_level": "B2"}
+
+    def test_a_named_weight_is_kept(self):
+        out = m._validate_analysis(self._reply(severity="major"))
+        assert out["errors"][0]["severity"] == "major"
+
+    def test_it_is_absent_when_the_grader_did_not_give_one(self):
+        assert "severity" not in m._validate_analysis(self._reply())["errors"][0]
+
+    def test_a_weight_outside_the_three_is_absent_not_invented(self):
+        out = m._validate_analysis(self._reply(severity="catastrophic"))
+        assert "severity" not in out["errors"][0]
+
+    def test_case_and_spacing_do_not_lose_it(self):
+        out = m._validate_analysis(self._reply(severity="  Moderate "))
+        assert out["errors"][0]["severity"] == "moderate"
+
+
+class TestCorrectedVersion:
+    """The candidate's own answer with the mistakes taken out.
+
+    Kept separate from enhanced_version on purpose: every difference between
+    the transcript and this one is a mistake they made, and every difference
+    between this one and enhanced_version is a way they could have said it
+    better. One field cannot carry both readings.
+    """
+    def _reply(self, **extra):
+        return {"errors": [], "overall_score": 60, "tcf_level": "B2",
+                "answers_question": True, **extra}
+
+    def test_it_is_carried_alongside_the_enhanced_one(self):
+        out = m._validate_speaking(self._reply(
+            corrected_version="Je vous ecris pour reserver une place.",
+            enhanced_version="Je me permets de vous ecrire afin de reserver une place."))
+        assert out["corrected_version"].startswith("Je vous ecris")
+        assert out["enhanced_version"].startswith("Je me permets")
+
+    def test_a_grader_that_omits_it_yields_an_empty_string(self):
+        assert m._validate_speaking(self._reply())["corrected_version"] == ""
+
+    def test_a_runaway_rewrite_cannot_fill_the_page(self):
+        out = m._validate_speaking(self._reply(corrected_version="mot " * 2000))
+        assert len(out["corrected_version"]) <= 2000
+
+
+class TestLanguageMix:
+    """Words produced in another language, which the paper cannot mark at all."""
+    def _reply(self, mix):
+        return {"errors": [], "overall_score": 60, "tcf_level": "B2",
+                "answers_question": True, "language_mix": mix}
+
+    def test_detected_carries_the_languages_and_a_sample(self):
+        out = m._validate_speaking(self._reply(
+            {"detected": True, "languages": ["English"],
+             "sample": "hello, sapko awaz aa rahi thi"}))
+        assert out["language_mix"]["languages"] == ["English"]
+        assert "hello" in out["language_mix"]["sample"]
+
+    def test_not_detected_is_empty_so_no_banner_is_rendered(self):
+        assert m._validate_speaking(self._reply(
+            {"detected": False, "languages": [], "sample": ""}))["language_mix"] == {}
+
+    def test_a_missing_or_malformed_field_is_empty(self):
+        assert m._validate_speaking(self._reply(None))["language_mix"] == {}
+        assert m._validate_speaking(self._reply("yes"))["language_mix"] == {}
+
+    def test_blank_language_names_are_dropped(self):
+        out = m._validate_speaking(self._reply(
+            {"detected": True, "languages": ["English", "  ", "Hindi"]}))
+        assert out["language_mix"]["languages"] == ["English", "Hindi"]
+
+
 class TestSpeechAudio:
     """The examiner that listens instead of reading.
 
