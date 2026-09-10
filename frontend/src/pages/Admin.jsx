@@ -289,41 +289,292 @@ function Pager({ offset, limit, total, onOffset }) {
 }
 
 /* ---------------------------------------------------------------- Users ---- */
+/* The five things a learner can have done, in the order the exam lists the
+   papers. Mirrors ACTIVITY_KINDS in backend/server.py. */
+const SKILLS = [
+  ['reading', 'admin.skillReading'],
+  ['listening', 'admin.skillListening'],
+  ['writing', 'admin.skillWriting'],
+  ['speaking', 'admin.skillSpeaking'],
+  ['mock', 'admin.skillMock'],
+  ['writing_exam', 'admin.skillWritingExam'],
+];
+
+const STATUSES = ['all', 'active', 'inactive', 'paid', 'unverified'];
+
+const Pill = ({ tone, children }) => (
+  <span className={`pill ${tone}`}>{children}</span>
+);
+
+const fmtDate = (v) => (v ? String(v).slice(0, 10) : '—');
+
+/* ---------------------------------------------------------- Learners ---- */
 function Users() {
   const t = useT();
   const [users, setUsers] = useState(null);
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
+  const [status, setStatus] = useState('all');
+  const [q, setQ] = useState('');
+  // The box is typed into on every keystroke; the query is not. Without this
+  // an eight-letter name is eight round trips and eight chances for an older
+  // one to land last and overwrite the answer to the newest.
+  const [term, setTerm] = useState('');
+  const [openUser, setOpenUser] = useState(null);
+
+  useEffect(() => {
+    const id = setTimeout(() => { setTerm(q.trim()); setOffset(0); }, 300);
+    return () => clearTimeout(id);
+  }, [q]);
+
   useEffect(() => {
     setUsers(null);
-    api.get('/api/admin/users', { params: { limit: PAGE_SIZE, offset } })
+    api.get('/api/admin/users', { params: { limit: PAGE_SIZE, offset, status, q: term } })
       .then((r) => { setUsers(r.data.users); setTotal(r.data.total ?? r.data.users.length); })
       .catch((e) => toast.error(errMsg(e)));
-  }, [offset]);
-  if (!users) return <Spinner />;
+  }, [offset, status, term]);
+
+  if (openUser) return <LearnerDetail userId={openUser} onBack={() => setOpenUser(null)} />;
+
   return (
-    <section className="card overflow-hidden">
-      <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
-          <tr>{['admin.thName', 'admin.thEmail', 'admin.thRole', 'admin.thPlan', 'admin.thUsed', 'admin.thStreak', 'admin.thJoined'].map((k) => <th key={k} className="px-5 py-3">{t(k)}</th>)}</tr>
-        </thead>
-        <tbody>
-          {users.map((u) => (
-            <tr key={u.user_id} className="border-t border-gray-100">
-              <td className="px-5 py-3 font-medium">{u.name}</td>
-              <td className="px-5 py-3">{u.email}</td>
-              <td className="px-5 py-3">{u.role === 'admin' ? <span className="pill bg-purple-50 text-purple-700">admin</span> : 'user'}</td>
-              <td className="px-5 py-3">{u.subscription_status}</td>
-              <td className="px-5 py-3">{u.free_submissions_used}</td>
-              <td className="px-5 py-3">{u.current_streak ?? 0}</td>
-              <td className="px-5 py-3">{u.created_at?.slice(0, 10)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <input value={q} onChange={(e) => setQ(e.target.value)}
+          placeholder={t('admin.learnersSearch')} data-testid="admin-learner-search"
+          className="w-full max-w-xs rounded-xl border border-gray-200 px-3 py-2 text-sm" />
+        {STATUSES.map((id) => (
+          <button key={id} onClick={() => { setStatus(id); setOffset(0); }}
+            className={`rounded-xl px-3 py-2 text-xs font-semibold transition ${
+              status === id ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            {t(`admin.status${id[0].toUpperCase()}${id.slice(1)}`)}
+          </button>
+        ))}
+        {users && <span className="ml-auto text-xs text-gray-500">{total}</span>}
       </div>
-      <Pager offset={offset} limit={PAGE_SIZE} total={total} onOffset={setOffset} />
+
+      {!users ? <Spinner /> : (
+        <div className="card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
+                <tr>
+                  {['admin.thName', 'admin.thEmail', 'admin.thPhone', 'admin.thStatus',
+                    'admin.thPlan'].map((k) => <th key={k} className="px-4 py-3">{t(k)}</th>)}
+                  {SKILLS.slice(0, 4).map(([id, k]) => (
+                    <th key={id} className="px-2 py-3 text-center">{t(k)}</th>
+                  ))}
+                  {['admin.thLastActive', 'admin.thJoined'].map((k) => (
+                    <th key={k} className="px-4 py-3">{t(k)}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u) => (
+                  <tr key={u.user_id} onClick={() => setOpenUser(u.user_id)}
+                    data-testid={`admin-learner-${u.user_id}`}
+                    className="cursor-pointer border-t border-gray-100 hover:bg-violet-50/50">
+                    <td className="px-4 py-3 font-medium">
+                      {u.name}
+                      {u.role === 'admin' && <Pill tone="ml-2 bg-purple-50 text-purple-700">admin</Pill>}
+                    </td>
+                    <td className="px-4 py-3">
+                      {u.email}
+                      {!u.email_verified && <span className="ml-1 text-amber-500" title={t('admin.notVerified')}>•</span>}
+                    </td>
+                    <td className="px-4 py-3">{u.phone || '—'}</td>
+                    <td className="px-4 py-3">
+                      {u.active
+                        ? <Pill tone="bg-emerald-50 text-emerald-700">{t('admin.activeBadge')}</Pill>
+                        : <Pill tone="bg-gray-100 text-gray-500">{t('admin.inactiveBadge')}</Pill>}
+                    </td>
+                    <td className="px-4 py-3">{u.subscription_status}</td>
+                    {SKILLS.slice(0, 4).map(([id]) => (
+                      <td key={id} className={`px-2 py-3 text-center ${
+                        u.activity?.[id] ? 'font-semibold text-gray-900' : 'text-gray-300'}`}>
+                        {u.activity?.[id] ?? 0}
+                      </td>
+                    ))}
+                    <td className="px-4 py-3">{fmtDate(u.last_activity_date)}</td>
+                    <td className="px-4 py-3">{fmtDate(u.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pager offset={offset} limit={PAGE_SIZE} total={total} onOffset={setOffset} />
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* One learner, paper by paper. */
+function LearnerDetail({ userId, onBack }) {
+  const t = useT();
+  const [data, setData] = useState(null);
+  const [openAttempt, setOpenAttempt] = useState(null);
+
+  useEffect(() => {
+    setData(null);
+    api.get(`/api/admin/users/${userId}/activity`)
+      .then((r) => setData(r.data))
+      .catch((e) => toast.error(errMsg(e)));
+  }, [userId]);
+
+  if (openAttempt) {
+    return <AttemptDetail {...openAttempt} onBack={() => setOpenAttempt(null)} />;
+  }
+  if (!data) return <Spinner />;
+  const u = data.user;
+
+  return (
+    <section className="space-y-4">
+      <button onClick={onBack} className="text-sm font-semibold text-primary">← {t('admin.back')}</button>
+
+      <div className="card p-5">
+        <h2 className="font-heading text-xl font-bold">{u.name}</h2>
+        <p className="text-sm text-gray-600">{u.email}{u.phone ? ` · ${u.phone}` : ''}</p>
+        <div className="mt-3 flex flex-wrap gap-2 text-xs">
+          <Pill tone="bg-violet-50 text-violet-700">{u.subscription_status}</Pill>
+          <Pill tone={u.email_verified ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}>
+            {t('admin.emailLabel')}: {u.email_verified ? '✓' : '✗'}
+          </Pill>
+          {u.phone && (
+            <Pill tone={u.phone_verified ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}>
+              {t('admin.phoneLabel')}: {u.phone_verified ? '✓' : '✗'}
+            </Pill>
+          )}
+          <Pill tone="bg-gray-100 text-gray-600">{t('admin.thJoined')}: {fmtDate(u.created_at)}</Pill>
+          <Pill tone="bg-gray-100 text-gray-600">{t('admin.thLastActive')}: {fmtDate(u.last_activity_date)}</Pill>
+          <Pill tone="bg-gray-100 text-gray-600">XP {u.xp ?? 0}</Pill>
+        </div>
+      </div>
+
+      {SKILLS.map(([kind, label]) => {
+        const rows = data[kind] || [];
+        if (!rows.length) return null;
+        return (
+          <div key={kind} className="card overflow-hidden">
+            <p className="border-b border-gray-100 bg-gray-50 px-5 py-3 text-xs font-bold uppercase text-gray-500">
+              {t(label)} · {rows.length}
+            </p>
+            <div className="divide-y divide-gray-100">
+              {rows.map((r, i) => (
+                <AttemptRow key={r.attempt_id || r.submission_id || i} kind={kind} row={r}
+                  onOpen={setOpenAttempt} />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+
+      {SKILLS.every(([kind]) => !(data[kind] || []).length) && (
+        <p className="card p-6 text-center text-sm text-gray-500">{t('admin.noActivity')}</p>
+      )}
+    </section>
+  );
+}
+
+/* One attempt, in whichever shape that paper has. Reading and listening are
+   the two whose answers are a choice among options, so they are the two that
+   can be opened up further. */
+function AttemptRow({ kind, row, onOpen }) {
+  const t = useT();
+  const openable = kind === 'reading' || kind === 'listening';
+  const isText = kind === 'writing' || kind === 'speaking';
+
+  return (
+    <div className="px-5 py-3">
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <span className="text-xs text-gray-400">{fmtDate(row.created_at)}</span>
+        {row.test_number != null && <span className="font-semibold">#{row.test_number}</span>}
+        {row.exam_type && <span className="font-semibold">{row.exam_type}</span>}
+        {row.tcf_level && <Pill tone="bg-violet-50 text-violet-700">{row.tcf_level}</Pill>}
+        {row.total != null && (
+          <span className="font-semibold text-gray-900">{row.score}/{row.total}</span>
+        )}
+        {row.overall_score != null && row.total == null && (
+          <span className="text-gray-500">{row.overall_score}/100</span>
+        )}
+        {row.combined_score != null && (
+          <span className="text-gray-500">{Math.round(row.combined_score)}/100</span>
+        )}
+        {row.word_count ? <span className="text-xs text-gray-400">{row.word_count} w</span> : null}
+        {Array.isArray(row.errors) && row.errors.length > 0 && (
+          <span className="text-xs text-rose-600">{row.errors.length} {t('admin.errorsLabel')}</span>
+        )}
+        {openable && (
+          <button onClick={() => onOpen({ kind, attemptId: row.attempt_id })}
+            data-testid={`admin-open-${row.attempt_id}`}
+            className="ml-auto text-xs font-semibold text-primary">
+            {t('admin.viewAnswers')} →
+          </button>
+        )}
+      </div>
+      {isText && row.text && (
+        <p className="mt-1.5 whitespace-pre-wrap rounded-xl bg-gray-50 p-3 text-xs leading-relaxed text-gray-700">
+          {row.text}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* One reading or listening paper: what was asked, what they chose, what was
+   right. */
+function AttemptDetail({ kind, attemptId, onBack }) {
+  const t = useT();
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    setData(null);
+    api.get(`/api/admin/attempts/${kind}/${attemptId}`)
+      .then((r) => setData(r.data))
+      .catch((e) => toast.error(errMsg(e)));
+  }, [kind, attemptId]);
+
+  if (!data) return <Spinner />;
+
+  return (
+    <section className="space-y-4">
+      <button onClick={onBack} className="text-sm font-semibold text-primary">← {t('admin.back')}</button>
+      <div className="card p-5">
+        <h2 className="font-heading text-lg font-bold">
+          {t(kind === 'reading' ? 'admin.skillReading' : 'admin.skillListening')} #{data.attempt.test_number}
+        </h2>
+        <p className="text-sm text-gray-600">
+          {data.user.name} · {data.attempt.score}/{data.attempt.total} · {t('admin.answeredLabel')}: {data.answered}
+        </p>
+      </div>
+
+      <div className="card overflow-hidden">
+        <div className="divide-y divide-gray-100">
+          {data.items.map((item) => (
+            <div key={item.position} className="px-5 py-3">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-bold text-gray-400">{item.position}</span>
+                <Pill tone="bg-gray-100 text-gray-600">{item.level}</Pill>
+                {!item.answered
+                  ? <Pill tone="bg-amber-50 text-amber-700">{t('admin.unanswered')}</Pill>
+                  : item.is_correct
+                    ? <Pill tone="bg-emerald-50 text-emerald-700">✓</Pill>
+                    : <Pill tone="bg-rose-50 text-rose-700">✗</Pill>}
+              </div>
+              <p className="mt-1 text-sm text-gray-900">{item.question}</p>
+              <div className="mt-1.5 space-y-0.5 text-xs">
+                {item.answered && !item.is_correct && (
+                  <p className="text-rose-600">
+                    {t('admin.theyChose')}: {item.chosen_text || item.chosen}
+                  </p>
+                )}
+                <p className="text-emerald-700">
+                  {t('admin.correctAnswer')}: {item.correct_text || item.correct}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </section>
   );
 }

@@ -39,7 +39,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from sqlalchemy import (
     String, Integer, Float, Boolean, DateTime, Text, ForeignKey, func, select,
-    update as sa_update, delete as sa_delete, case,
+    update as sa_update, delete as sa_delete, case, or_,
 )
 from sqlalchemy.dialects.postgresql import JSONB, ARRAY
 from sqlalchemy.ext.asyncio import (
@@ -7992,19 +7992,227 @@ async def admin_test_ai_providers(admin: User = Depends(get_admin_user)):
     return {"results": out}
 
 
+# Spoken work and written work live in one submissions table because the
+# analysis they produce is the same shape. Nobody uses the product that way,
+# so the admin view has to tell them apart again.
+SPOKEN_SOURCES = ("speaking", "conversation")
+
+# The five things a learner can have done, in the order the exam lists the
+# papers. Kept as one tuple so a new one cannot be added to the counts and
+# forgotten in the totals.
+ACTIVITY_KINDS = ("writing", "speaking", "reading", "listening",
+                  "mock", "writing_exam")
+
+
+def _empty_activity() -> dict:
+    return {kind: 0 for kind in ACTIVITY_KINDS}
+
+
+async def _activity_counts(db: AsyncSession, user_ids: list) -> dict:
+    """How much of each skill each of these learners has done.
+
+    Five grouped queries over the whole page of ids, not one query per row: a
+    200-row page would otherwise be a thousand round trips to render a table.
+    """
+    if not user_ids:
+        return {}
+    counts = {uid: _empty_activity() for uid in user_ids}
+
+    rows = await db.execute(
+        select(Submission.user_id, Submission.source, func.count())
+        .where(Submission.user_id.in_(user_ids))
+        .group_by(Submission.user_id, Submission.source))
+    for uid, source, n in rows.all():
+        kind = "speaking" if (source or "") in SPOKEN_SOURCES else "writing"
+        counts[uid][kind] += int(n)
+
+    for model, kind in ((ReadingAttempt, "reading"),
+                        (ListeningAttempt, "listening"),
+                        (MockExamAttempt, "mock"),
+                        (ExamAttempt, "writing_exam")):
+        rows = await db.execute(
+            select(model.user_id, func.count())
+            .where(model.user_id.in_(user_ids)).group_by(model.user_id))
+        for uid, n in rows.all():
+            counts[uid][kind] = int(n)
+    return counts
+
+
 @app.get("/api/admin/users")
 async def admin_users(admin: User = Depends(get_admin_user),
-                      limit: int = Query(200, ge=1, le=1000),
+                      q: str = Query("", max_length=120),
+                      status: str = Query("all"),
+                      days: int = Query(30, ge=1, le=365),
+                      limit: int = Query(100, ge=1, le=1000),
                       offset: int = Query(0, ge=0),
                       db: AsyncSession = Depends(get_db)):
-    """Newest accounts first. Paged, so the response cannot grow without bound
-    as the user base does."""
-    total = await db.scalar(select(func.count()).select_from(User))
+    """Every learner, who they are, and what they have actually done.
+
+    "Active" is a window, not a flag: there is no such column on an account
+    and inventing one would mean maintaining it. A learner is active if they
+    have done something in the last `days` days, and `days` is a parameter
+    because whether 30 is the right number is a question about the business
+    rather than about the code.
+    """
+    since = now_utc() - timedelta(days=days)
+    stmt = select(User)
+    term = (q or "").strip()
+    if term:
+        like = f"%{term}%"
+        stmt = stmt.where(or_(User.name.ilike(like), User.email.ilike(like),
+                              User.phone.ilike(like)))
+    if status == "active":
+        stmt = stmt.where(User.last_activity_date >= since)
+    elif status == "inactive":
+        stmt = stmt.where(or_(User.last_activity_date.is_(None),
+                              User.last_activity_date < since))
+    elif status == "paid":
+        stmt = stmt.where(User.subscription_status != "free")
+    elif status == "unverified":
+        stmt = stmt.where(User.email_verified.is_(False),
+                          User.phone_verified.is_(False))
+
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery()))
     res = await db.execute(
-        select(User).order_by(User.created_at.desc())
-        .limit(limit).offset(offset))
-    return {"users": [strip_user(u) for u in res.scalars().all()],
-            "total": total or 0, "limit": limit, "offset": offset}
+        stmt.order_by(User.created_at.desc()).limit(limit).offset(offset))
+    users = res.scalars().all()
+    activity = await _activity_counts(db, [u.user_id for u in users])
+
+    out = []
+    for u in users:
+        row = strip_user(u)
+        row["activity"] = activity.get(u.user_id, _empty_activity())
+        row["active"] = bool(u.last_activity_date
+                             and u.last_activity_date >= since)
+        out.append(row)
+    return {"users": out, "total": total or 0, "limit": limit,
+            "offset": offset, "active_days": days}
+
+
+@app.get("/api/admin/users/{user_id}/activity")
+async def admin_user_activity(user_id: str,
+                              admin: User = Depends(get_admin_user),
+                              limit: int = Query(50, ge=1, le=200),
+                              db: AsyncSession = Depends(get_db)):
+    """One learner's whole history, paper by paper.
+
+    Written and spoken answers carry the text itself, because for those two
+    the answer IS the text. Reading and listening carry only the score here —
+    forty questions each would make this response enormous and most of it
+    unread — and /api/admin/attempts/{kind}/{id} opens one paper when it is
+    actually wanted.
+    """
+    learner = await db.scalar(select(User).where(User.user_id == user_id))
+    if not learner:
+        raise HTTPException(status_code=404, detail="No such user")
+
+    res = await db.execute(
+        select(Submission).where(Submission.user_id == user_id)
+        .order_by(Submission.created_at.desc()).limit(limit * 2))
+    written, spoken = [], []
+    for sub in res.scalars().all():
+        row = {"submission_id": sub.submission_id, "source": sub.source,
+               "prompt_id": sub.prompt_id, "text": sub.original_text,
+               "word_count": sub.word_count, "tcf_level": sub.tcf_level,
+               "overall_score": sub.overall_score,
+               "errors": sub.errors or [], "caps_applied": sub.caps_applied or [],
+               "created_at": sub.created_at}
+        (spoken if (sub.source or "") in SPOKEN_SOURCES else written).append(row)
+
+    async def recent(model, id_col):
+        res = await db.execute(
+            select(model).where(model.user_id == user_id)
+            .order_by(model.created_at.desc()).limit(limit))
+        return [{**_row_to_dict(a), "attempt_id": getattr(a, id_col)}
+                for a in res.scalars().all()]
+
+    return {
+        "user": strip_user(learner),
+        "writing": written[:limit],
+        "speaking": spoken[:limit],
+        "reading": await recent(ReadingAttempt, "reading_attempt_id"),
+        "listening": await recent(ListeningAttempt, "listening_attempt_id"),
+        "mock": await recent(MockExamAttempt, "mock_attempt_id"),
+        "writing_exam": await recent(ExamAttempt, "attempt_id"),
+    }
+
+
+# Which model holds the paper, which holds its questions, and how the two are
+# keyed to each other. Reading and listening are the two papers whose answers
+# are a choice among options, so they are the two that can be opened up
+# question by question.
+_ATTEMPT_BANKS = {
+    "reading": (ReadingAttempt, ReadingAttempt.reading_attempt_id,
+                ReadingQuestion, "reading_question_id"),
+    "listening": (ListeningAttempt, ListeningAttempt.listening_attempt_id,
+                  ListeningQuestion, "listening_question_id"),
+}
+
+
+@app.get("/api/admin/attempts/{kind}/{attempt_id}")
+async def admin_attempt_detail(kind: str, attempt_id: str,
+                               admin: User = Depends(get_admin_user),
+                               db: AsyncSession = Depends(get_db)):
+    """One reading or listening paper, question by question.
+
+    What was asked, which option they picked, which one was right. The stored
+    answers are only {question_id: option_id}, so the question bank has to be
+    read back to turn them into something a human can look at — an option id
+    on its own says nothing about what the learner actually chose.
+    """
+    bank = _ATTEMPT_BANKS.get(kind)
+    if not bank:
+        raise HTTPException(status_code=404, detail="Unknown attempt type")
+    model, id_col, question_model, question_id_col = bank
+
+    attempt = await db.scalar(select(model).where(id_col == attempt_id))
+    if not attempt:
+        raise HTTPException(status_code=404, detail="No such attempt")
+
+    res = await db.execute(
+        select(question_model)
+        .where(question_model.test_number == attempt.test_number)
+        .order_by(question_model.position.asc()))
+    questions = res.scalars().all()
+    answers = attempt.answers if isinstance(attempt.answers, dict) else {}
+
+    def option_text(options, option_id):
+        for opt in (options or []):
+            if isinstance(opt, dict) and str(opt.get("id")) == str(option_id):
+                return str(opt.get("text", ""))
+        return ""
+
+    items = []
+    for q in questions:
+        chosen = answers.get(getattr(q, question_id_col))
+        items.append({
+            "position": q.position,
+            "level": q.level,
+            "question": q.question_fr,
+            # Every option, so a wrong answer can be read against what else
+            # was on offer rather than in isolation.
+            "options": [{"id": o.get("id"), "text": o.get("text")}
+                        for o in (q.options or []) if isinstance(o, dict)],
+            "chosen": chosen,
+            "chosen_text": option_text(q.options, chosen),
+            "correct": q.correct_answer,
+            "correct_text": option_text(q.options, q.correct_answer),
+            # Unanswered is not the same as wrong, and a paper full of blanks
+            # means something different from a paper full of mistakes.
+            "answered": chosen is not None,
+            "is_correct": chosen is not None and str(chosen) == str(q.correct_answer),
+        })
+
+    learner = await db.scalar(select(User).where(User.user_id == attempt.user_id))
+    return {
+        "kind": kind,
+        "attempt": {**_row_to_dict(attempt), "attempt_id": attempt_id},
+        "user": {"user_id": attempt.user_id,
+                 "name": learner.name if learner else "",
+                 "email": learner.email if learner else ""},
+        "items": items,
+        "answered": sum(1 for i in items if i["answered"]),
+    }
 
 
 @app.get("/api/admin/submissions")
