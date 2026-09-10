@@ -96,6 +96,7 @@ const AI_LABELS = {
   transcribe_provider: 'admin.transcribeProvider',
   speaking_grader_provider: 'admin.speakingGrader',
   writing_grader_provider: 'admin.writingGrader',
+  speech_audio_provider: 'admin.speechAudio',
 };
 
 function AIProviders() {

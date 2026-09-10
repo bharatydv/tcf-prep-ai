@@ -99,6 +99,342 @@ class TestLevelCaps:
         assert m.CEFR_LEVELS.index(capped["tcf_level"]) < m.CEFR_LEVELS.index("C1")
 
 
+class TestSpeakingGrid:
+    """The criterion-by-criterion grid the result page reads.
+
+    The interesting cases are all absences: a grader that omits a criterion is
+    saying it could not judge it, and a candidate must never be shown a zero
+    for something nobody assessed.
+    """
+    def _reply(self, **extra):
+        return {"errors": [], "overall_score": 60, "tcf_level": "B2",
+                "answers_question": True, "relevance_comment": "ok",
+                "suggestions": [], "vocabulary_suggestions": [], **extra}
+
+    def test_the_three_transcript_criteria_are_kept(self):
+        out = m._validate_speaking(self._reply(criteria={
+            "linguistic": {"score": 61, "comment": "varied tenses"},
+            "adequacy": {"score": 70, "comment": "answers the task"},
+            "discourse": {"score": 55, "comment": "few connectors"}}))
+        assert set(out["criteria"]) == {"linguistic", "adequacy", "discourse"}
+        assert out["criteria"]["linguistic"]["score"] == 61
+
+    def test_a_criterion_the_grader_omitted_is_absent_not_zero(self):
+        out = m._validate_speaking(self._reply(criteria={
+            "linguistic": {"score": 61, "comment": "x"}}))
+        assert "phonology" not in out["criteria"]
+
+    def test_a_phonology_score_invented_from_a_transcript_is_still_carried(self):
+        """The prompt forbids it; the validator does not silently drop it.
+
+        Dropping it here would hide a grader that ignores the instruction, and
+        the slot exists precisely so an audio grader can fill it."""
+        out = m._validate_speaking(self._reply(criteria={
+            "phonology": {"score": 40, "comment": "hesitant"}}))
+        assert out["criteria"]["phonology"]["score"] == 40
+
+    def test_scores_written_as_strings_or_fractions_are_read(self):
+        out = m._validate_speaking(self._reply(criteria={
+            "linguistic": {"score": "61/100", "comment": "x"},
+            "adequacy": {"score": "70%", "comment": "y"}}))
+        assert out["criteria"]["linguistic"]["score"] == 61
+        assert out["criteria"]["adequacy"]["score"] == 70
+
+    def test_an_unreadable_criterion_score_drops_only_that_criterion(self):
+        out = m._validate_speaking(self._reply(criteria={
+            "linguistic": {"score": "good", "comment": "x"},
+            "adequacy": {"score": 70, "comment": "y"}}))
+        assert "linguistic" not in out["criteria"]
+        assert out["criteria"]["adequacy"]["score"] == 70
+
+    def test_no_criteria_at_all_is_an_empty_grid_not_a_failure(self):
+        out = m._validate_speaking(self._reply())
+        assert out["criteria"] == {}
+        assert out["overall_score"] == 60
+
+    def test_strengths_and_focus_areas_are_capped_and_cleaned(self):
+        out = m._validate_speaking(self._reply(
+            strengths=["clear plan", "  ", "good range", "d", "e", "f"],
+            focus_areas=["nasal vowels"]))
+        assert out["strengths"] == ["clear plan", "good range", "d", "e"]
+        assert out["focus_areas"] == ["nasal vowels"]
+
+    def test_a_capped_level_pulls_the_grid_down_with_it(self):
+        """A 20-word answer cannot demonstrate B2 range however good it is, so
+        a criterion still reading 75 beside a capped A2 headline would be the
+        page contradicting itself."""
+        graded = {"errors": [], "overall_score": 75, "tcf_level": "B2",
+                  "answers_question": True,
+                  "criteria": {"linguistic": {"score": 75, "comment": "x"}}}
+        out = m.apply_speaking_caps(graded, "Bonjour je m'appelle Marie.", 3)
+        assert out["caps_applied"]
+        ceiling = m.LEVEL_MAX_SCORE[out["tcf_level"]]
+        assert out["criteria"]["linguistic"]["score"] <= ceiling
+
+    def test_an_uncapped_grid_is_left_exactly_as_graded(self):
+        graded = {"errors": [], "overall_score": 60, "tcf_level": "B2",
+                  "answers_question": True,
+                  "criteria": {"adequacy": {"score": 68, "comment": "x"}}}
+        out = m.apply_speaking_caps(graded, "mot " * 200, 3)
+        assert out["criteria"]["adequacy"]["score"] == 68
+
+
+class TestSpeechMetrics:
+    """Contrôle phonologique measured from the transcription already paid for.
+
+    AssemblyAI returns a confidence and a timing for every word and we used to
+    drop them. Nothing here asks a model anything, so nothing here can be
+    talked into a verdict it cannot support.
+    """
+    def _words(self, n=40, gap=80, dur=300, conf=0.95):
+        """n words, each `dur` ms long with `gap` ms between them."""
+        out, t = [], 0
+        for i in range(n):
+            out.append({"text": "mot%d" % i, "start": t, "end": t + dur,
+                        "confidence": conf})
+            t += dur + gap
+        return out
+
+    def test_a_fluent_clear_answer_reads_as_one(self):
+        # 300ms words, 80ms gaps -> ~158 wpm, no pause over the threshold
+        out = m.speech_metrics_from_words(self._words())
+        assert out["delivery"]["fluency"] == "fluent"
+        assert out["delivery"]["pronunciation"] == "clear"
+        assert out["metrics"]["pauses"] == 0
+        assert out["phonology"]["score"] > 70
+
+    def test_long_gaps_between_words_read_as_hesitant(self):
+        out = m.speech_metrics_from_words(self._words(gap=1600))
+        assert out["delivery"]["fluency"] == "hesitant"
+        assert out["metrics"]["pauses"] > 0
+        assert out["metrics"]["pause_seconds"] > 0
+
+    def test_words_the_recogniser_could_not_pin_down_lower_the_mark(self):
+        clear = m.speech_metrics_from_words(self._words(conf=0.95))
+        muddy = m.speech_metrics_from_words(self._words(conf=0.45))
+        assert muddy["delivery"]["pronunciation"] == "needs_work"
+        assert muddy["phonology"]["score"] < clear["phonology"]["score"]
+
+    def test_the_unclear_words_are_named_worst_first(self):
+        words = self._words(n=20)
+        words[3] = {**words[3], "text": "étranger", "confidence": 0.20}
+        words[9] = {**words[9], "text": "bibliothèque", "confidence": 0.40}
+        out = m.speech_metrics_from_words(words)
+        assert out["metrics"]["unclear_words"][:2] == ["étranger", "bibliothèque"]
+
+    def test_the_same_word_twice_is_named_once(self):
+        words = self._words(n=20)
+        for i in (3, 7, 11):
+            words[i] = {**words[i], "text": "étranger", "confidence": 0.2}
+        out = m.speech_metrics_from_words(words)
+        assert out["metrics"]["unclear_words"].count("étranger") == 1
+
+    def test_intonation_and_liaisons_are_left_unrated(self):
+        """Neither can be got from timings and confidences. An absent badge
+        says nobody listened for it, which is true; a guessed one would not
+        be."""
+        out = m.speech_metrics_from_words(self._words())
+        assert "intonation" not in out["delivery"]
+        assert "liaisons" not in out["delivery"]
+
+    def test_too_few_words_to_measure_yields_nothing(self):
+        assert m.speech_metrics_from_words(self._words(n=5)) == {}
+
+    def test_a_provider_that_reports_no_words_yields_nothing(self):
+        assert m.speech_metrics_from_words([]) == {}
+        assert m.speech_metrics_from_words(None or []) == {}
+
+    def test_junk_entries_do_not_raise(self):
+        assert m.speech_metrics_from_words(["mot", None, {}]) == {}
+
+    def test_zero_length_audio_yields_nothing_rather_than_dividing_by_it(self):
+        flat = [{"text": "mot%d" % i, "start": 0, "end": 0, "confidence": 0.9}
+                for i in range(20)]
+        assert m.speech_metrics_from_words(flat) == {}
+
+    def test_the_measurements_reach_the_result(self):
+        graded = {"errors": [], "overall_score": 60, "tcf_level": "B2",
+                  "answers_question": True, "criteria": {}}
+        out = m.merge_speech_audio(graded, m.speech_metrics_from_words(self._words()))
+        assert out["criteria"]["phonology"]["score"] > 0
+        assert out["delivery_metrics"]["wpm"] > 0
+
+
+class TestSeverity:
+    """How much an error costs, as three named weights.
+
+    Absent rather than defaulted: only the speaking graders are asked for it,
+    and a writing correction that carries none must not be labelled "moderate"
+    by a default nobody chose.
+    """
+    def _reply(self, **error_extra):
+        return {"errors": [{"error": "je vous ecrit", "correction": "je vous ecris",
+                            "explanation": "first person", "category": "conjugation",
+                            **error_extra}],
+                "overall_score": 60, "tcf_level": "B2"}
+
+    def test_a_named_weight_is_kept(self):
+        out = m._validate_analysis(self._reply(severity="major"))
+        assert out["errors"][0]["severity"] == "major"
+
+    def test_it_is_absent_when_the_grader_did_not_give_one(self):
+        assert "severity" not in m._validate_analysis(self._reply())["errors"][0]
+
+    def test_a_weight_outside_the_three_is_absent_not_invented(self):
+        out = m._validate_analysis(self._reply(severity="catastrophic"))
+        assert "severity" not in out["errors"][0]
+
+    def test_case_and_spacing_do_not_lose_it(self):
+        out = m._validate_analysis(self._reply(severity="  Moderate "))
+        assert out["errors"][0]["severity"] == "moderate"
+
+
+class TestCorrectedVersion:
+    """The candidate's own answer with the mistakes taken out.
+
+    Kept separate from enhanced_version on purpose: every difference between
+    the transcript and this one is a mistake they made, and every difference
+    between this one and enhanced_version is a way they could have said it
+    better. One field cannot carry both readings.
+    """
+    def _reply(self, **extra):
+        return {"errors": [], "overall_score": 60, "tcf_level": "B2",
+                "answers_question": True, **extra}
+
+    def test_it_is_carried_alongside_the_enhanced_one(self):
+        out = m._validate_speaking(self._reply(
+            corrected_version="Je vous ecris pour reserver une place.",
+            enhanced_version="Je me permets de vous ecrire afin de reserver une place."))
+        assert out["corrected_version"].startswith("Je vous ecris")
+        assert out["enhanced_version"].startswith("Je me permets")
+
+    def test_a_grader_that_omits_it_yields_an_empty_string(self):
+        assert m._validate_speaking(self._reply())["corrected_version"] == ""
+
+    def test_a_runaway_rewrite_cannot_fill_the_page(self):
+        out = m._validate_speaking(self._reply(corrected_version="mot " * 2000))
+        assert len(out["corrected_version"]) <= 2000
+
+
+class TestLanguageMix:
+    """Words produced in another language, which the paper cannot mark at all."""
+    def _reply(self, mix):
+        return {"errors": [], "overall_score": 60, "tcf_level": "B2",
+                "answers_question": True, "language_mix": mix}
+
+    def test_detected_carries_the_languages_and_a_sample(self):
+        out = m._validate_speaking(self._reply(
+            {"detected": True, "languages": ["English"],
+             "sample": "hello, sapko awaz aa rahi thi"}))
+        assert out["language_mix"]["languages"] == ["English"]
+        assert "hello" in out["language_mix"]["sample"]
+
+    def test_not_detected_is_empty_so_no_banner_is_rendered(self):
+        assert m._validate_speaking(self._reply(
+            {"detected": False, "languages": [], "sample": ""}))["language_mix"] == {}
+
+    def test_a_missing_or_malformed_field_is_empty(self):
+        assert m._validate_speaking(self._reply(None))["language_mix"] == {}
+        assert m._validate_speaking(self._reply("yes"))["language_mix"] == {}
+
+    def test_blank_language_names_are_dropped(self):
+        out = m._validate_speaking(self._reply(
+            {"detected": True, "languages": ["English", "  ", "Hindi"]}))
+        assert out["language_mix"]["languages"] == ["English", "Hindi"]
+
+
+class TestSpeechAudio:
+    """The examiner that listens instead of reading.
+
+    It is the one part of a speaking result allowed to come back empty: the
+    learner has paid for a grade and has one, so a second provider being down
+    must cost them a criterion and never the correction.
+    """
+    def test_a_clean_reply_fills_the_criterion(self):
+        out = m._validate_speech_audio({
+            "phonology": {"score": 45, "comment": "the nasal in etranger"},
+            "delivery": {"pronunciation": "needs_work", "fluency": "hesitant",
+                         "intonation": "flat", "liaisons": "many_errors"},
+            "pronunciation_errors": [
+                {"word": "positive", "issue": "vowel", "explanation": "open o"}]})
+        assert out["phonology"]["score"] == 45
+        assert out["delivery"]["fluency"] == "hesitant"
+        assert out["pronunciation_errors"][0]["word"] == "positive"
+
+    def test_a_rating_outside_its_scale_is_dropped_not_rendered_blank(self):
+        out = m._validate_speech_audio({
+            "delivery": {"fluency": "quite good", "intonation": "natural"}})
+        assert "fluency" not in out["delivery"]
+        assert out["delivery"]["intonation"] == "natural"
+
+    def test_an_unknown_issue_type_falls_back_rather_than_dropping_the_error(self):
+        out = m._validate_speech_audio({"pronunciation_errors": [
+            {"word": "chien", "issue": "palatal", "explanation": "x"}]})
+        assert out["pronunciation_errors"][0]["issue"] == "vowel"
+
+    def test_a_nameless_pronunciation_error_is_dropped(self):
+        """"Some sounds were unclear" is not something to go and practise."""
+        out = m._validate_speech_audio({"pronunciation_errors": [
+            {"word": "  ", "issue": "vowel", "explanation": "x"}]})
+        assert out["pronunciation_errors"] == []
+
+    def test_an_unjudgeable_recording_yields_no_score(self):
+        out = m._validate_speech_audio({
+            "phonology": None, "delivery": {}, "pronunciation_errors": []})
+        assert "phonology" not in out
+
+    def test_garbled_badges_do_not_cost_the_criterion(self):
+        out = m._validate_speech_audio({
+            "phonology": {"score": 62, "comment": "clear"}, "delivery": "good"})
+        assert out["phonology"]["score"] == 62
+        assert out["delivery"] == {}
+
+
+class TestMergeSpeechAudio:
+    def _graded(self, **extra):
+        return {"errors": [], "overall_score": 60, "tcf_level": "B2",
+                "answers_question": True,
+                "criteria": {"linguistic": {"score": 60, "comment": "x"}},
+                **extra}
+
+    def test_phonology_joins_the_grid(self):
+        out = m.merge_speech_audio(self._graded(), {
+            "phonology": {"score": 45, "comment": "nasal vowels"},
+            "delivery": {"fluency": "hesitant"}, "pronunciation_errors": []})
+        assert out["criteria"]["phonology"]["score"] == 45
+        assert out["criteria"]["linguistic"]["score"] == 60
+        assert out["delivery"]["fluency"] == "hesitant"
+
+    def test_pronunciation_errors_never_reach_the_error_cap(self):
+        """A mispronounced nasal vowel is not a grammar mistake. Appending it
+        to `errors` would drive apply_error_cap and lower the level twice over
+        for one fault."""
+        out = m.merge_speech_audio(self._graded(), {
+            "pronunciation_errors": [{"word": "etranger", "issue": "nasal",
+                                      "explanation": "x"}] * 6})
+        assert out["errors"] == []
+        assert len(out["pronunciation_errors"]) == 6
+        assert m.apply_error_cap(out)["tcf_level"] == "B2"
+
+    def test_a_capped_grade_pulls_a_late_phonology_mark_down_too(self):
+        capped = self._graded(caps_applied=[{"code": "speakVeryShort"}],
+                              tcf_level="A2", overall_score=39)
+        out = m.merge_speech_audio(capped, {
+            "phonology": {"score": 80, "comment": "very clear"}})
+        assert out["criteria"]["phonology"]["score"] <= m.LEVEL_MAX_SCORE["A2"]
+
+    def test_nothing_from_the_audio_examiner_leaves_the_grade_untouched(self):
+        graded = self._graded()
+        assert m.merge_speech_audio(graded, {}) is graded
+        assert "phonology" not in graded["criteria"]
+
+    @pytest.mark.asyncio
+    async def test_it_is_off_rather_than_failing_when_there_is_no_key(self, monkeypatch):
+        monkeypatch.setattr(m, "GEMINI_API_KEY", "")
+        monkeypatch.setattr(m, "SPEECH_AUDIO_PROVIDER", "gemini")
+        assert await m.analyze_speech_audio(b"x", "audio/webm", "q", "t") == {}
+
+
 class TestAudioSafety:
     def test_declared_mime_is_used_when_it_is_on_the_allowlist(self):
         assert m.resolve_audio_mime("a.webm", "audio/webm") == "audio/webm"

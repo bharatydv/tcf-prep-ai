@@ -11,6 +11,7 @@ import { api } from '../lib/api';
 import { startRecording as startCapture, appendAudio, isRecordingSupported } from '../lib/recorder';
 import { useAuth } from '../context/AuthContext';
 import { BackLink } from '../components/shared';
+import { SpeakingGrid } from '../components/SpeakingGrid';
 import ConversationModal from '../components/ConversationModal';
 import { useT } from '../i18n';
 import { useSeo } from '../lib/seo';
@@ -552,10 +553,11 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
               <div className="text-center">
                 <p className="text-[10px] uppercase tracking-wide text-gray-400">{t('st.level')}</p>
                 <p className="font-heading text-2xl font-extrabold text-primary">{result.tcf_level}</p>
-                <p className="text-[10px] text-gray-400">{result.overall_score}/100</p>
               </div>
             </div>
           </div>
+
+          <SpeakingGrid result={result} />
 
           <div className="rounded-2xl border border-violet-100 bg-white p-4">
             <p className="text-xs font-bold text-gray-900">{t('st.transcript')}</p>

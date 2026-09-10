@@ -145,6 +145,29 @@ export function markOutOf20(score, level) {
   return Math.round(m[0] + (span > 0 ? within / span : 0) * (m[1] - m[0]));
 }
 
+/* The next band up the mark ladder, and how far away it is: {level, points}.
+ *
+ * Derived from MARK_BAND rather than written out again, so the ladder cannot
+ * drift from the bands the mark itself is placed in. Null at the top of the
+ * table — there is nothing above C2 to aim at, and "+0 pts to nowhere" reads
+ * as a bug.
+ */
+const MARK_LADDER = Object.entries(MARK_BAND).map(([level, [floor]]) => [level, floor]);
+
+export function nextMarkBand(mark) {
+  if (!Number.isFinite(mark)) return null;
+  const step = MARK_LADDER.find(([, floor]) => floor > mark);
+  return step ? { level: step[0], points: step[1] - mark } : null;
+}
+
+/* The five columns of the level chart. C1 and C2 share one, as the official
+ * expression orale reporting does: above NCLC 10 the table stops splitting
+ * them, so a chart that did would be inventing a distinction. */
+export const LEVEL_COLUMNS = ['A1', 'A2', 'B1', 'B2', 'C1/C2'];
+
+export const levelColumn = (level) =>
+  (level === 'C1' || level === 'C2' ? 4 : LEVEL_COLUMNS.indexOf(level));
+
 /* The NCLC/CLB level a mark out of 20 converts to, or null below the table. */
 export function nclcFromMark(mark) {
   if (!Number.isFinite(mark)) return null;

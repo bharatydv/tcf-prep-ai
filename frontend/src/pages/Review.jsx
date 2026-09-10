@@ -190,19 +190,66 @@ export default function Review() {
             <p className="mt-2 text-gray-600">{t('rev.comeBack')} <Link to="/practice" className="font-semibold text-primary">{t('rev.writeNew')}</Link>.</p>
           </div>
         ) : (
-          <div className="mt-8 grid gap-5 md:grid-cols-3">
-            {[
-              ['flashcards', Cards, 'rev.modeFlashTitle', 'rev.modeFlashDesc'],
-              ['mcq', ListChecks, 'rev.modeMcqTitle', 'rev.modeMcqDesc'],
-              ['sprint', Lightning, 'rev.modeSprintTitle', 'rev.modeSprintDesc'],
-            ].map(([key, Icon, title, desc]) => (
-              <button key={key} className="card card-hover p-6 text-left" onClick={() => start(key)} data-testid={`mode-${key}`}>
-                <Icon size={28} weight="duotone" className="text-primary" />
-                <h3 className="mt-3 font-heading text-lg font-semibold">{t(title)}</h3>
-                <p className="mt-2 text-sm text-gray-600">{t(desc)}</p>
-              </button>
-            ))}
-          </div>
+          <>
+            {/* What is due, before how to drill it. The hub used to open on
+                three mode buttons, which asked the learner to choose a way of
+                practising before they had seen a single thing they got wrong —
+                so "Category sprint" was a guess, not a decision. */}
+            <section className="card mt-8 p-6" data-testid="mistake-list">
+              <h2 className="font-heading text-lg font-bold text-gray-900">
+                {t('rev.listTitle', { n: queue.due.length })}
+              </h2>
+              <ol className="mt-4 space-y-2.5">
+                {queue.due.map((m, i) => (
+                  <li key={m.mistake_id}
+                    className="rounded-xl border border-gray-100 bg-gray-50/60 p-4">
+                    <div className="flex items-start gap-3">
+                      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white text-[11px] font-bold tabular-nums text-gray-500 shadow-sm">
+                        {i + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm leading-relaxed">
+                          <span className="text-red-600 line-through decoration-red-300">
+                            {m.error_text}
+                          </span>
+                          <span className="mx-2 text-gray-400">→</span>
+                          <span className="font-semibold text-green-700">{m.correction}</span>
+                        </p>
+                        {m.explanation && (
+                          <p className="mt-1.5 text-[13px] leading-relaxed text-gray-600">
+                            {m.explanation}
+                          </p>
+                        )}
+                      </div>
+                      {m.times_repeated > 1 && (
+                        <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold tabular-nums text-amber-700"
+                          title={t('rev.seenTimesTitle', { n: m.times_repeated })}>
+                          ×{m.times_repeated}
+                        </span>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </section>
+
+            <h2 className="mt-10 font-heading text-lg font-bold text-gray-900">
+              {t('rev.chooseMode')}
+            </h2>
+            <div className="mt-4 grid gap-5 md:grid-cols-3">
+              {[
+                ['flashcards', Cards, 'rev.modeFlashTitle', 'rev.modeFlashDesc'],
+                ['mcq', ListChecks, 'rev.modeMcqTitle', 'rev.modeMcqDesc'],
+                ['sprint', Lightning, 'rev.modeSprintTitle', 'rev.modeSprintDesc'],
+              ].map(([key, Icon, title, desc]) => (
+                <button key={key} className="card card-hover p-6 text-left" onClick={() => start(key)} data-testid={`mode-${key}`}>
+                  <Icon size={28} weight="duotone" className="text-primary" />
+                  <h3 className="mt-3 font-heading text-lg font-semibold">{t(title)}</h3>
+                  <p className="mt-2 text-sm text-gray-600">{t(desc)}</p>
+                </button>
+              ))}
+            </div>
+          </>
         )}
       </main>
     );
@@ -266,13 +313,43 @@ export default function Review() {
             return (
               <button key={opt} disabled={picked != null}
                 className={`block w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-left text-sm transition hover:border-primary ${state}`}
-                onClick={() => { setPicked(opt); setTimeout(() => answer({ picked: opt }), 900); }}>
+                /* MCQ waits to be dismissed; the sprint still advances itself.
+                   Every card used to move on 900ms after the pick — less time
+                   than it takes to find the explanation on the page, let alone
+                   read it, so the one sentence saying WHY the answer was wrong
+                   went unread. But the sprint is two minutes against the clock
+                   and says so on the card that starts it: a button to press
+                   between questions is the one thing that mode must not have. */
+                onClick={() => {
+                  setPicked(opt);
+                  if (mode === 'sprint') setTimeout(() => answer({ picked: opt }), 700);
+                }}>
                 {opt}
               </button>
             );
           })}
         </div>
-        {picked != null && <p className="mt-4 text-sm text-gray-600">{m.explanation}</p>}
+
+        {picked != null && mode !== 'sprint' && (
+          <div className="mt-6 border-t border-gray-100 pt-5">
+            <p className={`text-sm font-bold ${
+              picked === m.correction ? 'text-green-700' : 'text-red-600'}`}>
+              {picked === m.correction ? t('rev.answerRight') : t('rev.answerWrong')}
+            </p>
+            {picked !== m.correction && (
+              <p className="mt-1.5 text-sm text-gray-700">
+                {t('rev.theAnswerIs')} <span className="font-semibold text-green-700">{m.correction}</span>
+              </p>
+            )}
+            {m.explanation && (
+              <p className="mt-2.5 text-sm leading-relaxed text-gray-600">{m.explanation}</p>
+            )}
+            <button className="btn-primary mt-5 w-full justify-center"
+              onClick={() => answer({ picked })} data-testid="review-next">
+              {idx + 1 >= items.length ? t('rev.finish') : t('rev.next')}
+            </button>
+          </div>
+        )}
       </div>
     </main>
   );
