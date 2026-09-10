@@ -482,6 +482,18 @@
     "title": "Correction détaillée",
     "vocabulary": "Vocabulaire suggéré"
   },
+  "grid": {
+    "adequacy": "Adéquation",
+    "clb": "NCLC {{level}}",
+    "clbBelow": "En dessous du NCLC 4",
+    "discourse": "Organisation du discours",
+    "focus": "À travailler",
+    "linguistic": "Maîtrise linguistique",
+    "none": "Cette réponse a été corrigée avant l'existence du détail par critère. Enregistrez-en une nouvelle pour le voir.",
+    "phonology": "Contrôle phonologique",
+    "strengths": "Ce que vous avez réussi",
+    "toNext": "Vers {{level}} · +{{points}} pts"
+  },
   "guide": {
     "badge": "Guide gratuit",
     "bandsIntro": "Votre performance à l'écrit est convertie en Niveaux de compétence linguistique canadiens (NCLC), appelés CLB en anglais. Voici comment ces niveaux correspondent aux niveaux du CECR utilisés dans la plupart des cours de français :",
@@ -708,6 +720,24 @@
     "weeklyGoals": "Objectifs de la semaine",
     "writeBlurb": "Obtenez un retour détaillé sur la grammaire, la cohérence, le vocabulaire et la structure.",
     "writtenTest": "Test écrit"
+  },
+  "landing": {
+    "film": {
+      "t1a": "Écrivez ce que",
+      "t1b": "l’examen demande.",
+      "t2a": "Corrigé",
+      "t2b": "en quelques secondes.",
+      "t3a": "Parlez à un",
+      "t3b": "examinateur IA.",
+      "t4a": "Mode examen,",
+      "t4b": "durées réelles.",
+      "t5a": "40 en orale.",
+      "t5b": "40 en écrite.",
+      "t6a": "Examens blancs",
+      "t6b": "complets, chronométrés.",
+      "t7a": "Votre note,",
+      "t7b": "votre niveau NCLC."
+    }
   },
   "lang": {
     "switch": "Langue"
@@ -1300,8 +1330,10 @@
     "newAnswer": "Nouvelle réponse",
     "noRecorder": "Ce navigateur ne peut pas enregistrer d'audio. Utilisez Safari sur iPhone ou iPad, Chrome ailleurs, ou importez un enregistrement.",
     "noSpeech": "Aucune parole détectée. Réessayez en parlant plus fort.",
+    "noSpeechLine": "Aucune parole détectée.",
     "noSpeechRefunded": "Aucune parole détectée dans cet enregistrement : votre crédit a été rendu. Vérifiez votre micro et réessayez.",
     "notAudio": "Veuillez sélectionner un fichier audio (mp3, m4a, wav, webm).",
+    "notRelevant": "Réponse à améliorer",
     "playAudio": "Écouter",
     "prepHint": "Prenez des notes. L'enregistrement démarre automatiquement à zéro.",
     "prepThenSpeak": "{{prep}} minutes de préparation, puis {{speak}} de parole.",
@@ -1315,6 +1347,7 @@
     "recordFirst": "Enregistrez d'abord votre réponse.",
     "recording": "Enregistrement… {{clock}}",
     "recordingOf": "Enregistrement… {{clock}} / {{max}}",
+    "relevant": "Réponse pertinente",
     "stopAudio": "Arrêter",
     "suggestions": "Suggestions",
     "timeUp": "Temps écoulé — enregistrement arrêté, comme à l’examen.",
@@ -2292,23 +2325,5 @@
     "topicsList": "Sujets du thème",
     "writeFirst": "Écrivez quelque chose d’abord !",
     "yourQuestion": "Votre question"
-  },
-  "landing": {
-    "film": {
-      "t1a": "Écrivez ce que",
-      "t1b": "l’examen demande.",
-      "t2a": "Corrigé",
-      "t2b": "en quelques secondes.",
-      "t3a": "Parlez à un",
-      "t3b": "examinateur IA.",
-      "t4a": "Mode examen,",
-      "t4b": "durées réelles.",
-      "t5a": "40 en orale.",
-      "t5b": "40 en écrite.",
-      "t6a": "Examens blancs",
-      "t6b": "complets, chronométrés.",
-      "t7a": "Votre note,",
-      "t7b": "votre niveau NCLC."
-    }
   }
 }

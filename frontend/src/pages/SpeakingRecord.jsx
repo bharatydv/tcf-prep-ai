@@ -12,6 +12,7 @@ import { saveTask } from '../lib/speakingExam';
 import { useAuth } from '../context/AuthContext';
 import { BackLink, CreditsBadge } from '../components/shared';
 import { SpeakButton } from '../components/SpeakButton';
+import { SpeakingGrid } from '../components/SpeakingGrid';
 import { useSpeak } from '../lib/speak';
 import { useT } from '../i18n';
 import { useSeo } from '../lib/seo';
@@ -366,7 +367,7 @@ export default function SpeakingRecord() {
                   )}
                   <div>
                     <p className="font-heading text-base font-bold text-gray-900">
-                      {result.answers_question ? 'Réponse pertinente' : 'Réponse à améliorer'}
+                      {result.answers_question ? t('speak.relevant') : t('speak.notRelevant')}
                     </p>
                     <p className="text-sm text-gray-600">{result.relevance_comment}</p>
                   </div>
@@ -374,15 +375,16 @@ export default function SpeakingRecord() {
                 <div className="text-center">
                   <p className="text-xs uppercase tracking-wide text-gray-400">{t('speak.level')}</p>
                   <p className="font-heading text-3xl font-extrabold text-primary">{result.tcf_level}</p>
-                  <p className="text-xs text-gray-400">{result.overall_score}/100</p>
                 </div>
               </div>
             </div>
 
+            <SpeakingGrid result={result} />
+
             <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft">
               <p className="font-heading text-sm font-bold text-gray-900">{t('speak.transcript')}</p>
               <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-gray-700">
-                {result.transcript || 'Aucune parole détectée.'}
+                {result.transcript || t('speak.noSpeechLine')}
               </p>
             </div>
 

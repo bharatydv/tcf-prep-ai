@@ -99,6 +99,86 @@ class TestLevelCaps:
         assert m.CEFR_LEVELS.index(capped["tcf_level"]) < m.CEFR_LEVELS.index("C1")
 
 
+class TestSpeakingGrid:
+    """The criterion-by-criterion grid the result page reads.
+
+    The interesting cases are all absences: a grader that omits a criterion is
+    saying it could not judge it, and a candidate must never be shown a zero
+    for something nobody assessed.
+    """
+    def _reply(self, **extra):
+        return {"errors": [], "overall_score": 60, "tcf_level": "B2",
+                "answers_question": True, "relevance_comment": "ok",
+                "suggestions": [], "vocabulary_suggestions": [], **extra}
+
+    def test_the_three_transcript_criteria_are_kept(self):
+        out = m._validate_speaking(self._reply(criteria={
+            "linguistic": {"score": 61, "comment": "varied tenses"},
+            "adequacy": {"score": 70, "comment": "answers the task"},
+            "discourse": {"score": 55, "comment": "few connectors"}}))
+        assert set(out["criteria"]) == {"linguistic", "adequacy", "discourse"}
+        assert out["criteria"]["linguistic"]["score"] == 61
+
+    def test_a_criterion_the_grader_omitted_is_absent_not_zero(self):
+        out = m._validate_speaking(self._reply(criteria={
+            "linguistic": {"score": 61, "comment": "x"}}))
+        assert "phonology" not in out["criteria"]
+
+    def test_a_phonology_score_invented_from_a_transcript_is_still_carried(self):
+        """The prompt forbids it; the validator does not silently drop it.
+
+        Dropping it here would hide a grader that ignores the instruction, and
+        the slot exists precisely so an audio grader can fill it."""
+        out = m._validate_speaking(self._reply(criteria={
+            "phonology": {"score": 40, "comment": "hesitant"}}))
+        assert out["criteria"]["phonology"]["score"] == 40
+
+    def test_scores_written_as_strings_or_fractions_are_read(self):
+        out = m._validate_speaking(self._reply(criteria={
+            "linguistic": {"score": "61/100", "comment": "x"},
+            "adequacy": {"score": "70%", "comment": "y"}}))
+        assert out["criteria"]["linguistic"]["score"] == 61
+        assert out["criteria"]["adequacy"]["score"] == 70
+
+    def test_an_unreadable_criterion_score_drops_only_that_criterion(self):
+        out = m._validate_speaking(self._reply(criteria={
+            "linguistic": {"score": "good", "comment": "x"},
+            "adequacy": {"score": 70, "comment": "y"}}))
+        assert "linguistic" not in out["criteria"]
+        assert out["criteria"]["adequacy"]["score"] == 70
+
+    def test_no_criteria_at_all_is_an_empty_grid_not_a_failure(self):
+        out = m._validate_speaking(self._reply())
+        assert out["criteria"] == {}
+        assert out["overall_score"] == 60
+
+    def test_strengths_and_focus_areas_are_capped_and_cleaned(self):
+        out = m._validate_speaking(self._reply(
+            strengths=["clear plan", "  ", "good range", "d", "e", "f"],
+            focus_areas=["nasal vowels"]))
+        assert out["strengths"] == ["clear plan", "good range", "d", "e"]
+        assert out["focus_areas"] == ["nasal vowels"]
+
+    def test_a_capped_level_pulls_the_grid_down_with_it(self):
+        """A 20-word answer cannot demonstrate B2 range however good it is, so
+        a criterion still reading 75 beside a capped A2 headline would be the
+        page contradicting itself."""
+        graded = {"errors": [], "overall_score": 75, "tcf_level": "B2",
+                  "answers_question": True,
+                  "criteria": {"linguistic": {"score": 75, "comment": "x"}}}
+        out = m.apply_speaking_caps(graded, "Bonjour je m'appelle Marie.", 3)
+        assert out["caps_applied"]
+        ceiling = m.LEVEL_MAX_SCORE[out["tcf_level"]]
+        assert out["criteria"]["linguistic"]["score"] <= ceiling
+
+    def test_an_uncapped_grid_is_left_exactly_as_graded(self):
+        graded = {"errors": [], "overall_score": 60, "tcf_level": "B2",
+                  "answers_question": True,
+                  "criteria": {"adequacy": {"score": 68, "comment": "x"}}}
+        out = m.apply_speaking_caps(graded, "mot " * 200, 3)
+        assert out["criteria"]["adequacy"]["score"] == 68
+
+
 class TestAudioSafety:
     def test_declared_mime_is_used_when_it_is_on_the_allowlist(self):
         assert m.resolve_audio_mime("a.webm", "audio/webm") == "audio/webm"

@@ -482,6 +482,18 @@
     "title": "Detailed correction",
     "vocabulary": "Suggested vocabulary"
   },
+  "grid": {
+    "adequacy": "Adequacy",
+    "clb": "CLB {{level}}",
+    "clbBelow": "Below CLB 4",
+    "discourse": "Discourse organisation",
+    "focus": "Focus areas",
+    "linguistic": "Linguistic mastery",
+    "none": "This answer was graded before the criterion breakdown existed. Record a new one to see it.",
+    "phonology": "Phonological control",
+    "strengths": "What you did well",
+    "toNext": "Towards {{level}} · +{{points}} pts"
+  },
   "guide": {
     "badge": "Free guide",
     "bandsIntro": "Your writing performance is mapped to the Canadian Language Benchmarks (CLB) — NCLC in French. Here is how the benchmarks line up with the CEFR levels used in most French courses:",
@@ -708,6 +720,24 @@
     "weeklyGoals": "Weekly goals",
     "writeBlurb": "Get detailed feedback on grammar, coherence, vocabulary and structure.",
     "writtenTest": "Written test"
+  },
+  "landing": {
+    "film": {
+      "t1a": "Write what",
+      "t1b": "the exam asks.",
+      "t2a": "Corrected",
+      "t2b": "in seconds.",
+      "t3a": "Speak to an",
+      "t3b": "AI examiner.",
+      "t4a": "Test mode,",
+      "t4b": "real timings.",
+      "t5a": "40 reading.",
+      "t5b": "40 listening.",
+      "t6a": "Full mock",
+      "t6b": "exams, timed.",
+      "t7a": "Your mark,",
+      "t7b": "your CLB level."
+    }
   },
   "lang": {
     "switch": "Language"
@@ -1300,8 +1330,10 @@
     "newAnswer": "New answer",
     "noRecorder": "This browser cannot record audio. Try Safari on iPhone or iPad, or Chrome elsewhere — or use the import option to upload a recording.",
     "noSpeech": "No speech detected. Try again, speaking louder.",
+    "noSpeechLine": "No speech was detected.",
     "noSpeechRefunded": "No speech was detected in that recording, so your credit was returned. Check your microphone and try again.",
     "notAudio": "Please choose an audio file (mp3, m4a, wav, webm).",
+    "notRelevant": "Answer needs work",
     "playAudio": "Listen",
     "prepHint": "Take notes. Recording starts automatically at zero.",
     "prepThenSpeak": "{{prep}} minutes of preparation, then {{speak}} of speaking.",
@@ -1315,6 +1347,7 @@
     "recordFirst": "Record your answer first.",
     "recording": "Recording… {{clock}}",
     "recordingOf": "Recording… {{clock}} / {{max}}",
+    "relevant": "Relevant answer",
     "stopAudio": "Stop",
     "suggestions": "Suggestions",
     "timeUp": "Time is up — recording stopped, exactly as in the exam.",
@@ -2292,23 +2325,5 @@
     "topicsList": "Theme topics",
     "writeFirst": "Write something first.",
     "yourQuestion": "Your question"
-  },
-  "landing": {
-    "film": {
-      "t1a": "Write what",
-      "t1b": "the exam asks.",
-      "t2a": "Corrected",
-      "t2b": "in seconds.",
-      "t3a": "Speak to an",
-      "t3b": "AI examiner.",
-      "t4a": "Test mode,",
-      "t4b": "real timings.",
-      "t5a": "40 reading.",
-      "t5b": "40 listening.",
-      "t6a": "Full mock",
-      "t6b": "exams, timed.",
-      "t7a": "Your mark,",
-      "t7b": "your CLB level."
-    }
   }
 }

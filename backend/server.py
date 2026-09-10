@@ -1844,13 +1844,33 @@ def apply_speaking_caps(analysis: dict, transcript: str,
     spec = SPEAKING_TASKS.get(task_type or 0)
     words = len([w for w in (transcript or "").split() if w.strip()])
     analysis["word_count"] = words
-    if not spec:
+    if spec:
+        floor = spec["min_words"]
+        if words < floor // 2:
+            analysis = cap_level(analysis, "A2", "speakVeryShort", words=words)
+        elif words < floor:
+            analysis = cap_level(analysis, "B1", "speakTooShort", words=words)
+    return _clamp_criteria_to_level(analysis)
+
+
+def _clamp_criteria_to_level(analysis: dict) -> dict:
+    """Hold the examiner's grid under the level the caps landed on.
+
+    A cap is the judgement that the answer *cannot* demonstrate more than this
+    level — twenty words cannot show B2 range however good those twenty words
+    are. A criterion still reading 75 beside a capped A2 headline is not a
+    second opinion, it is the page contradicting itself.
+    """
+    criteria = analysis.get("criteria")
+    if not analysis.get("caps_applied") or not isinstance(criteria, dict):
         return analysis
-    floor = spec["min_words"]
-    if words < floor // 2:
-        return cap_level(analysis, "A2", "speakVeryShort", words=words)
-    if words < floor:
-        return cap_level(analysis, "B1", "speakTooShort", words=words)
+    ceiling = LEVEL_MAX_SCORE.get(analysis.get("tcf_level"))
+    if ceiling is None:
+        return analysis
+    analysis["criteria"] = {
+        name: {**c, "score": min(c.get("score", 0), ceiling)}
+        for name, c in criteria.items()
+    }
     return analysis
 
 
@@ -1859,6 +1879,27 @@ def apply_speaking_caps(analysis: dict, transcript: str,
 # ----------------------------------------------------------------------------
 VALID_CATEGORIES = {"prepositions", "spelling", "conjugation",
                     "gender_number", "anglicism", "improvement"}
+
+# The official TCF Canada expression orale grid, in the order an examiner reads
+# it. Phonology is first on the real grid and is deliberately in this tuple
+# even though nothing fills it yet: we transcribe and then grade the text, so
+# the graders are told not to invent a pronunciation score. The slot exists so
+# that an audio-capable grader can fill it without the result page changing.
+SPEAKING_CRITERIA = ("phonology", "linguistic", "adequacy", "discourse")
+
+
+def _criterion_score(raw) -> Optional[int]:
+    """One criterion's 0-100 mark, or None if the model did not give a number.
+
+    Same tolerance as overall_score: models return "60", 60, "60/100" and
+    "60%" interchangeably, and dropping the criterion over its formatting
+    would blank a row of the grid the learner is reading.
+    """
+    try:
+        return max(0, min(100, int(float(
+            str(raw).strip().split("/")[0].replace("%", "")))))
+    except (TypeError, ValueError):
+        return None
 
 GRADER_SYSTEM = """You are a certified TCF Canada examiner grading French writing.
 Analyze the text and return ONLY valid JSON (no markdown, no commentary) with this exact shape:
@@ -2617,7 +2658,7 @@ SPEAKING_GRADER_SYSTEM = """You are a certified TEF/TCF Canada examiner evaluati
 You receive the QUESTION (the task) and the TRANSCRIPT of what the candidate said. The transcript may contain small transcription errors; judge the language charitably where a word is clearly a transcription artifact, not a learner error.
 
 Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
-{"answers_question": true, "relevance_comment": "one sentence (English) on whether and how well the answer addresses the task", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French"}
+{"answers_question": true, "relevance_comment": "one sentence (English) on whether and how well the answer addresses the task", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French"}
 
 Evaluate TWO things:
 1. RELEVANCE - does the spoken answer actually address the question/task? Set answers_question true/false and explain in relevance_comment. An off-topic or incomplete answer should lower the score even if the French is correct.
@@ -2634,7 +2675,16 @@ enhanced_version - THE CANDIDATE'S OWN ANSWER, rewritten as a strong version of 
 - Fix every error, and raise the register by roughly one level: better connectors, more precise verbs, fuller sentences.
 - Keep it the length someone actually speaks in this task. Do not return three times what they said.
 - It is read aloud by a speech synthesiser, so punctuate it the way it should be spoken and never use brackets, asterisks, or notes to the reader.
-- French only, and nothing but the answer itself."""
+- French only, and nothing but the answer itself.
+
+criteria - THE EXAMINER'S GRID. The official TCF Canada expression orale result is not one number, it is a criterion-by-criterion profile, and a candidate who is told only "B1" learns nothing about which part of B1 to work on. Score each 0-100 on the same CEFR scale as overall_score, and write a 2-4 sentence English comment that refers to what the candidate ACTUALLY said rather than to the level in general:
+- linguistic (Maîtrise linguistique): range and control of grammar and vocabulary. How varied is the language, and does the accuracy hold across tenses, agreement, and sentence types?
+- adequacy (Adéquation): does the production do what the task asked for? Judge the communicative goal here, not the French.
+- discourse (Organisation du discours): is it structured and connected - an opening, a developed middle, a close, held together by connectors - or a run of disconnected sentences?
+Never invent a phonological or pronunciation score. You are reading a transcript and cannot hear the candidate, so return exactly these three criteria and no fourth one.
+
+strengths: 1-3 short English bullets naming what the candidate genuinely did well. Do not pad it with a compliment the answer does not support - a weak answer earns one honest line, not three.
+focus_areas: 1-3 short English bullets naming what to work on next. Each is a thing to practise, not a restatement of an error already listed above."""
 
 
 # ----------------------------------------------------------------------------
@@ -2678,7 +2728,7 @@ INTERACTION_GRADER_SYSTEM = """You are a certified TCF Canada examiner grading T
 You receive the CONSIGNE (the scenario) and the full DIALOGUE. Grade ONLY the candidate's turns. The transcript comes from speech recognition, so judge charitably where a word is clearly a transcription artifact rather than a learner error.
 
 Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
-{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate obtained the information the consigne asked for", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French", "missed_questions":[{"question":"question in French the candidate should have asked","why":"what it would have obtained (English)"}]}
+{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate obtained the information the consigne asked for", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French", "missed_questions":[{"question":"question in French the candidate should have asked","why":"what it would have obtained (English)"}]}
 
 Because this task is INTERACTION, weigh these alongside grammar and vocabulary:
 1. QUESTION QUALITY - did the candidate actually ask questions, and were they well formed? Flat statements, or questions built only by raising intonation ("vous avez des places ?") where inversion or est-ce que is expected, are the single most common Tâche 2 weakness. Report them as errors.
@@ -2701,14 +2751,23 @@ enhanced_version - THE CANDIDATE'S OWN ANSWER, rewritten as a strong version of 
 - Fix every error, and raise the register by roughly one level: better connectors, more precise verbs, fuller sentences.
 - Keep it the length someone actually speaks in this task. Do not return three times what they said.
 - It is read aloud by a speech synthesiser, so punctuate it the way it should be spoken and never use brackets, asterisks, or notes to the reader.
-- French only, and nothing but the answer itself."""
+- French only, and nothing but the answer itself.
+
+criteria - THE EXAMINER'S GRID. The official TCF Canada expression orale result is not one number, it is a criterion-by-criterion profile, and a candidate who is told only "B1" learns nothing about which part of B1 to work on. Score each 0-100 on the same CEFR scale as overall_score, and write a 2-4 sentence English comment that refers to what the candidate ACTUALLY said rather than to the level in general:
+- linguistic (Maîtrise linguistique): range and control of grammar and vocabulary. How varied is the language, and does the accuracy hold across tenses, agreement, and sentence types?
+- adequacy (Adéquation): does the production do what the task asked for? Judge the communicative goal here, not the French.
+- discourse (Organisation du discours): is it structured and connected - an opening, a developed middle, a close, held together by connectors - or a run of disconnected sentences?
+Never invent a phonological or pronunciation score. You are reading a transcript and cannot hear the candidate, so return exactly these three criteria and no fourth one.
+
+strengths: 1-3 short English bullets naming what the candidate genuinely did well. Do not pad it with a compliment the answer does not support - a weak answer earns one honest line, not three.
+focus_areas: 1-3 short English bullets naming what to work on next. Each is a thing to practise, not a restatement of an error already listed above."""
 
 INTERVIEW_GRADER_SYSTEM = """You are a certified TCF Canada examiner grading Tâche 1 (Entretien dirigé) - a guided interview in which the EXAMINER asks and the CANDIDATE answers questions about themselves: who they are, their studies or work, their daily life, their interests and their plans.
 
 You receive the BRIEF and the full DIALOGUE. Grade ONLY the candidate's turns. The transcript comes from speech recognition, so judge charitably where a word is clearly a transcription artifact rather than a learner error.
 
 Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
-{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate answered what was asked", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French"}
+{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate answered what was asked", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French"}
 
 This task is a PRESENTATION, not an interaction. The candidate is NOT expected to ask questions, and must never be penalised for not asking any. Weigh instead:
 1. ANSWERING - did the candidate actually answer each question, rather than talking past it?
@@ -2727,7 +2786,16 @@ enhanced_version - THE CANDIDATE'S OWN ANSWER, rewritten as a strong version of 
 - Fix every error, and raise the register by roughly one level: better connectors, more precise verbs, fuller sentences.
 - Keep it the length someone actually speaks in this task. Do not return three times what they said.
 - It is read aloud by a speech synthesiser, so punctuate it the way it should be spoken and never use brackets, asterisks, or notes to the reader.
-- French only, and nothing but the answer itself."""
+- French only, and nothing but the answer itself.
+
+criteria - THE EXAMINER'S GRID. The official TCF Canada expression orale result is not one number, it is a criterion-by-criterion profile, and a candidate who is told only "B1" learns nothing about which part of B1 to work on. Score each 0-100 on the same CEFR scale as overall_score, and write a 2-4 sentence English comment that refers to what the candidate ACTUALLY said rather than to the level in general:
+- linguistic (Maîtrise linguistique): range and control of grammar and vocabulary. How varied is the language, and does the accuracy hold across tenses, agreement, and sentence types?
+- adequacy (Adéquation): does the production do what the task asked for? Judge the communicative goal here, not the French.
+- discourse (Organisation du discours): is it structured and connected - an opening, a developed middle, a close, held together by connectors - or a run of disconnected sentences?
+Never invent a phonological or pronunciation score. You are reading a transcript and cannot hear the candidate, so return exactly these three criteria and no fourth one.
+
+strengths: 1-3 short English bullets naming what the candidate genuinely did well. Do not pad it with a compliment the answer does not support - a weak answer earns one honest line, not three.
+focus_areas: 1-3 short English bullets naming what to work on next. Each is a thing to practise, not a restatement of an error already listed above."""
 
 # Keeps one exchange bounded so a runaway session cannot grow the prompt forever.
 MAX_DIALOGUE_TURNS = 40
@@ -2986,7 +3054,35 @@ def _validate_speaking(data: dict) -> dict:
         if question:
             missed.append({"question": question[:200], "why": why[:300]})
     base["missed_questions"] = missed
+    # The examiner's grid, criterion by criterion. Only what the grader
+    # actually returned is kept: a criterion it omitted is one it could not
+    # judge, and rendering that as a zero would tell a candidate they failed
+    # something nobody assessed.
+    criteria = {}
+    raw_criteria = data.get("criteria")
+    if isinstance(raw_criteria, dict):
+        for name in SPEAKING_CRITERIA:
+            item = raw_criteria.get(name)
+            if not isinstance(item, dict):
+                continue
+            score = _criterion_score(item.get("score"))
+            if score is None:
+                continue
+            criteria[name] = {
+                "score": score,
+                "comment": str(item.get("comment", "")).strip()[:600],
+            }
+    base["criteria"] = criteria
+    base["strengths"] = _short_lines(data.get("strengths"))
+    base["focus_areas"] = _short_lines(data.get("focus_areas"))
     return base
+
+
+def _short_lines(value) -> list:
+    """Up to four non-empty one-line bullets, each capped. The grader is asked
+    for one to three; the cap is here because the page lays them out as a card
+    and a model that returns ten would push the grid off the screen."""
+    return [str(x).strip()[:200] for x in (value or []) if str(x).strip()][:4]
 
 
 async def analyze_speaking_with_ai(transcript: str, question: str, db=None,
