@@ -314,7 +314,11 @@ function Users() {
   const [users, setUsers] = useState(null);
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
-  const [status, setStatus] = useState('all');
+  // Opens on the learners who are still here. "Who is using this" is the
+  // question this tab exists to answer, and a list led by accounts that
+  // registered once and never came back answers a different one. Every other
+  // filter is one click away, All included.
+  const [status, setStatus] = useState('active');
   const [q, setQ] = useState('');
   // The box is typed into on every keystroke; the query is not. Without this
   // an eight-letter name is eight round trips and eight chances for an older
