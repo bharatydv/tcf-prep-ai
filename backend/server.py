@@ -2261,7 +2261,13 @@ def _grader_backend(provider: str):
 
 # Substrings that cannot occur in a real provider key (they are alphanumeric
 # plus dashes), so matching one means the .env value is still a template.
-_PLACEHOLDER_KEY_HINTS = ("your_", "your-", "_here", "changeme", "replace_me")
+# "recover_from_vm" is the one this repo actually uses: the working keys live
+# only on the deploy host, and every key in a checked-out backend/.env holds
+# that word instead. It was not in this list, so a local server treated it as a
+# real credential, sent it, and reported the provider's 401 as an invalid key —
+# which reads as "your account is broken" rather than "there is no key here".
+_PLACEHOLDER_KEY_HINTS = ("your_", "your-", "_here", "changeme", "replace_me",
+                          "recover_from_vm", "recover-from-vm")
 
 
 def _key_is_usable(key: str) -> bool:
