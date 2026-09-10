@@ -3007,8 +3007,14 @@ def _transcribe_groq(audio_bytes: bytes, filename: str, mime: str = "") -> str:
 
 
 async def _transcribe_assemblyai_async(audio_bytes: bytes, filename: str,
-                                       mime: str = "") -> str:
+                                       mime: str = "") -> dict:
     """Transcribe with AssemblyAI: upload bytes, submit job, poll for result.
+
+    Returns {"text", "words"}. The words — each with a confidence and a start
+    and end in milliseconds — arrive in the same response the transcript does,
+    and used to be dropped on the floor. They are how contrôle phonologique
+    gets marked without a second provider, a second bill, or a second wait:
+    see speech_metrics_from_words.
 
     Async because the poll loop waits up to a minute. Done with time.sleep on a
     worker thread, choosing AssemblyAI in the Admin panel silently cut the
@@ -3045,7 +3051,8 @@ async def _transcribe_assemblyai_async(audio_bytes: bytes, filename: str,
         data = await run_ai(poll, poll_url)
         status = data.get("status")
         if status == "completed":
-            return (data.get("text") or "").strip()
+            return {"text": (data.get("text") or "").strip(),
+                    "words": data.get("words") or []}
         if status == "error":
             raise RuntimeError(data.get("error", "AssemblyAI transcription error"))
         await asyncio.sleep(1.5)
@@ -3054,11 +3061,26 @@ async def _transcribe_assemblyai_async(audio_bytes: bytes, filename: str,
 
 async def transcribe_audio(audio_bytes: bytes, filename: str, db=None,
                            mime: str = "") -> str:
-    """Transcribe using the active provider (Admin panel overrides .env).
+    """Just the words that were said. Most callers want only this.
 
     Returns "" when transcription fails or produces nothing. Callers that spend
     a credit MUST treat an empty transcript as a failure and refund it: an
     empty string was previously graded as if it were an answer.
+    """
+    detailed = await transcribe_audio_detailed(audio_bytes, filename, db=db,
+                                               mime=mime)
+    return detailed["text"]
+
+
+async def transcribe_audio_detailed(audio_bytes: bytes, filename: str, db=None,
+                                    mime: str = "") -> dict:
+    """Transcribe using the active provider (Admin panel overrides .env).
+
+    Returns {"text", "words"}. `words` is populated only by providers that
+    report per-word timing and confidence — today that is AssemblyAI alone,
+    which is also the configured default. Everything still works on the
+    others; the speaking result simply loses the criterion that is measured
+    from those numbers, exactly as it did before they were kept.
     """
     provider = (await get_provider("transcribe_provider")) if db is not None else TRANSCRIBE_PROVIDER
     if provider == "gemini":
@@ -3072,14 +3094,14 @@ async def transcribe_audio(audio_bytes: bytes, filename: str, db=None,
         provider = "openai"
     if not _key_is_usable(key):
         log.warning("No usable API key for transcription provider '%s'", provider)
-        return ""
+        return {"text": "", "words": []}
     try:
         if provider == "assemblyai":
             return await _transcribe_assemblyai_async(audio_bytes, filename, mime)
-        return await run_ai(fn, audio_bytes, filename, mime)
+        return {"text": await run_ai(fn, audio_bytes, filename, mime), "words": []}
     except Exception as exc:  # noqa: BLE001
         log.warning("Transcription failed (%s): %s", provider, _scrub_secrets(exc))
-        return ""
+        return {"text": "", "words": []}
 
 
 # ----------------------------------------------------------------------------
@@ -3125,6 +3147,113 @@ comment: say what you actually heard, naming the French words it happened in. "P
 pronunciation_errors: 0 to 8 entries, each a specific sound in a specific word you HEARD go wrong. Never list a word you cannot hear clearly, and never invent one from the transcript. Return an empty list when the pronunciation was sound — an examiner who always finds three faults is not listening.
 
 If the recording is silent, unintelligible, or too short to judge, return {"phonology":null,"delivery":{},"pronunciation_errors":[]} rather than guessing a score."""
+
+
+# A gap this long between two words is a pause somebody notices, rather than
+# the ordinary join between them. 700ms is about where a listener stops
+# hearing a phrase and starts hearing someone stuck.
+SPEECH_PAUSE_MS = 700
+
+# Below this, the recogniser could not decide what the word was. That is not
+# proof of a mispronunciation — a rare proper noun scores low too — but a word
+# a trained recogniser cannot pin down is usually a word a listener has to
+# work at, which is exactly what contrôle phonologique measures.
+SPEECH_UNCLEAR_CONFIDENCE = 0.6
+
+
+def speech_metrics_from_words(words: list) -> dict:
+    """Contrôle phonologique, measured from the transcription we already paid for.
+
+    AssemblyAI returns every word with a confidence and a start and end in
+    milliseconds. Three things fall out of that without asking any model
+    anything: how fast the candidate spoke, where they stopped, and which
+    words came out too indistinct to identify. All three are what an examiner
+    is listening for, and none of them is an opinion.
+
+    What this deliberately cannot do is name a sound. "The nasal vowel in
+    « étranger » was not produced distinctly" needs something that hears
+    phonemes; this hears timings and confidences. So it fills the score and
+    the two badges it can defend, and leaves intonation and liaisons unrated
+    rather than inventing them — an absent badge means nobody listened for it,
+    which is true.
+
+    Returns {} when there is nothing to measure, which is also what a provider
+    that reports no word data returns, so the caller needs no special case.
+    """
+    usable = [w for w in words
+              if isinstance(w, dict) and str(w.get("text", "")).strip()]
+    # Under a dozen words there is no rate and no rhythm to speak of, only
+    # noise that would be reported as a confident verdict.
+    if len(usable) < 12:
+        return {}
+
+    starts = [int(w.get("start", 0) or 0) for w in usable]
+    ends = [int(w.get("end", 0) or 0) for w in usable]
+    span_ms = max(ends) - min(starts)
+    if span_ms <= 0:
+        return {}
+
+    confidences = [float(w.get("confidence", 1.0) or 0.0) for w in usable]
+    clarity = sum(confidences) / len(confidences)
+    unclear = [w for w in usable
+               if float(w.get("confidence", 1.0) or 0.0) < SPEECH_UNCLEAR_CONFIDENCE]
+    unclear_share = len(unclear) / len(usable)
+
+    # Pauses, measured between one word ending and the next beginning.
+    gaps = [int(usable[i].get("start", 0) or 0) - int(usable[i - 1].get("end", 0) or 0)
+            for i in range(1, len(usable))]
+    long_gaps = [g for g in gaps if g >= SPEECH_PAUSE_MS]
+    paused_ms = sum(long_gaps)
+    pause_ratio = min(1.0, paused_ms / span_ms)
+
+    minutes = span_ms / 60000.0
+    wpm = len(usable) / minutes if minutes > 0 else 0.0
+
+    delivery = {
+        "pronunciation": ("clear" if unclear_share < 0.05
+                          else "understandable" if unclear_share < 0.15
+                          else "needs_work"),
+        "fluency": ("fluent" if wpm >= 110 and pause_ratio < 0.12
+                    else "hesitant" if wpm < 75 or pause_ratio > 0.25
+                    else "uneven"),
+    }
+
+    return {
+        "delivery": delivery,
+        "phonology": {"score": _delivery_score(clarity, wpm, pause_ratio),
+                      "comment": ""},
+        "metrics": {
+            "wpm": int(round(wpm)),
+            "pauses": len(long_gaps),
+            "pause_seconds": round(paused_ms / 1000.0, 1),
+            "clarity": round(clarity, 3),
+            # The words themselves, because "4 words were unclear" is a
+            # statistic and "« étranger », « bibliothèque »" is something to
+            # go and practise. Lowest confidence first, deduplicated.
+            "unclear_words": list(dict.fromkeys(
+                str(w.get("text", "")).strip()
+                for w in sorted(unclear, key=lambda w: float(w.get("confidence", 1.0) or 0.0))
+            ))[:6],
+        },
+    }
+
+
+def _delivery_score(clarity: float, wpm: float, pause_ratio: float) -> int:
+    """One 0-100 mark on the same CEFR scale as the rest of the grid.
+
+    Weighted towards clarity because that is what the criterion is named
+    after: a candidate who is hard to understand does not pass it by speaking
+    quickly. The rate and flow terms are there to separate two candidates who
+    are equally intelligible but where one is reading haltingly.
+
+    These anchors are estimates, and honestly so. A fluent speaker transcribes
+    around 0.95 confidence and a struggling one around 0.7, which is what the
+    clarity term is stretched across; 60 wpm is halting and 120 is running.
+    """
+    clarity_term = max(0.0, min(1.0, (clarity - 0.55) / 0.40))
+    rate_term = max(0.0, min(1.0, (wpm - 60.0) / 60.0))
+    flow_term = max(0.0, min(1.0, 1.0 - pause_ratio / 0.30))
+    return int(round(100 * (clarity_term * 0.6 + rate_term * 0.2 + flow_term * 0.2)))
 
 
 def _analyse_audio_gemini(audio_bytes: bytes, mime: str, prompt: str) -> str:
@@ -3237,6 +3366,8 @@ def merge_speech_audio(analysis: dict, audio: dict) -> dict:
         analysis["delivery"] = audio["delivery"]
     if audio.get("pronunciation_errors"):
         analysis["pronunciation_errors"] = audio["pronunciation_errors"]
+    if audio.get("metrics"):
+        analysis["delivery_metrics"] = audio["metrics"]
     return _clamp_criteria_to_level(analysis)
 
 
@@ -6620,9 +6751,10 @@ async def speaking_analyze(question: str = Form(...),
     is_tache2 = task_type == 2
     user = await reserve_credit(db, user, "speaking", tache2=is_tache2)
     try:
-        transcript = await asyncio.wait_for(
-            transcribe_audio(audio_bytes, filename, db=db, mime=mime),
+        heard = await asyncio.wait_for(
+            transcribe_audio_detailed(audio_bytes, filename, db=db, mime=mime),
             timeout=SPEAKING_MAX_WAIT_SECONDS)
+        transcript = heard["text"]
     except asyncio.TimeoutError:
         await refund_credit(db, user, "speaking", tache2=is_tache2)
         raise HTTPException(status_code=504, detail=AI_TIMEOUT_DETAIL)
@@ -6663,6 +6795,11 @@ async def speaking_analyze(question: str = Form(...),
     except (asyncio.TimeoutError, asyncio.CancelledError):
         log.warning("Speech audio analysis did not finish in time")
         audio_marks = {}
+    # Measured first, then the listener on top of it. The measurements come
+    # free with a transcription already paid for and cannot fail; a listening
+    # model is better on the sounds themselves and may not be configured at
+    # all, so it refines what is there rather than being the only source of it.
+    analysis = merge_speech_audio(analysis, speech_metrics_from_words(heard["words"]))
     analysis = merge_speech_audio(analysis, audio_marks)
     analysis["transcript"] = transcript
     sub = await persist_submission(

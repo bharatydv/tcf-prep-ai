@@ -76,6 +76,12 @@ export function SpeakingGrid({ result }) {
     .map(([name, scale]) => [name, delivery[name], scale.indexOf(delivery[name])])
     .filter(([, , i]) => i >= 0);
 
+  // Counted off the recording rather than judged: words a minute, pauses, and
+  // the words the recogniser could not pin down. Shown under the criterion
+  // they produced, because a number with no provenance reads as an opinion.
+  const measured = result.delivery_metrics && typeof result.delivery_metrics === 'object'
+    ? result.delivery_metrics : null;
+
   const strengths = Array.isArray(result.strengths) ? result.strengths : [];
   const focus = Array.isArray(result.focus_areas) ? result.focus_areas : [];
 
@@ -184,6 +190,34 @@ export function SpeakingGrid({ result }) {
                 <p className="mt-2 rounded-xl bg-gray-50 p-3 text-xs leading-relaxed text-gray-700">
                   {c.comment}
                 </p>
+              )}
+              {name === 'phonology' && measured && (
+                <div className="mt-2 rounded-xl bg-gray-50 p-3" data-testid="grid-measured">
+                  <p className="text-xs text-gray-600">
+                    {t('grid.measured', {
+                      wpm: measured.wpm,
+                      pauses: measured.pauses,
+                      seconds: measured.pause_seconds,
+                    })}
+                  </p>
+                  {(measured.unclear_words || []).length > 0 && (
+                    <>
+                      <p className="mt-2 text-xs font-semibold text-gray-700">
+                        {t('grid.unclearTitle')}
+                      </p>
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {measured.unclear_words.map((w) => (
+                          <span key={w} className="rounded-full bg-white px-2 py-0.5 text-xs text-gray-700 ring-1 ring-gray-200">
+                            {w}
+                          </span>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                  <p className="mt-2 text-[11px] leading-relaxed text-gray-400">
+                    {t('grid.measuredNote')}
+                  </p>
+                </div>
               )}
             </div>
           ))}

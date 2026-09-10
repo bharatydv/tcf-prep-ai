@@ -179,6 +179,87 @@ class TestSpeakingGrid:
         assert out["criteria"]["adequacy"]["score"] == 68
 
 
+class TestSpeechMetrics:
+    """Contrôle phonologique measured from the transcription already paid for.
+
+    AssemblyAI returns a confidence and a timing for every word and we used to
+    drop them. Nothing here asks a model anything, so nothing here can be
+    talked into a verdict it cannot support.
+    """
+    def _words(self, n=40, gap=80, dur=300, conf=0.95):
+        """n words, each `dur` ms long with `gap` ms between them."""
+        out, t = [], 0
+        for i in range(n):
+            out.append({"text": "mot%d" % i, "start": t, "end": t + dur,
+                        "confidence": conf})
+            t += dur + gap
+        return out
+
+    def test_a_fluent_clear_answer_reads_as_one(self):
+        # 300ms words, 80ms gaps -> ~158 wpm, no pause over the threshold
+        out = m.speech_metrics_from_words(self._words())
+        assert out["delivery"]["fluency"] == "fluent"
+        assert out["delivery"]["pronunciation"] == "clear"
+        assert out["metrics"]["pauses"] == 0
+        assert out["phonology"]["score"] > 70
+
+    def test_long_gaps_between_words_read_as_hesitant(self):
+        out = m.speech_metrics_from_words(self._words(gap=1600))
+        assert out["delivery"]["fluency"] == "hesitant"
+        assert out["metrics"]["pauses"] > 0
+        assert out["metrics"]["pause_seconds"] > 0
+
+    def test_words_the_recogniser_could_not_pin_down_lower_the_mark(self):
+        clear = m.speech_metrics_from_words(self._words(conf=0.95))
+        muddy = m.speech_metrics_from_words(self._words(conf=0.45))
+        assert muddy["delivery"]["pronunciation"] == "needs_work"
+        assert muddy["phonology"]["score"] < clear["phonology"]["score"]
+
+    def test_the_unclear_words_are_named_worst_first(self):
+        words = self._words(n=20)
+        words[3] = {**words[3], "text": "étranger", "confidence": 0.20}
+        words[9] = {**words[9], "text": "bibliothèque", "confidence": 0.40}
+        out = m.speech_metrics_from_words(words)
+        assert out["metrics"]["unclear_words"][:2] == ["étranger", "bibliothèque"]
+
+    def test_the_same_word_twice_is_named_once(self):
+        words = self._words(n=20)
+        for i in (3, 7, 11):
+            words[i] = {**words[i], "text": "étranger", "confidence": 0.2}
+        out = m.speech_metrics_from_words(words)
+        assert out["metrics"]["unclear_words"].count("étranger") == 1
+
+    def test_intonation_and_liaisons_are_left_unrated(self):
+        """Neither can be got from timings and confidences. An absent badge
+        says nobody listened for it, which is true; a guessed one would not
+        be."""
+        out = m.speech_metrics_from_words(self._words())
+        assert "intonation" not in out["delivery"]
+        assert "liaisons" not in out["delivery"]
+
+    def test_too_few_words_to_measure_yields_nothing(self):
+        assert m.speech_metrics_from_words(self._words(n=5)) == {}
+
+    def test_a_provider_that_reports_no_words_yields_nothing(self):
+        assert m.speech_metrics_from_words([]) == {}
+        assert m.speech_metrics_from_words(None or []) == {}
+
+    def test_junk_entries_do_not_raise(self):
+        assert m.speech_metrics_from_words(["mot", None, {}]) == {}
+
+    def test_zero_length_audio_yields_nothing_rather_than_dividing_by_it(self):
+        flat = [{"text": "mot%d" % i, "start": 0, "end": 0, "confidence": 0.9}
+                for i in range(20)]
+        assert m.speech_metrics_from_words(flat) == {}
+
+    def test_the_measurements_reach_the_result(self):
+        graded = {"errors": [], "overall_score": 60, "tcf_level": "B2",
+                  "answers_question": True, "criteria": {}}
+        out = m.merge_speech_audio(graded, m.speech_metrics_from_words(self._words()))
+        assert out["criteria"]["phonology"]["score"] > 0
+        assert out["delivery_metrics"]["wpm"] > 0
+
+
 class TestSeverity:
     """How much an error costs, as three named weights.
 
