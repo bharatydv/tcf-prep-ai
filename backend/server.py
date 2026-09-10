@@ -211,6 +211,12 @@ OPENAI_GRADER_MODEL = os.environ.get("OPENAI_GRADER_MODEL", "gpt-4o-mini")
 GEMINI_GRADER_MODEL = os.environ.get("GEMINI_GRADER_MODEL", "gemini-2.5-flash-lite")
 OPENAI_TRANSCRIBE_MODEL = os.environ.get("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-transcribe")
 GEMINI_TRANSCRIBE_MODEL = os.environ.get("GEMINI_TRANSCRIBE_MODEL", "gemini-2.5-flash")
+# Marks contrôle phonologique from the recording itself; see the block above
+# analyze_speech_audio. Declared with the other provider defaults rather than
+# beside its own code because _ENV_PROVIDER_DEFAULTS reads it a few lines
+# below, long before that code is reached.
+SPEECH_AUDIO_PROVIDER = os.environ.get("SPEECH_AUDIO_PROVIDER", "gemini")
+GEMINI_AUDIO_MODEL = os.environ.get("GEMINI_AUDIO_MODEL", "gemini-2.5-flash")
 # Groq: Whisper transcription + fast LLM grading (OpenAI-compatible API)
 # llama-3.3-70b-versatile was deprecated by Groq on 2026-06-17 and stops being
 # served on 2026-08-16; gpt-oss-120b is their named replacement. Override with
@@ -274,6 +280,7 @@ _ENV_PROVIDER_DEFAULTS = {
     "transcribe_provider": TRANSCRIBE_PROVIDER,
     "speaking_grader_provider": SPEAKING_GRADER_PROVIDER,
     "writing_grader_provider": WRITING_GRADER_PROVIDER,
+    "speech_audio_provider": SPEECH_AUDIO_PROVIDER,
 }
 _provider_cache: dict = {}          # key -> value
 _provider_cache_ts: float = 0.0     # last refresh time
@@ -3031,6 +3038,164 @@ async def transcribe_audio(audio_bytes: bytes, filename: str, db=None,
         return ""
 
 
+# ----------------------------------------------------------------------------
+# Contrôle phonologique — the one criterion a transcript cannot carry
+# ----------------------------------------------------------------------------
+# Everything else here grades text: the recording is transcribed and the words
+# are marked. That is most of an Expression orale result and it is not the
+# whole of one — an examiner also marks how it SOUNDED, and no transcript of
+# « une expérience de vie à l'étranger » records that the nasal vowel in
+# « étranger » never arrived. This listens to the recording itself.
+#
+# Gemini, specifically, because the browser hands us whatever MediaRecorder
+# produced — WebM/Opus everywhere, MP4/AAC on Safari — and Gemini accepts
+# those containers as they are. The OpenAI audio models document WAV input,
+# which would mean transcoding, which would mean ffmpeg in the image and on
+# the deploy VM for one feature. google-genai is already a dependency and
+# _transcribe_gemini already sends audio through it.
+# Fixed vocabularies, not free text: each rating becomes a coloured badge with
+# its own translated label, so a model inventing a fourth word for "hesitant"
+# would render as a blank chip. Ordered best to worst.
+DELIVERY_SCALES = {
+    "pronunciation": ("clear", "understandable", "needs_work"),
+    "fluency": ("fluent", "uneven", "hesitant"),
+    "intonation": ("natural", "flat", "monotone"),
+    "liaisons": ("accurate", "some_errors", "many_errors"),
+}
+PRONUNCIATION_ISSUES = {"vowel", "nasal", "liaison", "consonant", "stress",
+                        "rhythm"}
+
+SPEECH_AUDIO_SYSTEM = """You are a certified TCF Canada examiner marking ONE criterion of the Expression orale grid: contrôle phonologique. You are listening to the candidate's actual recording.
+
+Another examiner is already marking the grammar, the vocabulary and whether the answer addressed the task. Do not mark those. Mark only how the French SOUNDED: articulation of vowels and consonants, nasal vowels, liaisons and enchaînements, word and phrase stress, rhythm, intonation, and how much effort a listener has to make.
+
+You are given the question, and the transcript as a reference for what was said. The transcript is a reference only — it is text, and text cannot tell you how anything was pronounced. Judge the audio.
+
+Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
+{"phonology":{"score":50,"comment":"2-4 sentences (English)"},"delivery":{"pronunciation":"clear|understandable|needs_work","fluency":"fluent|uneven|hesitant","intonation":"natural|flat|monotone","liaisons":"accurate|some_errors|many_errors"},"pronunciation_errors":[{"word":"the French word as spoken","issue":"vowel|nasal|liaison|consonant|stress|rhythm","explanation":"what was wrong with the sound and how to produce it (English)"}]}
+
+phonology.score is 0-100 on the same CEFR scale as the rest of the grid: A1 (5-19) A2 (20-39) B1 (40-54) B2 (55-69) C1 (70-84) C2 (85-100). A candidate understood without effort by a listener unused to foreign accents is above 70; one who has to be worked at is around 50; one whose words cannot be identified at all is below 20. An accent is NOT an error — French is spoken in many accents and none of them is a fault. Mark intelligibility and control, never foreignness.
+
+comment: say what you actually heard, naming the French words it happened in. "Pronunciation was weak" teaches nothing; "the nasal vowel in « étranger » was produced as a plain 'a', and « positive » had an open 'o' where French closes it" is a thing the candidate can go and practise.
+
+pronunciation_errors: 0 to 8 entries, each a specific sound in a specific word you HEARD go wrong. Never list a word you cannot hear clearly, and never invent one from the transcript. Return an empty list when the pronunciation was sound — an examiner who always finds three faults is not listening.
+
+If the recording is silent, unintelligible, or too short to judge, return {"phonology":null,"delivery":{},"pronunciation_errors":[]} rather than guessing a score."""
+
+
+def _analyse_audio_gemini(audio_bytes: bytes, mime: str, prompt: str) -> str:
+    from google.genai import types
+    client = _gemini_client()
+    resp = client.models.generate_content(
+        model=GEMINI_AUDIO_MODEL,
+        contents=[SPEECH_AUDIO_SYSTEM, prompt,
+                  types.Part.from_bytes(data=audio_bytes, mime_type=mime)],
+    )
+    return (resp.text or "").strip()
+
+
+def _validate_speech_audio(data: dict) -> dict:
+    """The audio examiner's reply, reduced to what the page can render.
+
+    Every part is validated on its own rather than the whole reply being
+    thrown away together: a model that returns a usable phonology mark but
+    garbles the badges should still fill the criterion.
+    """
+    out: dict = {}
+    phon = data.get("phonology")
+    if isinstance(phon, dict):
+        score = _criterion_score(phon.get("score"))
+        if score is not None:
+            out["phonology"] = {
+                "score": score,
+                "comment": str(phon.get("comment", "")).strip()[:600],
+            }
+
+    delivery = {}
+    raw_delivery = data.get("delivery")
+    if isinstance(raw_delivery, dict):
+        for name, allowed in DELIVERY_SCALES.items():
+            value = str(raw_delivery.get(name, "")).strip().lower().replace(" ", "_")
+            if value in allowed:
+                delivery[name] = value
+    out["delivery"] = delivery
+
+    errors = []
+    for item in (data.get("pronunciation_errors") or [])[:8]:
+        if not isinstance(item, dict):
+            continue
+        word = str(item.get("word", "")).strip()
+        if not word:
+            continue
+        issue = str(item.get("issue", "")).strip().lower()
+        errors.append({
+            "word": word[:80],
+            "issue": issue if issue in PRONUNCIATION_ISSUES else "vowel",
+            "explanation": str(item.get("explanation", "")).strip()[:400],
+        })
+    out["pronunciation_errors"] = errors
+    return out
+
+
+async def analyze_speech_audio(audio_bytes: bytes, mime: str, question: str,
+                               transcript: str, db=None) -> dict:
+    """Contrôle phonologique, heard rather than inferred. {} when unavailable.
+
+    This never raises and never refunds. The grade does not depend on it: a
+    result without the phonology row is exactly the result shipped before this
+    existed, whereas letting a second provider's outage fail the request would
+    cost the learner the correction they have already paid for.
+    """
+    provider = ((await get_provider("speech_audio_provider")) if db is not None
+                else SPEECH_AUDIO_PROVIDER)
+    if provider != "gemini" or not _key_is_usable(GEMINI_API_KEY):
+        return {}
+    prompt = (f"QUESTION (the task):\n{question}\n\n"
+              f"TRANSCRIPT (reference only — judge the audio):\n{transcript}")
+    try:
+        raw = await run_ai(_analyse_audio_gemini, audio_bytes, mime, prompt)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Speech audio analysis failed (%s): %s",
+                    provider, _scrub_secrets(exc))
+        _PROVIDER_LAST_ERROR["speech_audio"] = _scrub_secrets(str(exc))[:300]
+        return {}
+    if not raw:
+        return {}
+    try:
+        return _validate_speech_audio(_extract_json(raw))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not parse speech audio JSON: %s | reply[:300]=%r",
+                    exc, _scrub_secrets(raw)[:300])
+        return {}
+
+
+def merge_speech_audio(analysis: dict, audio: dict) -> dict:
+    """Fold the audio examiner's marks into the grade.
+
+    The phonology criterion joins the grid it has always had a slot for, and
+    the caps are re-applied afterwards: a cap is the judgement that the answer
+    cannot demonstrate more than one level, and a phonology mark arriving
+    after the capping would otherwise be the one row on the page allowed to
+    sit above the headline.
+
+    Pronunciation errors are kept in their own list rather than appended to
+    `errors`, because `errors` drives apply_error_cap and a mispronounced
+    nasal vowel is not a grammar mistake — counting it as one would lower the
+    level twice over for a single fault.
+    """
+    if not audio:
+        return analysis
+    if audio.get("phonology"):
+        criteria = dict(analysis.get("criteria") or {})
+        criteria["phonology"] = audio["phonology"]
+        analysis["criteria"] = criteria
+    if audio.get("delivery"):
+        analysis["delivery"] = audio["delivery"]
+    if audio.get("pronunciation_errors"):
+        analysis["pronunciation_errors"] = audio["pronunciation_errors"]
+    return _clamp_criteria_to_level(analysis)
+
+
 def _validate_speaking(data: dict) -> dict:
     base = _validate_analysis(data)
     base["answers_question"] = bool(data.get("answers_question", False))
@@ -4617,6 +4782,12 @@ async def speaking_diag(admin: User = Depends(get_admin_user)):
     return {
         "transcribe_provider": TRANSCRIBE_PROVIDER,
         "speaking_grader_provider": SPEAKING_GRADER_PROVIDER,
+        # Whether the phonology criterion can be marked at all. It is the one
+        # part of a speaking result that fails silently by design, so it needs
+        # somewhere to say it is off rather than merely quiet.
+        "speech_audio_provider": SPEECH_AUDIO_PROVIDER,
+        "speech_audio_ready": (SPEECH_AUDIO_PROVIDER == "gemini"
+                               and _key_is_usable(GEMINI_API_KEY)),
         # _key_is_usable, not bool(): a placeholder left in .env is truthy and
         # would otherwise be reported here as a configured key.
         "keys_set": {
@@ -6352,6 +6523,12 @@ async def read_audio_upload(audio: UploadFile) -> bytes:
 # can stall. Without a ceiling the request outlived any proxy read timeout and
 # left the client on a spinner with no error.
 SPEAKING_MAX_WAIT_SECONDS = float(os.environ.get("SPEAKING_MAX_WAIT_SECONDS", "180"))
+# The audio examiner runs alongside the text grade, so its wait is usually
+# free. This bound is for the case where it is not: the candidate has a
+# finished, paid-for grade in hand by then, and must not be kept staring at a
+# spinner for a criterion that is a bonus on top of it.
+SPEECH_AUDIO_MAX_WAIT_SECONDS = float(
+    os.environ.get("SPEECH_AUDIO_MAX_WAIT_SECONDS", "45"))
 
 
 @app.post("/api/speaking/analyze")
@@ -6392,17 +6569,35 @@ async def speaking_analyze(question: str = Form(...),
         await refund_credit(db, user, "speaking", tache2=is_tache2)
         raise HTTPException(status_code=422, detail=NO_SPEECH_DETAIL)
 
+    # Contrôle phonologique is marked from the recording, by a second provider,
+    # and it is started here rather than after the grade: two round trips in
+    # series would add its whole latency to a wait the candidate already feels.
+    audio_task = asyncio.create_task(
+        analyze_speech_audio(audio_bytes, mime, question, transcript, db=db))
     try:
         analysis = await asyncio.wait_for(
             analyze_speaking_with_ai(transcript, question, db=db,
                                      task_type=task_type),
             timeout=SPEAKING_MAX_WAIT_SECONDS)
     except asyncio.TimeoutError:
+        audio_task.cancel()
         await refund_credit(db, user, "speaking", tache2=is_tache2)
         raise HTTPException(status_code=504, detail=AI_TIMEOUT_DETAIL)
     if analysis.get("ai_unavailable"):
+        audio_task.cancel()
         await refund_credit(db, user, "speaking", tache2=is_tache2)
         raise HTTPException(status_code=503, detail=ai_error_detail(analysis))
+    # Whatever the audio examiner has by now. It is the one part of this
+    # endpoint allowed to come back empty-handed: the learner paid for a
+    # grade, and they have one — losing a criterion is not worth failing the
+    # request or refunding a correction that was in fact delivered.
+    try:
+        audio_marks = await asyncio.wait_for(audio_task,
+                                             timeout=SPEECH_AUDIO_MAX_WAIT_SECONDS)
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        log.warning("Speech audio analysis did not finish in time")
+        audio_marks = {}
+    analysis = merge_speech_audio(analysis, audio_marks)
     analysis["transcript"] = transcript
     sub = await persist_submission(
         db, user, transcript, None, analysis,
@@ -7395,6 +7590,13 @@ PROVIDER_OPTIONS = {
     "transcribe_provider": ["groq", "assemblyai", "openai", "gemini"],
     "speaking_grader_provider": ["deepseek", "groq", "anthropic", "openai", "gemini"],
     "writing_grader_provider": ["deepseek", "groq", "anthropic", "openai", "gemini"],
+    # Only Gemini, for now, and "off" because this is the one setting here
+    # that adds a provider call per graded answer rather than choosing between
+    # calls already being made. Turning it off must not need a VM edit and a
+    # restart. The OpenAI audio models want WAV, and the browser sends WebM or
+    # MP4 — adding them means transcoding, so they are not listed as if they
+    # would work.
+    "speech_audio_provider": ["gemini", "off"],
 }
 
 

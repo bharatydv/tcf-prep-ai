@@ -21,6 +21,22 @@ import { useT } from '../i18n';
 // answered the task, and whether it was structured.
 const CRITERIA = ['phonology', 'linguistic', 'adequacy', 'discourse'];
 
+/* Mirrors DELIVERY_SCALES in backend/server.py — the server only ever sends a
+   value from these lists, and the position in the list is the colour: first is
+   good, last is not. Change one, change both. */
+const DELIVERY_SCALES = {
+  pronunciation: ['clear', 'understandable', 'needs_work'],
+  fluency: ['fluent', 'uneven', 'hesitant'],
+  intonation: ['natural', 'flat', 'monotone'],
+  liaisons: ['accurate', 'some_errors', 'many_errors'],
+};
+
+const RATING_TONE = [
+  'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  'bg-amber-50 text-amber-700 ring-amber-200',
+  'bg-rose-50 text-rose-700 ring-rose-200',
+];
+
 // The chart is a ladder, not data: each column is taller than the last because
 // each level is higher than the last, and the filled one says where you stand.
 const COLUMN_HEIGHT = ['34%', '50%', '66%', '82%', '100%'];
@@ -52,13 +68,21 @@ export function SpeakingGrid({ result }) {
     .filter((name) => criteria[name] && Number.isFinite(criteria[name].score))
     .map((name) => [name, criteria[name]]);
 
+  // How it was delivered, as chips. Only what the audio examiner actually
+  // rated: an absent badge means nobody listened for it, which is the normal
+  // case whenever the phonology criterion itself is absent.
+  const delivery = result.delivery && typeof result.delivery === 'object' ? result.delivery : {};
+  const badges = Object.entries(DELIVERY_SCALES)
+    .map(([name, scale]) => [name, delivery[name], scale.indexOf(delivery[name])])
+    .filter(([, , i]) => i >= 0);
+
   const strengths = Array.isArray(result.strengths) ? result.strengths : [];
   const focus = Array.isArray(result.focus_areas) ? result.focus_areas : [];
 
   // Nothing of the grid came back — an older graded attempt, or a grader that
   // dropped the fields. The headline level is shown by the caller either way,
   // so render nothing rather than an empty frame.
-  if (!rows.length && !strengths.length && !focus.length && mark === null) return null;
+  if (!rows.length && !strengths.length && !focus.length && !badges.length && mark === null) return null;
 
   return (
     <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft"
@@ -139,6 +163,16 @@ export function SpeakingGrid({ result }) {
 
         {/* CRITERION BY CRITERION */}
         <div className="space-y-4">
+          {badges.length > 0 && (
+            <div className="flex flex-wrap gap-1.5" data-testid="grid-delivery">
+              {badges.map(([name, value, i]) => (
+                <span key={name}
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${RATING_TONE[i]}`}>
+                  {t(`grid.delivery.${name}`)}: {t(`grid.rating.${value}`)}
+                </span>
+              ))}
+            </div>
+          )}
           {rows.map(([name, c]) => (
             <div key={name} data-testid={`grid-${name}`}>
               <p className="font-heading text-sm font-bold text-gray-900">{t(`grid.${name}`)}</p>

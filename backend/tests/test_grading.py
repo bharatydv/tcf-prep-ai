@@ -179,6 +179,98 @@ class TestSpeakingGrid:
         assert out["criteria"]["adequacy"]["score"] == 68
 
 
+class TestSpeechAudio:
+    """The examiner that listens instead of reading.
+
+    It is the one part of a speaking result allowed to come back empty: the
+    learner has paid for a grade and has one, so a second provider being down
+    must cost them a criterion and never the correction.
+    """
+    def test_a_clean_reply_fills_the_criterion(self):
+        out = m._validate_speech_audio({
+            "phonology": {"score": 45, "comment": "the nasal in etranger"},
+            "delivery": {"pronunciation": "needs_work", "fluency": "hesitant",
+                         "intonation": "flat", "liaisons": "many_errors"},
+            "pronunciation_errors": [
+                {"word": "positive", "issue": "vowel", "explanation": "open o"}]})
+        assert out["phonology"]["score"] == 45
+        assert out["delivery"]["fluency"] == "hesitant"
+        assert out["pronunciation_errors"][0]["word"] == "positive"
+
+    def test_a_rating_outside_its_scale_is_dropped_not_rendered_blank(self):
+        out = m._validate_speech_audio({
+            "delivery": {"fluency": "quite good", "intonation": "natural"}})
+        assert "fluency" not in out["delivery"]
+        assert out["delivery"]["intonation"] == "natural"
+
+    def test_an_unknown_issue_type_falls_back_rather_than_dropping_the_error(self):
+        out = m._validate_speech_audio({"pronunciation_errors": [
+            {"word": "chien", "issue": "palatal", "explanation": "x"}]})
+        assert out["pronunciation_errors"][0]["issue"] == "vowel"
+
+    def test_a_nameless_pronunciation_error_is_dropped(self):
+        """"Some sounds were unclear" is not something to go and practise."""
+        out = m._validate_speech_audio({"pronunciation_errors": [
+            {"word": "  ", "issue": "vowel", "explanation": "x"}]})
+        assert out["pronunciation_errors"] == []
+
+    def test_an_unjudgeable_recording_yields_no_score(self):
+        out = m._validate_speech_audio({
+            "phonology": None, "delivery": {}, "pronunciation_errors": []})
+        assert "phonology" not in out
+
+    def test_garbled_badges_do_not_cost_the_criterion(self):
+        out = m._validate_speech_audio({
+            "phonology": {"score": 62, "comment": "clear"}, "delivery": "good"})
+        assert out["phonology"]["score"] == 62
+        assert out["delivery"] == {}
+
+
+class TestMergeSpeechAudio:
+    def _graded(self, **extra):
+        return {"errors": [], "overall_score": 60, "tcf_level": "B2",
+                "answers_question": True,
+                "criteria": {"linguistic": {"score": 60, "comment": "x"}},
+                **extra}
+
+    def test_phonology_joins_the_grid(self):
+        out = m.merge_speech_audio(self._graded(), {
+            "phonology": {"score": 45, "comment": "nasal vowels"},
+            "delivery": {"fluency": "hesitant"}, "pronunciation_errors": []})
+        assert out["criteria"]["phonology"]["score"] == 45
+        assert out["criteria"]["linguistic"]["score"] == 60
+        assert out["delivery"]["fluency"] == "hesitant"
+
+    def test_pronunciation_errors_never_reach_the_error_cap(self):
+        """A mispronounced nasal vowel is not a grammar mistake. Appending it
+        to `errors` would drive apply_error_cap and lower the level twice over
+        for one fault."""
+        out = m.merge_speech_audio(self._graded(), {
+            "pronunciation_errors": [{"word": "etranger", "issue": "nasal",
+                                      "explanation": "x"}] * 6})
+        assert out["errors"] == []
+        assert len(out["pronunciation_errors"]) == 6
+        assert m.apply_error_cap(out)["tcf_level"] == "B2"
+
+    def test_a_capped_grade_pulls_a_late_phonology_mark_down_too(self):
+        capped = self._graded(caps_applied=[{"code": "speakVeryShort"}],
+                              tcf_level="A2", overall_score=39)
+        out = m.merge_speech_audio(capped, {
+            "phonology": {"score": 80, "comment": "very clear"}})
+        assert out["criteria"]["phonology"]["score"] <= m.LEVEL_MAX_SCORE["A2"]
+
+    def test_nothing_from_the_audio_examiner_leaves_the_grade_untouched(self):
+        graded = self._graded()
+        assert m.merge_speech_audio(graded, {}) is graded
+        assert "phonology" not in graded["criteria"]
+
+    @pytest.mark.asyncio
+    async def test_it_is_off_rather_than_failing_when_there_is_no_key(self, monkeypatch):
+        monkeypatch.setattr(m, "GEMINI_API_KEY", "")
+        monkeypatch.setattr(m, "SPEECH_AUDIO_PROVIDER", "gemini")
+        assert await m.analyze_speech_audio(b"x", "audio/webm", "q", "t") == {}
+
+
 class TestAudioSafety:
     def test_declared_mime_is_used_when_it_is_on_the_allowlist(self):
         assert m.resolve_audio_mime("a.webm", "audio/webm") == "audio/webm"

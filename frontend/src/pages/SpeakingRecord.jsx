@@ -24,6 +24,11 @@ const TACHE_INFO = {
   3: { title: "Tâche 3 : Expression d'un Point de Vue", range: '2 min de préparation + 2 min 30' },
 };
 
+// Each note names one sound in one word. The word gets a play button of its
+// own, because "the nasal vowel in « etranger » was not produced distinctly"
+// is advice you cannot act on until you have heard the vowel done right.
+const ISSUE_KEYS = ['vowel', 'nasal', 'liaison', 'consonant', 'stress', 'rhythm'];
+
 const CAT_LABELS = {
   prepositions: 'Prépositions', spelling: 'Orthographe', conjugation: 'Conjugaison',
   gender_number: 'Accord', anglicism: 'Anglicismes', improvement: 'Améliorations C1',
@@ -403,6 +408,27 @@ export default function SpeakingRecord() {
                             of a speaking test. */}
                         <SpeakButton text={e.correction} id={`fix-${i}`} {...tts} />
                         <span className="ml-auto rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase text-primary">{CAT_LABELS[e.category] || e.category}</span>
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">{e.explanation}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {Array.isArray(result.pronunciation_errors) && result.pronunciation_errors.length > 0 && (
+              <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft"
+                data-testid="pronunciation-notes">
+                <p className="font-heading text-sm font-bold text-gray-900">{t('speak.pronunciation')}</p>
+                <div className="mt-3 space-y-3">
+                  {result.pronunciation_errors.map((e, i) => (
+                    <div key={i} className="rounded-2xl border border-sky-50 bg-sky-50/40 p-4">
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <span className="font-semibold text-gray-900">{e.word}</span>
+                        <SpeakButton text={e.word} id={`say-${i}`} {...tts} />
+                        <span className="ml-auto rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold uppercase text-sky-700">
+                          {ISSUE_KEYS.includes(e.issue) ? t(`speak.issue.${e.issue}`) : e.issue}
+                        </span>
                       </div>
                       <p className="mt-1 text-xs text-gray-500">{e.explanation}</p>
                     </div>
