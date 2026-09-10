@@ -179,6 +179,26 @@ class TestSpeakingGrid:
         assert out["criteria"]["adequacy"]["score"] == 68
 
 
+class TestKeyIsUsable:
+    """An absent key and a broken key are different problems.
+
+    Every checked-out backend/.env holds RECOVER_FROM_VM, because the working
+    keys live only on the deploy host. Sending that to a provider earns a 401,
+    which the Admin panel then reports as an invalid key — pointing whoever
+    reads it at their billing account instead of at the missing key.
+    """
+    def test_the_placeholder_this_repo_actually_uses_is_recognised(self):
+        assert not m._key_is_usable("RECOVER_FROM_VM")
+        assert not m._key_is_usable("recover_from_vm")
+
+    def test_the_older_placeholders_still_are(self):
+        for k in ("your_key_here", "CHANGEME", "replace_me", ""):
+            assert not m._key_is_usable(k)
+
+    def test_a_real_looking_key_is_left_alone(self):
+        assert m._key_is_usable("sk-proj-9d81f0a2c4b7e6social")
+
+
 class TestSpeechMetrics:
     """Contrôle phonologique measured from the transcription already paid for.
 
