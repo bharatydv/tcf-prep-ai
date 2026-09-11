@@ -1,13 +1,12 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { CheckCircle } from '@phosphor-icons/react';
-import { toast } from 'sonner';
-import { api, errMsg } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import { useT } from '../i18n';
-import { Seo } from '../lib/seo';
+import { useI18n, useT } from '../i18n';
+import { Seo, SITE_URL } from '../lib/seo';
+import { pathForLocale } from '../lib/locale';
 import { useBillingPlans } from '../lib/plans';
-import { usePrompt } from '../components/shared';
+import { useCheckout } from '../lib/checkout';
 import { track } from '../lib/api';
 
 const FEATURE_KEYS = ['pricing.feature1', 'pricing.feature2', 'pricing.feature3', 'pricing.feature4'];
@@ -19,126 +18,63 @@ const FAQ_KEYS = [
 ];
 
 export default function Pricing() {
-  const { user, refreshUser } = useAuth();
+  const { user } = useAuth();
   const t = useT();
-  const navigate = useNavigate();
-  // `currency` is not destructured: the card stopped itemising the fee, and
-  // that breakdown was its only reader. Each plan's own price is formatted
-  // from the catalogue, so nothing here needs the catalogue-level code.
-  const { plans, configured, loading } = useBillingPlans();
-  const [busy, setBusy] = useState('');
-  const [prompt, promptDialog] = usePrompt();
+  // `currency` is back: the Offer markup below has to name one, and it must
+  // be the catalogue's rather than a guess — the whole point of the schema is
+  // that it agrees with what the page charges.
+  const { plans, currency, configured, loading } = useBillingPlans();
+  const { lang } = useI18n();
+  /* Checkout lives in lib/checkout.js so the landing page can open the same
+     one. This page is now a caller like any other. */
+  const { subscribe, busy, promptDialog } = useCheckout();
 
   // Reaching the pricing page is the step before checkout, and the gap
   // between the two is the most useful number in the funnel.
   useEffect(() => { track('pricing_view'); }, []);
-  const cta = user ? '/dashboard' : '/register';
 
-  /* Opens the mandate at Cashfree and hands the browser over to it. Nothing is
-     granted here — the signed webhook does that — so there is no success path
-     to fake if this call is tampered with. */
-  /* The gateway will not open a mandate without a phone number, so the
-     account needs one before checkout can proceed.
+  /* Product/Offer markup, built from the catalogue the page is rendering.
    *
-   * Asked for here, at the moment of purchase, rather than at registration.
-   * Only people who are actually buying are asked, nobody is stopped from
-   * signing up and using the free trial over a field the trial never needs,
-   * and everyone who registered before this existed can still buy. */
-  const askForPhone = async () => {
-    const phone = await prompt({
-      title: t('billing.phoneTitle'),
-      message: t('billing.phoneWhy'),
-      placeholder: '+1 514 555 0123',
-      type: 'tel',
-      inputMode: 'tel',
-      autoComplete: 'tel',
-      confirmLabel: t('billing.phoneSave'),
-    });
-    if (!phone) return false;
-    try {
-      await api.post('/api/auth/phone/send', { phone });
-      await refreshUser();
-      return true;
-    } catch (err) {
-      toast.error(errMsg(err, t('billing.phoneFailed')));
-      return false;
-    }
-  };
-
-  /* Cashfree's checkout script, fetched once and only when someone actually
-     buys. It is ~40 kB that a visitor reading the pricing table never needs,
-     and loading it on mount would put a third-party script on the page for
-     everyone to pay for a purchase most of them will not make. */
-  const loadCashfree = () => new Promise((resolve, reject) => {
-    if (window.Cashfree) return resolve(window.Cashfree);
-    const el = document.createElement('script');
-    el.src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
-    el.async = true;
-    el.onload = () => (window.Cashfree
-      ? resolve(window.Cashfree)
-      : reject(new Error('Cashfree SDK loaded without defining Cashfree')));
-    el.onerror = () => reject(new Error('Cashfree SDK failed to load'));
-    document.head.appendChild(el);
-  });
-
-  const startCheckout = async (planId) => {
-    const { data } = await api.post('/api/billing/subscribe', { plan_id: planId });
-    /* An order is not a link. Cashfree rejected this account for
-       Subscriptions and for Payment Links, so checkout is the Orders API,
-       which answers with a session id and no URL to send anyone to. The
-       session is opened by their script instead. */
-    if (!data?.session_id) {
-      // Sending the learner nowhere silently is how "I paid and nothing
-      // happened" reports start.
-      toast.error(t('billing.noLink'));
-      return false;
-    }
-    try {
-      const Cashfree = await loadCashfree();
-      const cashfree = Cashfree({ mode: 'production' });
-      // _self, not a popup: a blocked popup is indistinguishable from a
-      // broken checkout to the person looking at the screen.
-      await cashfree.checkout({
-        paymentSessionId: data.session_id,
-        redirectTarget: '_self',
-      });
-      return true;
-    } catch (err) {
-      toast.error(t('billing.noLink'));
-      return false;
-    }
-  };
-
-  const subscribe = async (planId) => {
-    if (!user) return navigate('/register');
-    if (busy) return;
-    setBusy(planId);
-    track('checkout_start', { plan: planId });
-    try {
-      await startCheckout(planId);
-    } catch (err) {
-      // The server names the missing phone in a 400. Collect it and carry on
-      // rather than making the learner find a settings page mid-purchase.
-      const detail = String(err?.response?.data?.detail || '');
-      const needsPhone = err?.response?.status === 400
-        && /num\u00e9ro de t\u00e9l\u00e9phone|phone/i.test(detail);
-      if (needsPhone && await askForPhone()) {
-        try {
-          await startCheckout(planId);
-        } catch (retryErr) {
-          toast.error(errMsg(retryErr, t('billing.failed')));
-        }
-      } else if (!needsPhone) {
-        toast.error(errMsg(err, t('billing.failed')));
-      }
-    } finally {
-      setBusy('');
-    }
-  };
+   * Not hand-written, and not duplicated from the shell's AggregateOffer: the
+   * one thing structured data must never do is disagree with the page it sits
+   * on, and a price typed into a template drifts the first time a price moves.
+   * Everything here comes from the same `plans` the cards below render.
+   *
+   * Held back until the catalogue has loaded. Emitting the fallback cards'
+   * prices would publish a figure the server has not confirmed. */
+  const offerSchema = useMemo(() => {
+    if (loading || !plans.length) return null;
+    const url = `${SITE_URL}${pathForLocale(lang, '/pricing')}`;
+    return {
+      '@context': 'https://schema.org',
+      '@type': 'Product',
+      name: 'prepfrancais premium',
+      description: t('seo.pricing.desc'),
+      brand: { '@type': 'Brand', name: 'prepfrancais' },
+      url,
+      offers: plans.map((plan) => ({
+        '@type': 'Offer',
+        name: plan.name,
+        /* The TOTAL, not the headline number.
+           It is what the card actually charges and what the page's own Total
+           line shows. Publishing the pre-fee figure would put a price in a
+           search result that nobody is ever charged — which is the same class
+           of mistake as the shell advertising dollars while checkout took
+           rupees. */
+        price: Number(plan.checkout?.total ?? plan.amount).toFixed(2),
+        priceCurrency: currency,
+        availability: 'https://schema.org/InStock',
+        category: 'Subscription',
+        url,
+      })),
+    };
+  }, [plans, currency, loading, t, lang]);
+  const cta = user ? '/dashboard' : '/register';
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-12">
-      <Seo titleKey="seo.pricing.title" descKey="seo.pricing.desc" path="/pricing" />
+      <Seo titleKey="seo.pricing.title" descKey="seo.pricing.desc" path="/pricing"
+        jsonLd={offerSchema} />
       <h1 className="text-center text-4xl font-bold">{t('pricing.title')}</h1>
       <p className="mx-auto mt-3 max-w-xl text-center text-gray-600">
         {t('pricing.subtitle')}

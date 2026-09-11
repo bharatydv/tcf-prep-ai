@@ -40,14 +40,19 @@ export default function Register() {
     }
     if (res.ok) {
       toast.success(t('auth.created'));
-      navigate(res.user?.role === 'admin' ? '/admin' : '/practice');
+      /* Someone who arrived from a plan card came to buy. Sending them to
+         /practice would drop that intent at the last step; /pricing is one
+         click from the gateway, with the plan they picked already chosen. */
+      const wanted = new URLSearchParams(window.location.search).get('plan');
+      if (res.user?.role === 'admin') navigate('/admin');
+      else navigate(wanted ? '/pricing' : '/practice');
     } else { setError(res.error); toast.error(res.error); }
   };
 
   if (sentTo) {
     return (
       <main className="flex min-h-[calc(100dvh-4rem)] items-center justify-center bg-gradient-to-br from-violet-50 via-white to-violet-100 px-4 py-12">
-        <Seo titleKey="seo.register.title" descKey="seo.register.desc" path="/register" />
+        <Seo titleKey="seo.register.title" descKey="seo.register.desc" path="/register" noindex />
         <div className="card w-full max-w-md p-8 text-center" data-testid="verify-sent">
           <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-50 text-primary">
             <EnvelopeSimple size={28} weight="duotone" />
@@ -70,7 +75,7 @@ export default function Register() {
 
   return (
     <main className="flex min-h-[calc(100dvh-4rem)] items-center justify-center bg-gradient-to-br from-violet-50 via-white to-violet-100 px-4 py-12">
-      <Seo titleKey="seo.register.title" descKey="seo.register.desc" path="/register" />
+      <Seo titleKey="seo.register.title" descKey="seo.register.desc" path="/register" noindex />
       <div className="card w-full max-w-md p-8">
         <span className="pill mb-4 bg-green-50 text-green-700" data-testid="free-attempts-badge">{t('auth.freeBadge')}</span>
         <h1 className="text-2xl font-bold">{t('auth.createAccount')}</h1>
