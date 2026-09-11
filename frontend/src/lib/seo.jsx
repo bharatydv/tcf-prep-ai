@@ -15,7 +15,9 @@
  *        type="article" image={post.cover_image} jsonLd={articleSchema} />
  */
 import { useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useI18n } from '../i18n';
+import { LOCALES, pathForLocale } from './locale';
 
 export const SITE_URL = (process.env.REACT_APP_SITE_URL || 'https://prepfrancais.com')
   .replace(/\/$/, '');
@@ -56,6 +58,12 @@ function setLink(rel, href, extra = {}) {
   el.setAttribute('href', href);
 }
 
+function clearHreflang() {
+  document.head
+    .querySelectorAll('link[rel="alternate"][hreflang]')
+    .forEach((el) => el.remove());
+}
+
 export function useSeo({
   title, titleKey,
   description, descKey,
@@ -64,8 +72,23 @@ export function useSeo({
   type = 'website',
   jsonLd,
   noindex = false,
+  /* Does this page exist in both languages?
+   *
+   * True for anything whose copy comes out of the i18n dictionaries — the
+   * marketing pages, the guides, the legal set. False for content that exists
+   * in one language only, chiefly blog posts and exam material: those render
+   * the same body whichever shell wraps them, so claiming a French version
+   * would point hreflang at a translation that does not exist. A page like
+   * that canonicalises to its unprefixed URL from either locale, which
+   * collapses the duplicate instead of advertising it.
+   */
+  localized = true,
 } = {}) {
   const { t, lang } = useI18n();
+  /* Inside the router this is ALREADY the path without its locale prefix —
+     basename strips it — so /fr/pricing arrives here as "/pricing". That is
+     what makes one path build both locales' URLs below. */
+  const { pathname } = useLocation();
 
   const resolvedTitle = titleKey ? t(titleKey) : title;
   const resolvedDesc = descKey ? t(descKey) : description;
@@ -75,7 +98,10 @@ export function useSeo({
       ? (resolvedTitle.includes('prepfrancais') ? resolvedTitle : `${resolvedTitle} | prepfrancais`)
       : DEFAULTS.title;
     const desc = resolvedDesc || DEFAULTS.description;
-    const url = SITE_URL + (path || window.location.pathname);
+    const routePath = path || pathname;
+    /* A single-language page has one address, and it is the unprefixed one.
+       A translated page's canonical is its own locale's URL. */
+    const url = SITE_URL + (localized ? pathForLocale(lang, routePath) : routePath);
     const img = image
       ? (image.startsWith('http') ? image : SITE_URL + image)
       : DEFAULTS.image;
@@ -97,11 +123,28 @@ export function useSeo({
     setMeta('name', 'twitter:description', desc);
     setMeta('name', 'twitter:image', img);
 
-    // Both locales live at one address, so hreflang tags are not applicable.
-    // When separate locale routing is implemented (/en/*, /fr-ca/*), hreflang
-    // tags can be added back to direct search engines to the correct locale version.
-    // For now, remove any stale hreflang tags to avoid conflicts with canonical.
-    document.head.querySelectorAll('link[rel="alternate"][hreflang]').forEach(el => el.remove());
+    /* hreflang. Every translated page names every version of itself,
+       including itself — a reciprocal set is what makes search engines trust
+       it, and a page that omits its own entry is a common reason the whole
+       cluster is ignored.
+
+       x-default points at English: it is what a visitor with no matching
+       language preference should land on, and it is the URL that already
+       ranks.
+
+       Cleared first rather than updated in place, so navigating from a
+       translated page to a single-language one cannot leave the previous
+       page's alternates behind — which would tell a crawler that a blog post
+       has a French translation at a URL serving the same English text. */
+    clearHreflang();
+    if (localized) {
+      LOCALES.forEach((code) => {
+        setLink('alternate', SITE_URL + pathForLocale(code, routePath),
+                { hreflang: code });
+      });
+      setLink('alternate', SITE_URL + pathForLocale('en', routePath),
+              { hreflang: 'x-default' });
+    }
 
     // Signed-in and utility pages should never enter an index.
     let robots = document.head.querySelector('meta[name="robots"]');
@@ -130,7 +173,8 @@ export function useSeo({
       const stale = document.head.querySelector('meta[name="robots"]');
       if (noindex && stale) stale.remove();
     };
-  }, [resolvedTitle, resolvedDesc, path, image, type, jsonLd, noindex, lang]);
+  }, [resolvedTitle, resolvedDesc, path, pathname, image, type, jsonLd,
+      noindex, lang, localized]);
 }
 
 /* Element form, for pages that read better with it in the tree. Identical
@@ -143,7 +187,7 @@ export function Seo(props) {
 
 /* Breadcrumbs help both search results and answer engines place a deep page in
    the site. `trail` is [[label, path], ...] ending at the current page. */
-export function breadcrumbSchema(trail) {
+export function breadcrumbSchema(trail, lang = 'en') {
   return {
     '@context': 'https://schema.org',
     '@type': 'BreadcrumbList',
@@ -151,7 +195,9 @@ export function breadcrumbSchema(trail) {
       '@type': 'ListItem',
       position: i + 1,
       name,
-      item: SITE_URL + p,
+      // Locale-aware: a French breadcrumb naming the English URLs would send
+      // a crawler out of the locale it is reading.
+      item: SITE_URL + pathForLocale(lang, p),
     })),
   };
 }

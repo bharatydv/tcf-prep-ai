@@ -47,9 +47,17 @@ function save() {
   console.log('[prerender] saved pristine shell -> build/app-shell.html');
 }
 
+/* Every protected route exists once per language, so each has to be pruned
+   twice. Without the French half, react-snap's crawl of /fr/dashboard — which
+   redirects to the login form exactly as the English one does — would bake
+   that form into build/fr/dashboard/index.html, and a signed-in French learner
+   hard-loading their dashboard would be shown a login page until React took
+   over. The English bug this script was written for, in the other locale. */
+const localised = (route) => [route, path.join('fr', route)];
+
 function prune() {
   let removed = 0;
-  for (const route of NOT_PRERENDERABLE) {
+  for (const route of NOT_PRERENDERABLE.flatMap(localised)) {
     const file = path.join(BUILD, route, 'index.html');
     if (!fs.existsSync(file)) continue;
     fs.rmSync(path.join(BUILD, route), { recursive: true, force: true });

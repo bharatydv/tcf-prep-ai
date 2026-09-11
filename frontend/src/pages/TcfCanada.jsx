@@ -24,9 +24,11 @@ import {
   ChatCircleText, SealCheck, Lightbulb, ClockCountdown,
 } from '@phosphor-icons/react';
 import { Reveal, ScoreRing, Faq, useInView } from '../components/landing';
+import { RouteFallback } from '../components/shared';
 import { useAuth } from '../context/AuthContext';
-import { useI18n } from '../i18n';
+import { useI18n, useNamespace } from '../i18n';
 import { Seo, SITE_URL, breadcrumbSchema } from '../lib/seo';
+import { pathForLocale } from '../lib/locale';
 import { track } from '../lib/api';
 import { WRITING_TASKS, SPEAKING_TASKS, fmtClock } from '../lib/tcf';
 import NotFound from './NotFound';
@@ -460,11 +462,22 @@ function Crumbs({ trail }) {
 /* ================================================================== page == */
 
 export default function TcfCanada({ slug }) {
+  /* This family's copy is 58 kB and is the only thing that reads it, so it is
+     split out of the dictionary and fetched here rather than shipped to every
+     visitor in the entry chunk. See NAMESPACE_LOADERS in i18n/index.jsx.
+
+     The hook runs before the early return below, because hook order cannot be
+     conditional. */
+  const nsReady = useNamespace('tcfCanada');
   const page = BY_SLUG[slug];
   /* Routes come from slugs.js and the copy from pages.js; if the two ever
      disagree in a shipped build, a real 404 beats a half-rendered page that
      search engines would index as a soft one. */
   if (!page) return <NotFound />;
+  /* Held back deliberately. Rendering now would put raw i18n keys on screen —
+     and on these pages, which are prerendered, those keys are what react-snap
+     would capture into the static HTML a crawler reads. */
+  if (!nsReady) return <RouteFallback />;
   return <TcfCanadaPage page={page} slug={slug} />;
 }
 
@@ -489,12 +502,13 @@ function TcfCanadaPage({ page, slug }) {
       ? [[t('tcfCanada.ui.home'), '/'], [p('crumb'), path]]
       : [[t('tcfCanada.ui.home'), '/'], [t('tcfCanada.hub.crumb'), '/tcf-canada'], [p('crumb'), path]];
     return [
-      breadcrumbSchema(trail),
+      // Locale-aware, so a French page's breadcrumb names French URLs.
+      breadcrumbSchema(trail, lang),
       {
         '@context': 'https://schema.org',
         '@type': 'FAQPage',
         inLanguage: lang === 'fr' ? 'fr-CA' : 'en',
-        url: SITE_URL + path,
+        url: SITE_URL + pathForLocale(lang, path),
         mainEntity: range(page.faqs).map((n) => ({
           '@type': 'Question',
           name: p(`q${n}`),

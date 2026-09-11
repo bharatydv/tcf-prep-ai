@@ -1,5 +1,11 @@
 # prepfrancais — https://prepfrancais.com
 
+# Every private path is listed twice, once per language. robots.txt matches a
+# path prefix literally and has no notion of a locale, so `Disallow: /dashboard`
+# does not cover /fr/dashboard - the French half of the site would have been
+# fully crawlable, signed-in surfaces included, the day locale routing shipped.
+# /api/ needs no French twin: the API is not localised.
+#
 # Signed-in surfaces: nothing to index, and crawling them only burns budget.
 # No blank line inside this group - a blank line ENDS a group, and these rules
 # used to sit after one, which orphaned every Disallow below it. The paths were
@@ -13,6 +19,13 @@ Disallow: /feedback/
 Disallow: /check-writing
 Disallow: /practice/simulator
 Disallow: /api/
+Disallow: /fr/admin
+Disallow: /fr/admin/
+Disallow: /fr/dashboard
+Disallow: /fr/review
+Disallow: /fr/feedback/
+Disallow: /fr/check-writing
+Disallow: /fr/practice/simulator
 Allow: /
 
 # Answer engines, allowed on purpose: the guides, blog and exam topics are
@@ -37,6 +50,13 @@ Disallow: /feedback/
 Disallow: /check-writing
 Disallow: /practice/simulator
 Disallow: /api/
+Disallow: /fr/admin
+Disallow: /fr/admin/
+Disallow: /fr/dashboard
+Disallow: /fr/review
+Disallow: /fr/feedback/
+Disallow: /fr/check-writing
+Disallow: /fr/practice/simulator
 Allow: /
 
 User-agent: OAI-SearchBot
@@ -48,6 +68,13 @@ Disallow: /feedback/
 Disallow: /check-writing
 Disallow: /practice/simulator
 Disallow: /api/
+Disallow: /fr/admin
+Disallow: /fr/admin/
+Disallow: /fr/dashboard
+Disallow: /fr/review
+Disallow: /fr/feedback/
+Disallow: /fr/check-writing
+Disallow: /fr/practice/simulator
 Allow: /
 
 User-agent: ClaudeBot
@@ -59,6 +86,13 @@ Disallow: /feedback/
 Disallow: /check-writing
 Disallow: /practice/simulator
 Disallow: /api/
+Disallow: /fr/admin
+Disallow: /fr/admin/
+Disallow: /fr/dashboard
+Disallow: /fr/review
+Disallow: /fr/feedback/
+Disallow: /fr/check-writing
+Disallow: /fr/practice/simulator
 Allow: /
 
 User-agent: Claude-Web
@@ -70,6 +104,13 @@ Disallow: /feedback/
 Disallow: /check-writing
 Disallow: /practice/simulator
 Disallow: /api/
+Disallow: /fr/admin
+Disallow: /fr/admin/
+Disallow: /fr/dashboard
+Disallow: /fr/review
+Disallow: /fr/feedback/
+Disallow: /fr/check-writing
+Disallow: /fr/practice/simulator
 Allow: /
 
 User-agent: PerplexityBot
@@ -81,6 +122,13 @@ Disallow: /feedback/
 Disallow: /check-writing
 Disallow: /practice/simulator
 Disallow: /api/
+Disallow: /fr/admin
+Disallow: /fr/admin/
+Disallow: /fr/dashboard
+Disallow: /fr/review
+Disallow: /fr/feedback/
+Disallow: /fr/check-writing
+Disallow: /fr/practice/simulator
 Allow: /
 
 User-agent: Google-Extended
@@ -92,6 +140,13 @@ Disallow: /feedback/
 Disallow: /check-writing
 Disallow: /practice/simulator
 Disallow: /api/
+Disallow: /fr/admin
+Disallow: /fr/admin/
+Disallow: /fr/dashboard
+Disallow: /fr/review
+Disallow: /fr/feedback/
+Disallow: /fr/check-writing
+Disallow: /fr/practice/simulator
 Allow: /
 
 User-agent: Applebot-Extended
@@ -103,6 +158,13 @@ Disallow: /feedback/
 Disallow: /check-writing
 Disallow: /practice/simulator
 Disallow: /api/
+Disallow: /fr/admin
+Disallow: /fr/admin/
+Disallow: /fr/dashboard
+Disallow: /fr/review
+Disallow: /fr/feedback/
+Disallow: /fr/check-writing
+Disallow: /fr/practice/simulator
 Allow: /
 
 User-agent: CCBot
@@ -114,6 +176,13 @@ Disallow: /feedback/
 Disallow: /check-writing
 Disallow: /practice/simulator
 Disallow: /api/
+Disallow: /fr/admin
+Disallow: /fr/admin/
+Disallow: /fr/dashboard
+Disallow: /fr/review
+Disallow: /fr/feedback/
+Disallow: /fr/check-writing
+Disallow: /fr/practice/simulator
 Allow: /
 
 Sitemap: https://prepfrancais.com/sitemap.xml
