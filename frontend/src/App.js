@@ -7,10 +7,18 @@ import { Header, ProtectedRoute, ScrollToTop, RouteFallback } from "./components
 import Footer from "./components/Footer";
 import VerifyBanner from "./components/VerifyBanner";
 import Paywall from "./components/Paywall";
+/* Static, not lazy: it decides whether an analytics cookie may be written, so
+   it has to be able to answer before the first pageview is measured. It is a
+   few hundred bytes and renders nothing once a choice has been stored. */
+import ConsentBanner from "./components/ConsentBanner";
 /* Strings only. The page configs and their icons live in tcfCanada/pages.js,
    which the lazy chunk below pulls in — importing them here would put fifteen
    marketing pages' worth of data in the bundle the landing page waits on. */
 import { TCF_CANADA_SLUGS } from "./pages/tcfCanada/slugs";
+/* English is unprefixed, French lives under /fr. See lib/locale.js for why the
+   two are not symmetric, and why this is done with basename rather than with a
+   prefix on each of the routes below. */
+import { basenameFor, localeFromPath } from "./lib/locale";
 
 /* Landing, Login and Register are the entry points for a first-time visitor,
    so they stay in the main chunk — code-splitting them would only add a round
@@ -69,9 +77,18 @@ const NotFound = lazy(() => import("./pages/NotFound"));
 const TcfCanada = lazy(() => import("./pages/TcfCanada"));
 
 export default function App() {
+  /* Read once, from the real address bar, before the router exists.
+   *
+   * basename is what makes every <Route path="/pricing"> below serve
+   * /fr/pricing too, and what makes every <Link to="/pricing"> inside a French
+   * page stay French — without a single one of them mentioning the locale.
+   *
+   * It is deliberately not state: changing locale changes the URL, which is a
+   * navigation, so the value is correct for the life of the mount. */
+  const pathname = typeof window === 'undefined' ? '/' : window.location.pathname;
   return (
-    <BrowserRouter>
-      <I18nProvider>
+    <BrowserRouter basename={basenameFor(pathname)}>
+      <I18nProvider initialLang={localeFromPath(pathname)}>
       <AuthProvider>
         <ScrollToTop />
         <Header />
@@ -203,6 +220,9 @@ export default function App() {
             navigation and no legal links at all. */}
         <Footer />
         <Toaster position="top-right" richColors closeButton />
+        {/* Below the routes, fixed to the viewport: it must sit over every
+            page without taking part in any page's layout. */}
+        <ConsentBanner />
       </AuthProvider>
       </I18nProvider>
     </BrowserRouter>

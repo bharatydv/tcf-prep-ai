@@ -16,15 +16,18 @@
     <meta name="description" content="Préparation IA au TEF et au TCF Canada : correction de l'expression écrite et orale, niveau CEFR expliqué, examens blancs et révision de vos propres erreurs. 6 corrections gratuites." />
     <link rel="canonical" href="https://prepfrancais.com/" />
 
-    <!-- Hreflang tags removed: both languages exist at the same address until
-         locale routing lands. When locale routing is implemented (/en/*, /fr-ca/*),
-         hreflang tags will be added back to direct search engines to the correct
-         locale version. See frontend/src/lib/seo.jsx for more. -->
+    <!-- Hreflang is emitted per route by <Seo> (src/lib/seo.jsx) and again in
+         the sitemap, so it is not static here: this shell is the fallback for
+         EVERY unmatched URL, and a fixed set of alternates would tell a crawler
+         that each of them is a translation of the homepage.
+
+         English is unprefixed and French lives under /fr — see src/lib/locale.js
+         for why the two are not symmetric. -->
 
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="prepfrancais" />
-    <meta property="og:locale" content="fr_CA" />
-    <meta property="og:locale:alternate" content="en_CA" />
+    <meta property="og:locale" content="en_CA" />
+    <meta property="og:locale:alternate" content="fr_CA" />
     <meta property="og:title" content="prepfrancais — Réussissez votre TEF/TCF Canada" />
     <meta property="og:description" content="Correction IA de l'expression écrite et orale, niveau CEFR expliqué, et révision de vos propres erreurs." />
     <meta property="og:url" content="https://prepfrancais.com/" />
@@ -61,7 +64,17 @@
 
     <!-- Identity and product facts, in the served HTML so crawlers that do not
          execute JavaScript can still read them. Per-page Article/FAQ markup is
-         emitted by the Seo component on the routes that have it. -->
+         emitted by the Seo component on the routes that have it.
+
+         sameAs is what ties this name to profiles that can corroborate it, and
+         it is the main input to whether an answer engine treats "prepfrancais"
+         as a real organisation worth citing. Both URLs are the CANONICAL
+         profile addresses, not the share links they were copied from:
+         instagram.com/prepfrancais?igsi=... carries a share-tracking parameter,
+         and facebook.com/share/1DkFvdpju2/ is a redirect, not a page. A sameAs
+         pointing at a redirect or a tracked URL is a weaker claim about
+         identity than one pointing at the profile itself - so if either link
+         is ever replaced, resolve it first and strip the query. -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -74,7 +87,11 @@
             "logo": "https://prepfrancais.com/icon-512.png",
             "description": "Préparation en ligne au TEF et au TCF Canada, avec correction par IA de l'expression écrite et orale.",
             "areaServed": "CA",
-            "knowsLanguage": ["fr-CA", "en-CA"]
+            "knowsLanguage": ["fr-CA", "en-CA"],
+            "sameAs": [
+              "https://www.instagram.com/prepfrancais",
+              "https://www.facebook.com/people/Prep-Francais/61592984745939/"
+            ]
           },
           {
             "@type": "WebSite",

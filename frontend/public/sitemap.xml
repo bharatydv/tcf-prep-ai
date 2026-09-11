@@ -1,224 +1,595 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
     <loc>https://prepfrancais.com/</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/"/>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/"/>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/tef-tcf-writing-guide</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tef-tcf-writing-guide"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tef-tcf-writing-guide"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tef-tcf-writing-guide"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/tef-tcf-writing-guide</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tef-tcf-writing-guide"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tef-tcf-writing-guide"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tef-tcf-writing-guide"/>
     <changefreq>monthly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/blog</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/blog"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/blog"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/blog"/>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/blog</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/blog"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/blog"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/blog"/>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/recent-topics</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/recent-topics"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/recent-topics"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/recent-topics"/>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/recent-topics</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/recent-topics"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/recent-topics"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/recent-topics"/>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/practice</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/practice"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/practice"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/practice"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/practice</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/practice"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/practice"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/practice"/>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/practice/tasks</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/practice/tasks"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/practice/tasks"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/practice/tasks"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/practice/tasks</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/practice/tasks"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/practice/tasks"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/practice/tasks"/>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/practice/themes</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/practice/themes"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/practice/themes"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/practice/themes"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/practice/themes</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/practice/themes"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/practice/themes"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/practice/themes"/>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/speaking</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/speaking"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/speaking"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/speaking"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/speaking</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/speaking"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/speaking"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/speaking"/>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/speaking/tasks</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/speaking/tasks"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/speaking/tasks"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/speaking/tasks"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/speaking/tasks</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/speaking/tasks"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/speaking/tasks"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/speaking/tasks"/>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/speaking/themes</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/speaking/themes"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/speaking/themes"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/speaking/themes"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/speaking/themes</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/speaking/themes"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/speaking/themes"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/speaking/themes"/>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/reading</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/reading"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/reading"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/reading"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/reading</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/reading"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/reading"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/reading"/>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/reading/practice</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/reading/practice"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/reading/practice"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/reading/practice"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/reading/practice</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/reading/practice"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/reading/practice"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/reading/practice"/>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/listening</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/listening"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/listening"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/listening"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/listening</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/listening"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/listening"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/listening"/>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/listening/practice</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/listening/practice"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/listening/practice"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/listening/practice"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/listening/practice</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/listening/practice"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/listening/practice"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/listening/practice"/>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/resources</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/resources"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/resources"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/resources"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/resources</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/resources"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/resources"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/resources"/>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/combinations</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/combinations"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/combinations"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/combinations"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/combinations</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/combinations"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/combinations"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/combinations"/>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/pricing</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/pricing"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/pricing"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/pricing"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/pricing</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/pricing"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/pricing"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/pricing"/>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/tcf-canada</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/tcf-canada</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada"/>
     <changefreq>monthly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/tcf-canada-practice</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-practice"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-practice"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-practice"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/tcf-canada-practice</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-practice"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-practice"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-practice"/>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/tcf-canada-mock-test</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-mock-test"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-mock-test"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-mock-test"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/tcf-canada-mock-test</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-mock-test"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-mock-test"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-mock-test"/>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/tcf-canada-exam-simulator</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-exam-simulator"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-exam-simulator"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-exam-simulator"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/tcf-canada-exam-simulator</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-exam-simulator"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-exam-simulator"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-exam-simulator"/>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/tcf-canada-nclc-7</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-nclc-7"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-nclc-7"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-nclc-7"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/tcf-canada-nclc-7</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-nclc-7"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-nclc-7"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-nclc-7"/>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/tcf-canada-speaking</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-speaking"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-speaking"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-speaking"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/tcf-canada-speaking</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-speaking"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-speaking"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-speaking"/>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/tcf-canada-writing</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-writing"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-writing"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-writing"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/tcf-canada-writing</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-writing"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-writing"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-writing"/>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/tcf-canada-listening</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-listening"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-listening"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-listening"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/tcf-canada-listening</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-listening"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-listening"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-listening"/>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/tcf-canada-reading</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-reading"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-reading"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-reading"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/tcf-canada-reading</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-reading"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-reading"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-reading"/>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/tcf-canada-speaking-task-1</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-speaking-task-1"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-speaking-task-1"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-speaking-task-1"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/tcf-canada-speaking-task-1</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-speaking-task-1"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-speaking-task-1"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-speaking-task-1"/>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/tcf-canada-speaking-task-2</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-speaking-task-2"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-speaking-task-2"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-speaking-task-2"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/tcf-canada-speaking-task-2</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-speaking-task-2"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-speaking-task-2"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-speaking-task-2"/>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/tcf-canada-speaking-task-3</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-speaking-task-3"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-speaking-task-3"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-speaking-task-3"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/tcf-canada-speaking-task-3</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-speaking-task-3"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-speaking-task-3"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-speaking-task-3"/>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/tcf-canada-writing-task-1</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-writing-task-1"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-writing-task-1"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-writing-task-1"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/tcf-canada-writing-task-1</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-writing-task-1"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-writing-task-1"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-writing-task-1"/>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/tcf-canada-writing-task-2</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-writing-task-2"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-writing-task-2"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-writing-task-2"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/tcf-canada-writing-task-2</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-writing-task-2"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-writing-task-2"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-writing-task-2"/>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/tcf-canada-writing-task-3</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-writing-task-3"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-writing-task-3"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-writing-task-3"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/tcf-canada-writing-task-3</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/tcf-canada-writing-task-3"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/tcf-canada-writing-task-3"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/tcf-canada-writing-task-3"/>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/privacy</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/privacy"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/privacy"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/privacy"/>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/privacy</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/privacy"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/privacy"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/privacy"/>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/terms</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/terms"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/terms"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/terms"/>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/terms</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/terms"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/terms"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/terms"/>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/contact</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/contact"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/contact"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/contact"/>
+    <changefreq>yearly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/contact</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/contact"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/contact"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/contact"/>
     <changefreq>yearly</changefreq>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/refund</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/refund"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/refund"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/refund"/>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/refund</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/refund"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/refund"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/refund"/>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/shipping</loc>
-    <lastmod>2026-09-04</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/shipping"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/shipping"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/shipping"/>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/fr/shipping</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/shipping"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/shipping"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/shipping"/>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
   </url>

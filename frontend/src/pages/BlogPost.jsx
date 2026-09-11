@@ -178,6 +178,10 @@ export default function BlogPost() {
         path={`/blog/${slug}`}
         type="article"
         image={post.cover_image}
+        /* No French translation exists: a post is written once, in one
+           language, and only the shell around it is localised. Claiming an
+           alternate would point hreflang at the same English text. */
+        localized={false}
         jsonLd={articleSchema}
       />
       {/* HERO */}

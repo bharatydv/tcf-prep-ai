@@ -12,6 +12,7 @@ import { useI18n } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
 import { track } from '../lib/api';
 import { useBillingPlans, formatPrice } from '../lib/plans';
+import { useCheckout } from '../lib/checkout';
 
 /* ===================================================================== page */
 /* Verifiable description of the product, in place of invented testimonials. */
@@ -31,10 +32,12 @@ export default function Landing() {
   const [simTopic, setSimTopic] = useState('');
   const [simAnswer, setSimAnswer] = useState('');
   const trialTo = user ? '/dashboard' : '/register';
-  // A plan card is purchase intent, not trial intent, so it opens checkout.
-  // /pricing sends a signed-out visitor to /register on its own, so this
-  // does not need the user check trialTo makes.
-  const planTo = '/pricing';
+  /* A plan card is purchase intent, so it opens the real checkout here rather
+     than linking to /pricing.
+     Clicking "1 Month" and being shown a page that asks which plan you want is
+     a step that sells nothing — the visitor already said. The hook handles the
+     signed-out case itself, carrying the chosen plan through registration. */
+  const { subscribe, busy, promptDialog } = useCheckout();
 
   // The top of the funnel. Everything else is measured against this number.
   useEffect(() => { track('landing_view'); }, []);
@@ -89,6 +92,9 @@ export default function Landing() {
 
   return (
     <main className="overflow-x-clip bg-white">
+      {/* The phone prompt renders through this; without it, a Cashfree
+          checkout that needs a number would stall with nothing on screen. */}
+      {promptDialog}
       <Seo
         titleKey="seo.home.title"
         descKey="seo.home.desc"
@@ -737,13 +743,14 @@ export default function Landing() {
                       <li key={f} className="flex items-center gap-2.5"><CheckCircle size={17} weight="fill" className="shrink-0 text-primary" /> {t(f)}</li>
                     ))}
                   </ul>
-                  {/* Straight to /pricing: someone who clicked a specific plan
-                      is asking to buy, and bouncing them to the dashboard lost
-                      that intent. /pricing is still where the money is taken. */}
-                  <Link to={planTo} data-testid={`plan-${p.id}`}
+                  {/* Opens the gateway from here. Someone who clicked a
+                      specific plan is asking to buy it, and every screen
+                      between that click and the card form costs conversions. */}
+                  <button type="button" data-testid={`plan-${p.id}`}
+                    onClick={() => subscribe(p.id)} disabled={Boolean(busy)}
                     className={`mt-7 ${p.popular ? 'btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600 w-full justify-center' : 'btn-outline w-full justify-center'}`}>
-                    {t('land.getStarted')}
-                  </Link>
+                    {busy === p.id ? t('billing.redirecting') : t('land.getStarted')}
+                  </button>
                 </div>
               </div>
             </Reveal>

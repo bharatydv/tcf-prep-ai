@@ -11,6 +11,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PaperPlaneTilt } from '@phosphor-icons/react';
+import { reopenConsent } from './ConsentBanner';
 import { toast } from 'sonner';
 import { api, errMsg } from '../lib/api';
 import { useT } from '../i18n';
@@ -119,7 +120,9 @@ export default function Footer() {
           /* The pillar of the /tcf-canada family. Every page in it links to
              its siblings, but the family needs one link from the site-wide
              footer or a crawler only ever reaches it from the sitemap. */
-          ['/tcf-canada', t('tcfCanada.hub.crumb')],
+          // From `land`, not `tcfCanada`: that namespace is now loaded with the
+          // pages that use it, and the footer renders on every page.
+          ['/tcf-canada', t('land.footTcfCanada')],
           ['/tef-tcf-writing-guide', t('land.footGuide')],
           ['/blog', t('land.footBlog')],
           ['/recent-topics', t('land.footRecent')],
@@ -161,6 +164,13 @@ export default function Footer() {
                 the one page that happens to link them. */}
             <li><Link to="/refund" className="inline-block py-1.5 transition hover:text-white">{t('land.footRefund')}</Link></li>
             <li><Link to="/shipping" className="inline-block py-1.5 transition hover:text-white">{t('land.footShipping')}</Link></li>
+            {/* Withdrawing consent is the half a one-time banner usually
+                leaves out, and a choice that cannot be changed is not really
+                a choice. Reopens the banner rather than being a page of its
+                own — there is one setting behind it. */}
+            <li><button type="button" onClick={reopenConsent}
+              className="inline-block py-1.5 text-left transition hover:text-white">
+              {t('consent.manage')}</button></li>
           </ul>
         </div>
       </div>

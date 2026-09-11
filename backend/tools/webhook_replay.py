@@ -1,23 +1,30 @@
 """Drive the payment grant path without a gateway.
 
     python tools/webhook_replay.py --api http://127.0.0.1:15000
+    python tools/webhook_replay.py --gateway cashfree
 
-Cashfree's part of a payment is the checkout page. Everything that decides
+The gateway's part of a payment is the checkout page. Everything that decides
 what a customer actually gets happens afterwards, when the signed webhook
 arrives: premium is granted, an invoice is issued, a duplicate is ignored, a
-refund takes the access back. None of that needs Cashfree to be reachable -
+refund takes the access back. None of that needs the gateway to be reachable -
 only a correctly signed body - so it can be exercised here, in full, instead
 of being discovered in production.
+
+Runs against either gateway, because the handler serves both at one URL and
+picks its verifier from the signature header. Razorpay is the default, matching
+PAYMENT_PROVIDER.
 
 What it does
 ------------
 1. Registers a throwaway learner through the real API.
 2. Inserts a pending subscription for them (the row /billing/subscribe would
-   have written after Cashfree accepted the mandate).
-3. Sends a correctly signed SUBSCRIPTION_PAYMENT_SUCCESS webhook.
+   have written after the gateway accepted the order).
+3. Sends a correctly signed payment-success webhook.
 4. Checks: premium granted, expiry set from the PLAN, invoice issued.
 5. Sends the same webhook again - nothing should change.
-6. Sends a refund webhook - access should be taken back.
+6. On Razorpay, sends `order.paid` for the same payment - the other event name
+   for the same money, which must not grant a second cycle.
+7. Sends a refund webhook - access should be taken back.
 
 Requires the stack to be up and the database reachable, and it writes only to
 rows it created.
@@ -47,9 +54,15 @@ def check(label, ok, detail=""):
 
 
 def sign(body: bytes, ts: str, secret: str) -> str:
+    """Cashfree: base64(HMAC-SHA256(timestamp + body))."""
     return base64.b64encode(
         hmac.new(secret.encode(), ts.encode() + body, hashlib.sha256).digest()
     ).decode()
+
+
+def sign_rzp(body: bytes, secret: str) -> str:
+    """Razorpay: hex(HMAC-SHA256(body)). No timestamp in the signed material."""
+    return hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 
 
 def psql(sql: str, container: str, user: str, db: str) -> str:
@@ -102,7 +115,18 @@ def _query_direct(sql: str) -> str:
     return asyncio.run(run()).strip()
 
 
-def post_event(api, secret, kind, sub_id, payment_id):
+# What each gateway calls the two events this script sends. Kept as a table so
+# the steps below read the same whichever gateway is under test.
+EVENTS = {
+    "cashfree": {"success": "SUBSCRIPTION_PAYMENT_SUCCESS",
+                 "refund": "SUBSCRIPTION_PAYMENT_REFUND"},
+    "razorpay": {"success": "payment.captured", "refund": "refund.created"},
+}
+
+
+def post_event(api, secret, gateway, kind, sub_id, payment_id):
+    if gateway == "razorpay":
+        return _post_razorpay(api, secret, kind, sub_id, payment_id)
     body = json.dumps({
         "type": kind,
         "data": {"subscription_id": sub_id, "cf_payment_id": payment_id,
@@ -115,15 +139,54 @@ def post_event(api, secret, kind, sub_id, payment_id):
         "x-webhook-timestamp": ts}, timeout=30)
 
 
+def _post_razorpay(api, secret, kind, sub_id, payment_id):
+    """A Razorpay event body, shaped the way Razorpay actually sends one.
+
+    The amount is in paise: 8239, not 82.39. Sending it in whole currency here
+    would make this script agree with a server that had the conversion wrong,
+    which is the one thing a replay tool must not do.
+    """
+    payment = {"id": payment_id, "entity": "payment", "amount": 8239,
+               "currency": "INR", "status": "captured",
+               "order_id": f"order_{payment_id}",
+               "notes": {"subscription_id": sub_id, "plan_id": "month"}}
+    if kind.startswith("refund"):
+        # Razorpay sends the original payment alongside the refund, and it has
+        # to be here: our subscription id rides in the payment's notes, and
+        # without it the handler cannot tell which row was refunded.
+        payload = {"refund": {"entity": {
+            "id": f"rfnd_{payment_id}", "payment_id": payment_id,
+            "amount": 8239, "currency": "INR", "status": "processed"}},
+            "payment": {"entity": dict(payment, status="refunded")}}
+    else:
+        payload = {"payment": {"entity": payment}}
+    body = json.dumps({"entity": "event", "event": kind,
+                       "contains": list(payload), "payload": payload}).encode()
+    return requests.post(f"{api}/api/billing/webhook", data=body, headers={
+        "Content-Type": "application/json",
+        "x-razorpay-signature": sign_rzp(body, secret),
+        "x-razorpay-event-id": f"evt_{payment_id}"}, timeout=30)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--api", default="http://127.0.0.1:15000")
     ap.add_argument("--container", default="tcf_db")
     ap.add_argument("--db-user", default=os.environ.get("DB_USER", "audit"))
     ap.add_argument("--db-name", default=os.environ.get("DB_NAME", "audit_db"))
-    ap.add_argument("--secret", default=os.environ.get(
-        "CASHFREE_WEBHOOK_SECRET", "local-audit-webhook-secret"))
+    ap.add_argument("--gateway", choices=("razorpay", "cashfree"),
+                    default=os.environ.get("PAYMENT_PROVIDER", "razorpay"))
+    ap.add_argument("--secret", default=None,
+                    help="webhook secret; defaults to the chosen gateway's")
     a = ap.parse_args()
+
+    if a.secret is None:
+        a.secret = (os.environ.get("RAZORPAY_WEBHOOK_SECRET")
+                    if a.gateway == "razorpay"
+                    else os.environ.get("CASHFREE_WEBHOOK_SECRET")
+                    ) or "local-audit-webhook-secret"
+    events = EVENTS[a.gateway]
+    print(f"gateway: {a.gateway}\n")
 
     q = lambda sql: psql(sql, a.container, a.db_user, a.db_name)  # noqa: E731
 
@@ -142,16 +205,17 @@ def main():
     sub_id = f"replay_{uuid.uuid4().hex[:8]}"
     q(f"""INSERT INTO subscriptions
           (subscription_id, user_id, plan_id, status, currency, amount,
-           base_amount, fee_percent, fee_amount, tax_amount,
+           base_amount, fee_percent, fee_amount, tax_amount, provider,
            created_at, updated_at)
           VALUES ('{sub_id}', '{user_id}', 'month', 'pending', 'USD', 82.39,
-                  80.0, 2.99, 2.39, 0.0, now(), now())""")
+                  80.0, 2.99, 2.39, 0.0, '{a.gateway}', now(), now())""")
     check("pending subscription inserted", True, sub_id)
     before = q(f"SELECT COALESCE(subscription_status,'free') FROM users WHERE user_id='{user_id}'")
     check("learner starts without premium", before != "premium", f"status={before}")
 
     print("\n3. a signed payment-success webhook")
-    r = post_event(a.api, a.secret, "SUBSCRIPTION_PAYMENT_SUCCESS", sub_id, "cf_replay_1")
+    r = post_event(a.api, a.secret, a.gateway, events["success"],
+                   sub_id, "replay_1")
     check("accepted", r.status_code == 200, f"HTTP {r.status_code} {r.text[:60]}")
 
     status = q(f"SELECT subscription_status FROM users WHERE user_id='{user_id}'")
@@ -168,8 +232,9 @@ def main():
     inv = q(f"SELECT number || ' ' || total FROM invoices WHERE user_id='{user_id}'")
     check("invoice issued", bool(inv), inv or "none")
 
-    print("\n4. the same webhook again (Cashfree retries until it gets a 2xx)")
-    r2 = post_event(a.api, a.secret, "SUBSCRIPTION_PAYMENT_SUCCESS", sub_id, "cf_replay_1")
+    print("\n4. the same webhook again (both gateways retry until they get a 2xx)")
+    r2 = post_event(a.api, a.secret, a.gateway, events["success"],
+                    sub_id, "replay_1")
     check("second delivery is a no-op", r2.json().get("duplicate") is True, r2.text[:60])
     days2 = q(f"SELECT ROUND(EXTRACT(EPOCH FROM (premium_until - now()))/86400) "
               f"FROM users WHERE user_id='{user_id}'")
@@ -177,8 +242,20 @@ def main():
     n_inv = q(f"SELECT count(*) FROM invoices WHERE user_id='{user_id}'")
     check("no second invoice", n_inv == "1", f"{n_inv} invoice(s)")
 
+    if a.gateway == "razorpay":
+        print("\n4b. order.paid - the same money under Razorpay's other name")
+        r2b = post_event(a.api, a.secret, a.gateway, "order.paid",
+                         sub_id, "replay_1")
+        check("accepted", r2b.status_code == 200, f"HTTP {r2b.status_code}")
+        days2b = q(f"SELECT ROUND(EXTRACT(EPOCH FROM (premium_until - now()))/86400) "
+                   f"FROM users WHERE user_id='{user_id}'")
+        check("still no second cycle", days2b == days, f"{days} -> {days2b} days")
+        n_inv_b = q(f"SELECT count(*) FROM invoices WHERE user_id='{user_id}'")
+        check("still one invoice", n_inv_b == "1", f"{n_inv_b} invoice(s)")
+
     print("\n5. a refund")
-    r3 = post_event(a.api, a.secret, "SUBSCRIPTION_PAYMENT_REFUND", sub_id, "cf_replay_2")
+    r3 = post_event(a.api, a.secret, a.gateway, events["refund"],
+                    sub_id, "replay_1")
     check("accepted", r3.status_code == 200, f"HTTP {r3.status_code}")
     status3 = q(f"SELECT subscription_status FROM users WHERE user_id='{user_id}'")
     check("access taken back", status3 == "free", f"status={status3}")

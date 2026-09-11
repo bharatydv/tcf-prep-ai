@@ -108,6 +108,16 @@ anglicismes · améliorations C1 (style upgrades, which never count as errors)
 - /reading, /listening: comprehension papers
 - /pricing: the plans, with the payment processing fee itemised before checkout
 
+## Languages and URLs
+
+The interface exists in English and French. English pages are unprefixed and
+French pages live under /fr — /pricing and /fr/pricing are the same page in the
+two languages, and each names the other with hreflang. Exam material (consignes,
+model answers, corrections) is French in both, because it is the exam.
+
+Blog posts are written once, in one language, and have a single unprefixed
+address; there is no /fr twin to cite.
+
 ## Usage
 
 Content may be quoted with attribution to prepfrancais and a link to the source

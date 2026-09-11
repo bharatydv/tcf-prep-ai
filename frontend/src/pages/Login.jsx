@@ -49,7 +49,7 @@ const submit = async (e) => {
 
   return (
     <main className="flex min-h-[calc(100dvh-4rem)] items-center justify-center bg-gradient-to-br from-violet-50 via-white to-violet-100 px-4 py-12">
-      <Seo titleKey="seo.login.title" descKey="seo.login.desc" path="/login" />
+      <Seo titleKey="seo.login.title" descKey="seo.login.desc" path="/login" noindex />
       <div className="card w-full max-w-md p-8">
         <h1 className="text-2xl font-bold">{t('auth.welcomeBack')}</h1>
         <p className="mt-1 text-sm text-gray-500">{t('auth.loginSub')}</p>
