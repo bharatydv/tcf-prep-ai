@@ -20,6 +20,7 @@ os.environ.setdefault("DATABASE_URL",
 os.environ.setdefault("JWT_SECRET", "test-secret-that-is-at-least-32-chars-long")
 os.environ.setdefault("ENV", "development")
 os.environ.setdefault("CASHFREE_WEBHOOK_SECRET", "test-webhook-secret")
+os.environ.setdefault("RAZORPAY_WEBHOOK_SECRET", "test-razorpay-secret")
 os.environ.setdefault("INTERNATIONAL_CARD_FEE_PERCENT", "2.99")
 os.environ.setdefault("TAX_PERCENT", "0")
 os.environ.setdefault("BILLING_CURRENCY", "USD")

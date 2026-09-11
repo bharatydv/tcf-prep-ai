@@ -2287,8 +2287,13 @@ _PROVIDER_LAST_ERROR: Dict[str, str] = {}
 def _scrub_secrets(text: str) -> str:
     """Remove anything key-shaped from a provider error before showing it."""
     out = str(text)
+    # The gateway secrets are defined further down this file; this function
+    # only ever runs long after import, so reading them here is fine - and a
+    # webhook or order payload logged whole is exactly where one would leak.
     for key in (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,
-                GROQ_API_KEY, DEEPSEEK_API_KEY, ASSEMBLYAI_API_KEY):
+                GROQ_API_KEY, DEEPSEEK_API_KEY, ASSEMBLYAI_API_KEY,
+                CASHFREE_SECRET_KEY, CASHFREE_WEBHOOK_SECRET,
+                RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET):
         if key and len(key) > 8:
             out = out.replace(key, "***")
     return re.sub(r"\b(sk|gsk)[-_][A-Za-z0-9\-_]{8,}", "***", out)[:400]
@@ -3506,6 +3511,12 @@ class Subscription(Base):
     plan_id: Mapped[str] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
     currency: Mapped[str] = mapped_column(String(8), default="USD")
+    # Which gateway opened this order. A row outlives the PAYMENT_PROVIDER
+    # switch: a webhook for a payment taken through the old gateway can arrive
+    # after the new one is live, and a refund can arrive months later. Without
+    # this there is no way to tell, after the fact, who actually took the
+    # money - which is the first question asked about any disputed charge.
+    provider: Mapped[str] = mapped_column(String(16), default="cashfree")
     # What the card is actually charged: the plan price plus the processing
     # fee. The parts are kept beside it because an invoice has to itemise them
     # and a webhook has to be checked against the total, and recomputing either
@@ -3547,6 +3558,10 @@ class Invoice(Base):
     plan_id: Mapped[str] = mapped_column(String(32))
     plan_name: Mapped[str] = mapped_column(String(64))
     currency: Mapped[str] = mapped_column(String(8), default="USD")
+    # Copied off the subscription for the same reason the name and email are:
+    # a receipt has to keep naming the processor that actually took the
+    # payment, even after the site has moved to a different one.
+    provider: Mapped[str] = mapped_column(String(16), default="cashfree")
     base_amount: Mapped[float] = mapped_column(Float, default=0.0)
     fee_percent: Mapped[float] = mapped_column(Float, default=0.0)
     fee_amount: Mapped[float] = mapped_column(Float, default=0.0)
@@ -3655,6 +3670,30 @@ CASHFREE_BASE_URL = os.environ.get(
 # configured in the dashboard.
 CASHFREE_WEBHOOK_SECRET = (os.environ.get("CASHFREE_WEBHOOK_SECRET", "")
                            or CASHFREE_SECRET_KEY)
+
+# ----------------------------------------------------------------------------
+# Which gateway takes the money
+# ----------------------------------------------------------------------------
+# Razorpay is what checkout uses; Cashfree is kept behind this switch so a
+# failure at one is a config change and a restart, not a deploy. Every row
+# already written by Cashfree keeps working either way - the webhook handler
+# below reads both event shapes regardless of which provider is selected, so a
+# retried Cashfree notification for a payment taken last week still lands.
+PAYMENT_PROVIDER = os.environ.get("PAYMENT_PROVIDER", "razorpay").strip().lower()
+
+# Razorpay has one host for both test and live; which one you are on is decided
+# by the key, not the URL - a key beginning rzp_test_ cannot touch live money.
+RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
+RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
+RAZORPAY_BASE_URL = os.environ.get("RAZORPAY_BASE_URL",
+                                   "https://api.razorpay.com/v1")
+# Deliberately NOT falling back to the key secret the way Cashfree does.
+# Razorpay signs webhooks with a secret you type into the dashboard when you
+# create the webhook, which is a different string from the API key secret.
+# Defaulting to the key secret would not "mostly work" - it would fail every
+# signature check, and it would do so while looking configured.
+RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
+
 # Cashfree subscription plans are INR by default and non-INR needs the
 # international product enabled on the account. Kept as one env var so a
 # currency that the account cannot actually charge is a config change, not a
@@ -3701,6 +3740,18 @@ DEFAULT_PAYMENT_METHOD = os.environ.get("DEFAULT_PAYMENT_METHOD",
 # actually owes it, and label it correctly with TAX_LABEL.
 TAX_PERCENT = float(os.environ.get("TAX_PERCENT", "0"))
 TAX_LABEL = os.environ.get("TAX_LABEL", "Tax")
+
+# How each gateway is named on anything a customer reads. Keyed on the same
+# strings PAYMENT_PROVIDER accepts, and falling back to the stored value so a
+# row written by some future provider still prints something truthful rather
+# than blank.
+_GATEWAY_NAMES = {"razorpay": "Razorpay", "cashfree": "Cashfree"}
+
+
+def gateway_display_name(provider: Optional[str] = None) -> str:
+    key = (provider or PAYMENT_PROVIDER or "").strip().lower()
+    return _GATEWAY_NAMES.get(key) or (key.title() if key else "the payment provider")
+
 
 _CENTS = Decimal("0.01")
 
@@ -3786,8 +3837,25 @@ def plan_period(plan: dict) -> timedelta:
     return fn(plan["intervals"])
 
 
-def billing_configured() -> bool:
+def razorpay_configured() -> bool:
+    return bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET)
+
+
+def cashfree_configured() -> bool:
     return bool(CASHFREE_APP_ID and CASHFREE_SECRET_KEY)
+
+
+def billing_configured() -> bool:
+    """Can the selected gateway actually take a payment?
+
+    Only the selected one is consulted. Answering yes because the *other*
+    provider still has credentials in the environment would light up a buy
+    button that leads nowhere - which is exactly what the paywall's "payments
+    are not live yet" line exists to prevent.
+    """
+    if PAYMENT_PROVIDER == "razorpay":
+        return razorpay_configured()
+    return cashfree_configured()
 
 
 def _cf_request_sync(method: str, path: str, payload: Optional[dict] = None) -> dict:
@@ -3837,6 +3905,97 @@ def verify_cashfree_signature(raw_body: bytes, signature: str,
                    timestamp.encode("utf-8") + raw_body, hashlib.sha256)
     expected = base64.b64encode(mac.digest()).decode("utf-8")
     return hmac.compare_digest(expected, signature)
+
+
+# ----------------------------------------------------------------------------
+# Razorpay
+# ----------------------------------------------------------------------------
+# The same shape as the Cashfree integration above, and for the same reason:
+# card details never reach this server. /billing/subscribe opens an order at
+# Razorpay, the browser pays at Razorpay's own checkout, and the signed webhook
+# below is the only thing that grants premium.
+#
+# One order, one payment, one fixed period - the model the Cashfree path was
+# forced into when Subscriptions was rejected, kept here on purpose. Razorpay
+# Subscriptions needs its own product approval, and a checkout that depends on
+# an approval you may not have is a checkout that breaks on day one.
+def _rzp_request_sync(method: str, path: str,
+                      payload: Optional[dict] = None) -> dict:
+    import requests
+    resp = requests.request(
+        method, f"{RAZORPAY_BASE_URL}{path}",
+        # Razorpay authenticates with HTTP Basic, not headers of its own.
+        auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET),
+        headers={"Content-Type": "application/json"},
+        json=payload, timeout=30)
+    try:
+        data = resp.json()
+    except ValueError:
+        data = {"raw": resp.text[:2000]}
+    if resp.status_code >= 400:
+        # Razorpay nests the useful part under error.description, and names the
+        # offending field in error.field - both are worth having in the log,
+        # because the status alone never says which one was wrong.
+        err = data.get("error") if isinstance(data, dict) else None
+        err = err if isinstance(err, dict) else {}
+        detail = err.get("description") or data.get("raw") or data
+        field = f" (field: {err['field']})" if err.get("field") else ""
+        raise RuntimeError(
+            f"Razorpay {method} {path} -> {resp.status_code}: {detail}{field}")
+    return data
+
+
+async def rzp_request(method: str, path: str,
+                      payload: Optional[dict] = None) -> dict:
+    # On the explicit pool for the same reason cf_request is - see the note
+    # there. A Razorpay checkout is one call rather than Cashfree's two or
+    # three, but it is still a 30-second blocking request.
+    return await run_ai(
+        functools.partial(_rzp_request_sync, method, path, payload))
+
+
+def verify_razorpay_signature(raw_body: bytes, signature: str) -> bool:
+    """Razorpay signs hex(HMAC-SHA256(rawBody, webhook_secret)).
+
+    No timestamp in the signed material, unlike Cashfree, and the digest is hex
+    rather than base64 - so the two cannot share one verifier.
+
+    The secret is the one typed into the dashboard when the webhook was
+    created, NOT the API key secret. With it unset every event is refused,
+    which is the right failure: an unverified webhook is an open endpoint that
+    grants premium to anyone who can POST JSON.
+    """
+    if not (signature and RAZORPAY_WEBHOOK_SECRET):
+        return False
+    mac = hmac.new(RAZORPAY_WEBHOOK_SECRET.encode("utf-8"),
+                   raw_body, hashlib.sha256)
+    return hmac.compare_digest(mac.hexdigest(), signature)
+
+
+# Razorpay states every amount in the currency's smallest unit, as an integer:
+# 8239 is INR 82.39, and sending 82.39 would charge 82 paise. Most currencies
+# are two-decimal; these are the ones that are not, and passing an unknown
+# code through as two-decimal is the safe default because that is what all but
+# a handful of ISO 4217 codes are.
+_ZERO_DECIMAL_CURRENCIES = {"JPY", "KRW", "VND", "CLP", "ISK", "XOF", "XAF"}
+
+
+def _currency_factor(currency: Optional[str]) -> int:
+    return 1 if (currency or "").upper() in _ZERO_DECIMAL_CURRENCIES else 100
+
+
+def to_minor_units(amount, currency: Optional[str] = None) -> int:
+    """A decimal amount as the integer Razorpay wants.
+
+    Rounded through money() first: int(82.39 * 100) is 8238 in binary floating
+    point, and a cent short is a mismatch logged against every single payment.
+    """
+    return int(money(amount) * _currency_factor(currency))
+
+
+def from_minor_units(value, currency: Optional[str] = None) -> Decimal:
+    """The inverse, for reading an amount back off a webhook."""
+    return money(Decimal(str(value)) / Decimal(_currency_factor(currency)))
 
 
 def _dig(data: Any, *names: str) -> Any:
@@ -4787,6 +4946,16 @@ MIGRATIONS = [
     "DOUBLE PRECISION DEFAULT 0",
     "UPDATE subscriptions SET base_amount = amount "
     "WHERE COALESCE(base_amount, 0) = 0",
+    # Which gateway took the money. Backfilled to cashfree rather than to the
+    # current PAYMENT_PROVIDER: every row that exists when this first runs was
+    # charged through Cashfree, and stamping them with whatever is configured
+    # today would rewrite the history of payments Razorpay never saw.
+    "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS provider "
+    "VARCHAR(16) DEFAULT 'cashfree'",
+    "ALTER TABLE invoices ADD COLUMN IF NOT EXISTS provider "
+    "VARCHAR(16) DEFAULT 'cashfree'",
+    "UPDATE subscriptions SET provider = 'cashfree' WHERE provider IS NULL",
+    "UPDATE invoices SET provider = 'cashfree' WHERE provider IS NULL",
     # Every one of these tables is read by user_id on a page the learner opens
     # - the dashboard, the history list, the mistake summary, the review queue
     # - and none of them indexed it. Postgres was scanning the whole table and
@@ -7055,59 +7224,19 @@ async def billing_my_subscription(user: User = Depends(get_current_user),
     }
 
 
-@app.post("/api/billing/subscribe")
-async def billing_subscribe(body: SubscribeIn,
-                            user: User = Depends(get_current_user),
-                            db: AsyncSession = Depends(get_db)):
-    """Open a Cashfree mandate and hand back the link that authorises it.
+async def _cashfree_open_order(sub_id: str, charged: float,
+                               user: User) -> dict:
+    """One Cashfree order. Returns what the browser needs to pay it.
 
-    Nothing is granted here. The learner authorises at Cashfree and the signed
-    webhook is what turns premium on - a reply to this call cannot be trusted,
-    because the browser it goes to is the one thing an attacker controls.
+    Cashfree activated the Payment Gateway for this account on 2026-09-04 and
+    rejected Subscriptions in the same message ("Products rejected:
+    Subscriptions"), so no recurring mandate can be opened. Payment Links
+    answered `feature_not_enabled` too. Orders is what this account actually
+    has, and it was verified against the live API before this was written.
     """
-    if not billing_configured():
-        raise HTTPException(
-            status_code=503,
-            detail="Les paiements ne sont pas encore configurés.")
-    plan = BILLING_PLANS.get(body.plan_id.strip().lower())
-    if not plan:
-        raise HTTPException(status_code=400,
-                            detail=f"Formule inconnue : {body.plan_id}")
-
-    # Cashfree rejects a mandate with no phone. A placeholder would be worse
-    # than a clear error, so ask for the number instead.
-    if not user.phone:
-        raise HTTPException(
-            status_code=400,
-            detail="Ajoutez un numéro de téléphone à votre compte avant de payer.")
-
-    # Decided here, from the database, and never from the request: a discount
-    # the browser can ask for is a discount anyone can take twice.
-    first_time = not await has_paid_before(db, user.user_id)
-    amount = plan_price(plan, first_time)
-    # The customer pays the plan price plus the gateway's cut. Computed here
-    # from the server's own catalogue - the request carries a plan id and
-    # nothing else, so there is no total for the browser to tamper with.
-    bill = checkout_breakdown(amount)
-    charged = bill["total"]
-
-    sub_id = new_id("sub")
-    # One order, one payment, one fixed period.
-    #
-    # Cashfree activated the Payment Gateway for this account on 2026-09-04
-    # and rejected Subscriptions in the same message ("Products rejected:
-    # Subscriptions"), so no recurring mandate can be opened. Payment Links
-    # answered `feature_not_enabled` too. Orders is what this account actually
-    # has, and it was verified against the live API before this was written.
-    #
-    # So the learner buys a week, a month or a quarter, it expires, and they
-    # buy again. Nothing downstream moves: the webhook still grants from the
-    # PLAN and never from the amount, so access is the length that was bought
-    # rather than a length inferred from what was charged.
-    #
-    # `order_id` is our own id, and Cashfree echoes it back on the webhook,
-    # which is how the payment finds this row.
     payload = {
+        # Our own id, echoed back on the webhook, which is how the payment
+        # finds its row.
         "order_id": sub_id,
         "order_amount": charged,
         "order_currency": BILLING_CURRENCY,
@@ -7125,41 +7254,160 @@ async def billing_subscribe(body: SubscribeIn,
             "notify_url": f"{ALLOWED_ORIGINS[0]}/api/billing/webhook",
         },
     }
+    data = await cf_request("POST", "/orders", payload)
+    # Logged whole: the field names move between Cashfree API versions, and
+    # without the raw reply a missing session is undiagnosable.
+    log.info("Cashfree order %s created: %s", sub_id, _scrub_secrets(data))
+    return {
+        "gateway_order_id": str(_dig(data, "cf_order_id") or ""),
+        # An order has no URL to redirect to: the browser opens Cashfree's
+        # checkout with this session id.
+        "session_id": _dig(data, "payment_session_id"),
+        "checkout": None,
+    }
 
+
+async def _razorpay_open_order(sub_id: str, plan_key: str, charged: float,
+                               user: User) -> dict:
+    """One Razorpay order, and the parameters that open its checkout.
+
+    `receipt` carries our own id so the order can be found from Razorpay's
+    dashboard, and `notes` carries it again because the payment entity on a
+    webhook does not repeat the receipt - notes is the one field of ours that
+    rides along with every event about this order.
+    """
+    payload = {
+        "amount": to_minor_units(charged, BILLING_CURRENCY),
+        "currency": BILLING_CURRENCY,
+        # Capped at 40 characters by Razorpay; new_id() produces 16.
+        "receipt": sub_id[:40],
+        # Captured automatically. The alternative is an authorised-but-not-
+        # captured payment that silently expires after five days, which looks
+        # to the customer exactly like a successful purchase.
+        "payment_capture": 1,
+        "notes": {
+            "subscription_id": sub_id,
+            "user_id": user.user_id,
+            "plan_id": plan_key,
+        },
+    }
+    data = await rzp_request("POST", "/orders", payload)
+    log.info("Razorpay order %s created: %s", sub_id, _scrub_secrets(data))
+    order_id = str(data.get("id") or "")
+    if not order_id:
+        raise RuntimeError(f"Razorpay returned an order with no id: {data}")
+    return {
+        "gateway_order_id": order_id,
+        "session_id": None,
+        # Everything the browser hands to Razorpay's checkout script. The key
+        # id is publishable by design - it names the merchant, it does not
+        # authorise anything, and the secret never leaves this process.
+        "checkout": {
+            "key_id": RAZORPAY_KEY_ID,
+            "order_id": order_id,
+            "amount": payload["amount"],
+            "currency": BILLING_CURRENCY,
+            "name": INVOICE_BUSINESS_NAME,
+            "description": (BILLING_PLANS.get(plan_key) or {}).get(
+                "name", plan_key),
+            "prefill": {
+                "name": user.name or "",
+                "email": user.email or "",
+                # Razorpay accepts an order without one, unlike Cashfree, so an
+                # account with no phone is prefilled with nothing rather than
+                # being refused a checkout.
+                "contact": user.phone or "",
+            },
+            "notes": payload["notes"],
+        },
+    }
+
+
+@app.post("/api/billing/subscribe")
+async def billing_subscribe(body: SubscribeIn,
+                            user: User = Depends(get_current_user),
+                            db: AsyncSession = Depends(get_db)):
+    """Open an order at the gateway and hand back what pays for it.
+
+    Nothing is granted here. The learner pays at the gateway and the signed
+    webhook is what turns premium on - a reply to this call cannot be trusted,
+    because the browser it goes to is the one thing an attacker controls.
+    """
+    if not billing_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Les paiements ne sont pas encore configurés.")
+    plan_key = body.plan_id.strip().lower()
+    plan = BILLING_PLANS.get(plan_key)
+    if not plan:
+        raise HTTPException(status_code=400,
+                            detail=f"Formule inconnue : {body.plan_id}")
+
+    # Cashfree rejects an order with no phone. A placeholder would be worse
+    # than a clear error, so ask for the number instead. Razorpay does not
+    # require one, so it is not demanded there - making somebody type a phone
+    # number to buy something that never needed it costs sales.
+    if PAYMENT_PROVIDER != "razorpay" and not user.phone:
+        raise HTTPException(
+            status_code=400,
+            detail="Ajoutez un numéro de téléphone à votre compte avant de payer.")
+
+    # Decided here, from the database, and never from the request: a discount
+    # the browser can ask for is a discount anyone can take twice.
+    first_time = not await has_paid_before(db, user.user_id)
+    amount = plan_price(plan, first_time)
+    # The customer pays the plan price plus the gateway's cut. Computed here
+    # from the server's own catalogue - the request carries a plan id and
+    # nothing else, so there is no total for the browser to tamper with.
+    bill = checkout_breakdown(amount)
+    charged = bill["total"]
+
+    sub_id = new_id("sub")
+    # One order, one payment, one fixed period. The learner buys a week, a
+    # month or a quarter, it expires, and they buy again. Nothing downstream
+    # moves between providers: the webhook still grants from the PLAN and never
+    # from the amount, so access is the length that was bought rather than a
+    # length inferred from what was charged.
     try:
-        data = await cf_request("POST", "/orders", payload)
+        if PAYMENT_PROVIDER == "razorpay":
+            opened = await _razorpay_open_order(sub_id, plan_key, charged, user)
+        else:
+            opened = await _cashfree_open_order(sub_id, charged, user)
     except Exception:  # noqa: BLE001
-        log.exception("Cashfree order create failed for %s", user.user_id)
+        log.exception("%s order create failed for %s",
+                      PAYMENT_PROVIDER, user.user_id)
         raise HTTPException(
             status_code=502,
             detail="Le prestataire de paiement n'a pas répondu. Réessayez.")
 
-    # Logged whole: the field names move between Cashfree API versions, and
-    # without the raw reply a missing session is undiagnosable.
-    log.info("Cashfree order %s created: %s", sub_id, _scrub_secrets(data))
     now = now_utc()
     db.add(Subscription(
         subscription_id=sub_id, user_id=user.user_id,
-        plan_id=body.plan_id.strip().lower(), status="pending",
+        plan_id=plan_key, status="pending",
         currency=BILLING_CURRENCY, amount=charged,
         base_amount=bill["base_amount"], fee_percent=bill["fee_percent"],
         fee_amount=bill["fee_amount"], tax_amount=bill["tax_amount"],
-        cf_subscription_id=str(_dig(data, "cf_order_id") or ""),
+        provider=PAYMENT_PROVIDER,
+        # The gateway's own id for this order. Named cf_* from when Cashfree
+        # was the only gateway; it holds whichever provider's id opened the
+        # row, and the webhook matches on it when the gateway reports its own
+        # id rather than ours.
+        cf_subscription_id=opened["gateway_order_id"],
         created_at=now, updated_at=now))
     await db.commit()
     return {
         "subscription_id": sub_id,
+        "provider": PAYMENT_PROVIDER,
         # `amount` stays the charged total, which is what the old field always
         # meant; the parts are beside it so a confirmation screen can itemise.
         "amount": charged,
         "breakdown": bill,
         "first_time": first_time,
-        # An order has no URL to redirect to: the browser opens Cashfree's
-        # checkout with this session id. auth_link stays in the reply and stays
-        # null, so an older cached bundle redirects nowhere rather than
-        # somewhere wrong.
+        # Kept, and kept null, so an older cached bundle redirects nowhere
+        # rather than somewhere wrong.
         "auth_link": None,
-        "session_id": _dig(data, "payment_session_id"),
+        "session_id": opened["session_id"],
+        "checkout": opened["checkout"],
         "order_id": sub_id,
     }
 
@@ -7198,13 +7446,96 @@ async def billing_cancel(user: User = Depends(get_current_user),
 # halves instead of an exact list.
 def _is_payment_success(event_type: str) -> bool:
     e = event_type.upper()
-    return "PAYMENT" in e and "SUCCESS" in e
+    if "PAYMENT" in e and "SUCCESS" in e:          # Cashfree
+        return True
+    return e in _RZP_PAID_EVENTS_UPPER              # Razorpay
 
 
-def verify_paid_amount(event: dict, row: Subscription) -> Optional[float]:
-    """Compare what Cashfree says it took against what we asked it to take.
+# Razorpay reports one successful payment under two events when both are
+# subscribed in the dashboard: `payment.captured` and `order.paid`. They are
+# the same money. Both are accepted so that whichever is enabled works, and
+# _parse_razorpay_event() gives both the same idempotency key so enabling both
+# cannot grant two cycles for one charge.
+#
+# `payment.authorized` is deliberately NOT here. An authorised payment is a
+# hold, not a collection; orders are created with payment_capture=1 so the
+# capture follows immediately, and granting on the hold would hand out premium
+# for money that can still fail to arrive.
+_RZP_PAID_EVENTS = {"payment.captured", "order.paid"}
+_RZP_PAID_EVENTS_UPPER = {e.upper() for e in _RZP_PAID_EVENTS}
 
-    Logged, not enforced. Cashfree is the authority on what it actually
+
+def _parse_razorpay_event(event: dict, headers) -> dict:
+    """Razorpay's webhook body, flattened to the fields this handler needs.
+
+    Not done with _dig(): Razorpay nests two entities that both carry an `id`
+    and an `amount` — on a refund event, payload.refund.entity and
+    payload.payment.entity sit side by side — and a search-by-name would
+    return whichever came first in dict order. Which one it found would decide
+    whether a refund was recorded against the refund or against the original
+    payment, so the path is spelled out instead.
+    """
+    payload = event.get("payload") or {}
+
+    def entity(name):
+        node = payload.get(name) or {}
+        ent = node.get("entity") if isinstance(node, dict) else None
+        return ent if isinstance(ent, dict) else {}
+
+    pay, order, refund = entity("payment"), entity("order"), entity("refund")
+    notes = pay.get("notes") or order.get("notes") or {}
+    if not isinstance(notes, dict):
+        notes = {}
+
+    event_type = str(event.get("event") or "UNKNOWN")
+    payment_id = str(pay.get("id") or refund.get("payment_id") or "")
+
+    # A refund event carries the original payment alongside the refund, so the
+    # refund's own id has to be what names it. Keying on the payment id would
+    # give two partial refunds of one payment the same idempotency key, and the
+    # second would be dropped as a duplicate — which is access the customer was
+    # refunded for and kept.
+    #
+    # The event id is Razorpay's own, unique per delivery and stable across the
+    # retries of one event: the right fallback when neither is present.
+    marker = (str(refund.get("id") or "") or payment_id
+              or str(headers.get("x-razorpay-event-id") or ""))
+
+    # Likewise the amount. Both entities carry one and they differ on a partial
+    # refund, so the refund's is the amount that actually moved.
+    amount = refund.get("amount") if refund else pay.get("amount")
+    if amount is None:
+        amount = pay.get("amount") if refund else order.get("amount")
+
+    return {
+        "event_type": event_type,
+        # Our own subscription id, which we put in notes at order creation.
+        # `receipt` is the same string and is checked second, for an order
+        # entity that arrives without notes.
+        "our_id": str(notes.get("subscription_id") or order.get("receipt") or ""),
+        # Razorpay's id for the order, which is what sits in cf_subscription_id.
+        "gateway_order_id": str(pay.get("order_id") or order.get("id") or ""),
+        "status": str(pay.get("status") or refund.get("status") or ""),
+        "marker": marker,
+        # Razorpay states money in the smallest unit; the rest of this file
+        # works in whole currency, so it is converted once, here.
+        "amount": (float(from_minor_units(
+            amount, pay.get("currency") or order.get("currency")))
+            if amount is not None else None),
+        # One key per PAYMENT for the paid events — built from payment_id and
+        # not from marker — so `payment.captured` and `order.paid` describing
+        # the same charge collapse into one. Per event for everything else.
+        "event_key": (f"rzp:paid:{payment_id}"
+                      if event_type in _RZP_PAID_EVENTS and payment_id
+                      else f"rzp:{event_type}:{marker}"),
+    }
+
+
+def verify_paid_amount(event: dict, row: Subscription,
+                       amount: Optional[float] = None) -> Optional[float]:
+    """Compare what the gateway says it took against what we asked it to take.
+
+    Logged, not enforced. The gateway is the authority on what it actually
     collected, and the amounts that legitimately differ from the plan total
     are ordinary: the refunded authorisation charge that opens a mandate, a
     partial refund, a currency conversion landing a cent out. Refusing premium
@@ -7214,19 +7545,23 @@ def verify_paid_amount(event: dict, row: Subscription) -> Optional[float]:
 
     Returns the amount seen, or None when the event does not carry one.
     """
-    raw = _dig(event, "payment_amount", "order_amount", "amount",
-               "subscription_payment_amount")
+    # Razorpay's parser has already converted out of paise; digging the raw
+    # body here instead would compare 8239 against 82.39 and log a mismatch on
+    # every single payment.
+    raw = amount if amount is not None else _dig(
+        event, "payment_amount", "order_amount", "amount",
+        "subscription_payment_amount")
     if raw is None:
         return None
     try:
         paid = float(money(raw))
     except Exception:  # noqa: BLE001
-        log.warning("Cashfree reported an unreadable amount %r for %s",
+        log.warning("The gateway reported an unreadable amount %r for %s",
                     raw, row.subscription_id)
         return None
     expected = float(money(row.amount or 0))
     if abs(paid - expected) > 0.01:
-        log.error("AMOUNT MISMATCH on %s: Cashfree took %.2f, the plan total "
+        log.error("AMOUNT MISMATCH on %s: the gateway took %.2f, the plan total "
                   "is %.2f (base %.2f + fee %.2f). Premium still granted from "
                   "the plan, not the amount - check this payment.",
                   row.subscription_id, paid, expected,
@@ -7491,8 +7826,12 @@ def render_invoice_pdf(inv: Invoice) -> bytes:
     if INVOICE_TAX_NOTE:
         c.drawString(left, y, INVOICE_TAX_NOTE)
         y -= 4.5 * mm
-    c.drawString(left, y, "Paid by card via Cashfree. This is a receipt for a "
-                          "payment already taken.")
+    # Named from the invoice rather than hardcoded. A receipt that says
+    # "Cashfree" for a payment Razorpay took is wrong on the one document a
+    # customer forwards to their bank when they dispute a charge.
+    c.drawString(left, y,
+                 f"Paid by card via {gateway_display_name(inv.provider)}. "
+                 f"This is a receipt for a payment already taken.")
 
     c.showPage()
     c.save()
@@ -7544,6 +7883,8 @@ def public_invoice(inv: Invoice) -> dict:
         "tax_label": inv.tax_label,
         "total": inv.total,
         "payment_reference": inv.payment_reference,
+        "provider": inv.provider,
+        "provider_name": gateway_display_name(inv.provider),
         "period_end": inv.period_end.isoformat() if inv.period_end else None,
         "issued_at": inv.issued_at.isoformat() if inv.issued_at else None,
         "download_url": f"/api/billing/invoices/{inv.invoice_id}/pdf",
@@ -7604,6 +7945,9 @@ async def issue_invoice(db: AsyncSession, user: User, row: Subscription,
         user_id=user.user_id, subscription_id=row.subscription_id,
         plan_id=row.plan_id, plan_name=plan.get("name", row.plan_id),
         currency=row.currency or BILLING_CURRENCY,
+        # From the row, not from today's setting: a receipt for a charge taken
+        # through the old gateway must keep naming the old gateway.
+        provider=row.provider or PAYMENT_PROVIDER,
         base_amount=base, fee_percent=row.fee_percent or 0.0, fee_amount=fee,
         tax_percent=TAX_PERCENT, tax_amount=tax, tax_label=TAX_LABEL,
         total=total, payment_reference=payment_reference,
@@ -7664,18 +8008,33 @@ async def download_invoice(invoice_id: str,
 
 @app.post("/api/billing/webhook")
 async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
-    """Cashfree's notification. The only thing that grants premium.
+    """The gateway's notification. The only thing that grants premium.
 
-    Returns 2xx for anything it has already handled or does not recognise:
-    Cashfree retries until it gets one, and retrying an event we understood
+    Serves both providers at one URL, chosen by which signature header is
+    present rather than by PAYMENT_PROVIDER. That matters on the day of a
+    switch: a Cashfree payment taken an hour before the flip is still retrying,
+    and a refund on a Cashfree charge can arrive months later. Refusing those
+    because the setting has moved on would strand real money.
+
+    Nothing is weakened by accepting either. Each body is verified against that
+    provider's own secret, and neither signature can be produced without it.
+
+    Returns 2xx for anything it has already handled or does not recognise: both
+    gateways retry until they get one, and retrying an event we understood
     perfectly well the first time is how one payment becomes two months.
     """
     raw = await request.body()
-    if not verify_cashfree_signature(
-            raw,
-            request.headers.get("x-webhook-signature", ""),
-            request.headers.get("x-webhook-timestamp", "")):
-        log.warning("Rejected a Cashfree webhook with an invalid signature")
+    rzp_sig = request.headers.get("x-razorpay-signature", "")
+    cf_sig = request.headers.get("x-webhook-signature", "")
+    is_razorpay = bool(rzp_sig)
+    if is_razorpay:
+        ok = verify_razorpay_signature(raw, rzp_sig)
+    else:
+        ok = verify_cashfree_signature(
+            raw, cf_sig, request.headers.get("x-webhook-timestamp", ""))
+    if not ok:
+        log.warning("Rejected a %s webhook with an invalid signature",
+                    "Razorpay" if is_razorpay else "Cashfree")
         raise HTTPException(status_code=401, detail="Invalid signature")
 
     try:
@@ -7683,18 +8042,30 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     except ValueError:
         raise HTTPException(status_code=400, detail="Malformed body")
 
-    event_type = str(event.get("type") or _dig(event, "type") or "UNKNOWN")
-    # Payment Gateway events name the payment differently from the
-    # subscription events this once handled: `link_id` is the id we chose, and
-    # `order_id` is the order Cashfree derived from the link. Both are tried,
-    # `link_id` first because it is ours and matches a row exactly.
-    sub_id = _dig(event, "order_id", "link_id", "subscription_id")
-    status = str(_dig(event, "subscription_status", "payment_status") or "")
-    # No single id is present on every event, so the key is built from what is.
-    marker = (_dig(event, "cf_payment_id", "payment_id", "event_id",
-                   "cf_subscription_id") or request.headers.get(
-                       "x-webhook-timestamp", ""))
-    event_key = f"{event_type}:{sub_id}:{marker}"[:200]
+    paid_amount = None
+    if is_razorpay:
+        parsed = _parse_razorpay_event(event, request.headers)
+        event_type = parsed["event_type"]
+        status = parsed["status"]
+        marker = parsed["marker"]
+        paid_amount = parsed["amount"]
+        event_key = parsed["event_key"][:200]
+        # Ours first because it matches a row exactly; Razorpay's order id is
+        # the fallback, and is what cf_subscription_id holds.
+        sub_id = parsed["our_id"] or parsed["gateway_order_id"]
+    else:
+        event_type = str(event.get("type") or _dig(event, "type") or "UNKNOWN")
+        # Payment Gateway events name the payment differently from the
+        # subscription events this once handled: `link_id` is the id we chose,
+        # and `order_id` is the order Cashfree derived from the link. Both are
+        # tried, `link_id` first because it is ours and matches a row exactly.
+        sub_id = _dig(event, "order_id", "link_id", "subscription_id")
+        status = str(_dig(event, "subscription_status", "payment_status") or "")
+        # No single id is on every event, so the key is built from what is.
+        marker = (_dig(event, "cf_payment_id", "payment_id", "event_id",
+                       "cf_subscription_id") or request.headers.get(
+                           "x-webhook-timestamp", ""))
+        event_key = f"{event_type}:{sub_id}:{marker}"[:200]
 
     db.add(BillingEvent(event_key=event_key, event_type=event_type,
                         subscription_id=str(sub_id) if sub_id else None,
@@ -7704,28 +8075,28 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     except Exception:  # noqa: BLE001
         # Unique violation: this is a retry of an event already applied.
         await db.rollback()
-        log.info("Ignored duplicate Cashfree webhook %s", event_key)
+        log.info("Ignored duplicate webhook %s", event_key)
         return {"ok": True, "duplicate": True}
 
     if not sub_id:
-        log.info("Cashfree webhook %s carried no subscription_id", event_type)
+        log.info("Webhook %s carried no subscription id", event_type)
         return {"ok": True, "ignored": "no subscription_id"}
 
     res = await db.execute(select(Subscription)
                            .where(Subscription.subscription_id == str(sub_id)))
     row = res.scalar_one_or_none()
     if not row:
-        # Cashfree derives its own id for the order behind a payment link, and
-        # it is not always the link_id we chose. The id it gave us at creation
-        # is on the row, so try that before giving up -- otherwise a paid
-        # learner gets nothing and the only trace is this log line.
+        # Both gateways derive an id of their own for the order and do not
+        # always report ours back. The id each gave us at creation is on the
+        # row, so try that before giving up -- otherwise a paid learner gets
+        # nothing and the only trace is this log line.
         res = await db.execute(
             select(Subscription)
             .where(Subscription.cf_subscription_id == str(sub_id)))
         row = res.scalar_one_or_none()
     if not row:
-        log.warning("Cashfree webhook %s named payment %s, which matches no "
-                    "row by subscription_id or cf id", event_type, sub_id)
+        log.warning("Webhook %s named payment %s, which matches no row by "
+                    "subscription_id or gateway id", event_type, sub_id)
         return {"ok": True, "ignored": "unknown subscription"}
 
     res = await db.execute(select(User).where(User.user_id == row.user_id))
@@ -7740,11 +8111,22 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     was_active = row.status == "active"
 
     if _is_payment_success(event_type):
+        # One order is one payment for one period, so a row that has already
+        # been granted has nothing left to grant. Without this, a gateway
+        # reporting the same charge under two event names - Razorpay sends both
+        # `payment.captured` and `order.paid` when both are subscribed - would
+        # hand out two cycles for one payment. The event key collapses those
+        # two into one already; this is the backstop that does not depend on
+        # both events carrying the same payment id.
+        if row.status == "active" and row.current_period_end is not None:
+            log.info("Ignored a repeat success event (%s) on %s, which was "
+                     "already granted", event_type, row.subscription_id)
+            return {"ok": True, "duplicate": True}
         # The charge landed: add one cycle. The period comes from our own
         # catalogue and never from the webhook - and specifically from the
         # PLAN, not from the amount, so the processing fee riding along with
         # the payment can never be mistaken for a bigger purchase.
-        verify_paid_amount(event, row)
+        verify_paid_amount(event, row, amount=paid_amount)
         await grant_premium(db, user, plan_period(plan), bonus=plan["bonus"])
         row.status = "active"
         row.current_period_end = user.premium_until
