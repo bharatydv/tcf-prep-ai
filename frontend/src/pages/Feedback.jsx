@@ -3,8 +3,12 @@ import { Link, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { api, errMsg, CATEGORY_META } from '../lib/api';
 import { BackLink, ErrorHighlightedText } from '../components/shared';
+import { RecordingPlayer } from '../components/RecordingPlayer';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
+
+/* Same two sources the dashboard counts as speaking. */
+const SPEAKING_SOURCES = new Set(['speaking', 'conversation']);
 
 export default function Feedback() {
   const { submissionId } = useParams();
@@ -24,6 +28,9 @@ export default function Feedback() {
   const byCat = {};
   sub.errors.forEach((e) => { (byCat[e.category] = byCat[e.category] || []).push(e); });
   const caps = sub.caps_applied || [];
+  // Spoken work reads its "text" back as a transcript, and may have the
+  // recording behind it. Written work never does.
+  const spoken = SPEAKING_SOURCES.has(sub.source || '');
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-10">
@@ -66,7 +73,21 @@ export default function Feedback() {
       )}
 
       <section className="card mt-6 p-8">
-        <h2 className="mb-4 font-heading text-lg font-semibold">{t('fb.annotated')}</h2>
+        <h2 className="mb-4 font-heading text-lg font-semibold">
+          {spoken ? t('fb.annotatedSpoken') : t('fb.annotated')}
+        </h2>
+        {/* The recording above the transcript it produced: what was said, then
+            what was heard, then what was wrong with it. Reading a correction
+            of a sentence you cannot hear yourself say is the part of speaking
+            feedback that does the least work. */}
+        {spoken && sub.has_audio && (
+          <RecordingPlayer submissionId={sub.submission_id} className="mb-5" />
+        )}
+        {spoken && !sub.has_audio && (
+          <p className="mb-5 text-xs text-gray-400" data-testid="recording-absent">
+            {t('fb.audioMissing')}
+          </p>
+        )}
         <ErrorHighlightedText text={sub.original_text} errors={sub.errors} />
         <p className="mt-4 text-xs text-gray-400">{t('fb.hoverHint')}</p>
       </section>

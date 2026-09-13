@@ -33,6 +33,13 @@ const NOT_PRERENDERABLE = [
   'dashboard', 'review', 'check-writing', 'admin', 'invoices',
   'forgot-password', 'reset-password', 'verify-email',
   path.join('practice', 'simulator'),
+  /* These two are NOT behind ProtectedRoute — the components redirect to
+     /login themselves when signed out, which react-snap follows. The result
+     was four sitemap URLs (two locales each) serving a login form: duplicate
+     titles, canonical pointing at /login, and hreflang aimed at a page that is
+     not in the sitemap. Every hreflang error on the site came from these. */
+  path.join('reading', 'practice'),
+  path.join('listening', 'practice'),
   path.join('admin', 'blog'),
   path.join('billing', 'return'),
   path.join('account', 'verify'),

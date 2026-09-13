@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Lock, CaretRight, BookOpen } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { useSeo } from '../lib/seo';
 import { BackLink } from '../components/shared';
+import { ThemeCard } from '../components/ThemeCard';
 
 const TACHE_LABEL = { 1: 'themes.tache1', 2: 'themes.tache2', 3: 'themes.tache3' };
 
@@ -24,6 +24,10 @@ export default function SelectTheme() {
 
   const [themes, setThemes] = useState([]);
   const [loading, setLoading] = useState(true);
+  /* Its own request: /api/themes is public and cached for everyone,
+     and this answer is one person's. Failing quietly is right — a
+     picker that cannot say what you already did is still a picker. */
+  const [attempts, setAttempts] = useState({});
 
   useEffect(() => {
     /* skill=writing matters: speaking themes also carry tâche 2 and 3
@@ -33,6 +37,13 @@ export default function SelectTheme() {
       .catch(() => setThemes([]))
       .finally(() => setLoading(false));
   }, [tache]);
+
+  useEffect(() => {
+    if (!user) return;
+    api.get('/api/themes/attempts', { params: { skill: 'writing' } })
+      .then(({ data }) => setAttempts(data.attempts || {}))
+      .catch(() => setAttempts({}));
+  }, [user]);
 
   const isPremiumUser = user?.subscription_status === 'premium';
 
@@ -71,49 +82,11 @@ export default function SelectTheme() {
           <p className="text-center text-sm text-gray-500">{t('themes.none')}</p>
         ) : (
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {themes.map((theme) => {
-              const locked = theme.is_premium && !isPremiumUser;
-              const count = theme.question_count ?? 0;
-              return (
-                <button
-                  key={theme.theme_id}
-                  onClick={() => openTheme(theme)}
-                  data-testid={`theme-${theme.theme_id}`}
-                  className={`flex flex-col rounded-3xl border bg-white p-6 text-left shadow-soft transition hover:-translate-y-1 hover:shadow-xl hover:shadow-violet-200/50 ${
-                    locked ? 'border-amber-100' : 'border-violet-100'
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <span className={`flex h-11 w-11 items-center justify-center rounded-2xl text-xl ${
-                      locked ? 'bg-amber-50' : 'bg-violet-100'
-                    }`}>
-                      {locked ? <Lock size={20} weight="fill" className="text-amber-500" /> : (theme.emoji || <BookOpen size={20} weight="duotone" className="text-primary" />)}
-                    </span>
-                    {theme.is_premium ? (
-                      <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">{t('themes.pro')}</span>
-                    ) : (
-                      <CaretRight size={18} className="text-gray-300" />
-                    )}
-                  </div>
-
-                  <h3 className="mt-4 font-heading text-base font-bold text-gray-900">{theme.name}</h3>
-                  {theme.description && (
-                    <p className="mt-1 flex-1 text-xs leading-relaxed text-gray-500">{theme.description}</p>
-                  )}
-
-                  <div className="mt-4">
-                    <div className="flex items-center justify-between text-xs text-gray-500">
-                      <span>{t('themes.attempted')}</span>
-                      <span className="font-semibold text-gray-700">{locked ? '—' : `0/${count}`}</span>
-                    </div>
-                    <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-violet-100">
-                      <div className="h-full rounded-full bg-gradient-to-r from-primary to-fuchsia-500" style={{ width: '0%' }} />
-                    </div>
-                    <p className="mt-1 text-right text-[10px] text-gray-400">{locked ? t('themes.upgradeToUnlock') : t('themes.completed', { n: 0 })}</p>
-                  </div>
-                </button>
-              );
-            })}
+            {themes.map((theme) => (
+              <ThemeCard key={theme.theme_id} theme={theme}
+                ns="themes" locked={theme.is_premium && !isPremiumUser}
+                attempt={attempts[theme.theme_id]} onOpen={openTheme} />
+            ))}
           </div>
         )}
       </section>

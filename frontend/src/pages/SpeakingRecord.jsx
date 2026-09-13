@@ -235,6 +235,9 @@ export default function SpeakingRecord() {
         mimeType: audioMeta?.mimeType || audioBlob.type,
       });
       if (tacheNum) form.append('task_type', String(tacheNum));
+      // Same reason as the writing flow: the theme is not recoverable
+      // from anything else on the submission.
+      if (themeId) form.append('theme_id', themeId);
       const { data } = await api.post('/api/speaking/analyze', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });

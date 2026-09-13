@@ -16,9 +16,22 @@ export default function RecentTopics() {
   const [task, setTask] = useState(0);
   const [month, setMonth] = useState('');
 
+  /* `|| []`, not `data.topics`.
+   *
+   * The catch below only covers a REJECTED request. A resolved one carrying no
+   * `topics` array set the state to undefined, and the derived months list
+   * calls .map on it — so the whole page threw "Cannot read property 'map' of
+   * undefined" and rendered nothing at all.
+   *
+   * That is not hypothetical: it is why /recent-topics has been serving an
+   * empty shell. react-snap crashed on exactly this during the prerender pass
+   * and wrote no markup, so the live page had no h1, no copy and zero words
+   * while sitting in the sitemap at priority 0.9. A page with no topics should
+   * show its heading and an empty state, which is what this restores. */
   useEffect(() => {
     api.get('/api/recent-topics', { params: task ? { task_type: task } : {} })
-      .then(({ data }) => setTopics(data.topics)).catch(() => {});
+      .then(({ data }) => setTopics(Array.isArray(data?.topics) ? data.topics : []))
+      .catch(() => setTopics([]));
   }, [task]);
 
   const months = [...new Set(topics.map((topic) => topic.month_label).filter(Boolean))];
@@ -76,14 +89,26 @@ export function RecentTopicDetail() {
   const navigate = useNavigate();
   const [topic, setTopic] = useState(null);
   const [error, setError] = useState('');
-  /* useSeo, not <Seo>, because every branch below returns early — signed out,
-     errored, still loading — and an element form would only have rendered on
-     the success path. This page had no metadata at all: no title of its own and
-     no canonical, so it inherited whatever the previously visited route left in
-     the head. It is also noindex: the model answer is the product, and the page
-     needs an account to show anything, so it has no business in an index. */
-  useSeo({ titleKey: 'seo.topics.title', descKey: 'seo.topics.desc',
-           path: `/recent-topics/${topicId}`, noindex: true });
+  /* useSeo, not <Seo>, because the branches below return early — errored,
+     still loading — and an element form would only have rendered on the
+     success path.
+
+     Indexable now, and titled from the topic itself. It was noindex because
+     the page needed an account to show anything; the consigne is public, so
+     the reason is gone. This is the one thing on the site nobody else has —
+     candidates search for a consigne by its wording — and a unique title and
+     description per topic is what lets that search find it.
+
+     `localized={false}`: a consigne is exam material, published in French and
+     never translated. Both locales serve the same text, so the French URL
+     canonicalises to the English one rather than claiming to be a
+     translation. */
+  useSeo({
+    title: topic?.title || t('seo.topics.title'),
+    description: (topic?.topic_text || '').slice(0, 155) || t('seo.topics.desc'),
+    path: `/recent-topics/${topicId}`,
+    localized: false,
+  });
   const [writing, setWriting] = useState(false);
   const [text, setText] = useState('');
   const [stage, setStage] = useState(null);
@@ -92,21 +117,16 @@ export function RecentTopicDetail() {
   const [lastSubmission, setLastSubmission] = useState(null);
   const taRef = useRef(null);
 
+  /* No `user` guard: the endpoint is public and answers a signed-out visitor
+     with the consigne and no model answer. Guarding here was what made every
+     topic page invisible — a crawler carries no cookie, so it saw only the
+     "please log in" panel this replaces. */
   useEffect(() => {
-    if (!user) return;
     api.get(`/api/recent-topics/${topicId}`)
       .then(({ data }) => setTopic(data.topic))
       .catch((e) => setError(errMsg(e)));
-  }, [topicId, user]);
+  }, [topicId]);
 
-  if (!user) {
-    return (
-      <main className="px-4 py-20 text-center">
-        <p className="text-gray-600">{t('topics.loginPrompt')}</p>
-        <Link to="/login" className="btn-primary mt-4 inline-flex">{t('auth.loginButton')}</Link>
-      </main>
-    );
-  }
   if (error) return <main className="px-4 py-20 text-center text-gray-600">{error}</main>;
   if (!topic) return <main className="flex min-h-[60vh] items-center justify-center"><div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" /></main>;
 
@@ -191,6 +211,24 @@ export function RecentTopicDetail() {
             </div>
           </div>
         </section>
+      ) : !user ? (
+        /* Signed out. The question is above and free; this says plainly what an
+           account adds rather than hiding the page behind a login wall. */
+        <section className="card mt-6 border-violet-200 bg-violet-50/50 p-7 text-center"
+          data-testid="topic-signed-out-cta">
+          <h2 className="font-heading text-lg font-bold text-gray-900">
+            {t('topics.publicCtaTitle')}
+          </h2>
+          <p className="mx-auto mt-2 max-w-lg text-sm leading-relaxed text-gray-600">
+            {t('topics.publicCtaBody')}
+          </p>
+          <div className="mt-5 flex flex-wrap justify-center gap-3">
+            <Link to="/register" className="btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600">
+              {t('topics.publicCtaButton')}
+            </Link>
+            <Link to="/login" className="btn-outline">{t('auth.loginButton')}</Link>
+          </div>
+        </section>
       ) : (
         <div className="mt-6 flex flex-wrap gap-3">
           <button className="btn-primary" onClick={() => setWriting(true)} data-testid="write-answer-button">{t('topics.writeAnswer')}</button>
@@ -216,7 +254,7 @@ export function RecentTopicDetail() {
         </div>
       )}
 
-      {topic.model_answer_locked && !topic.model_answer && showModel ? (
+      {!user ? null : topic.model_answer_locked && !topic.model_answer && showModel ? (
         <section className="card mt-6 border-amber-200 bg-amber-50/60 p-8 text-center">
           <LockSimple size={28} className="mx-auto text-amber-500" />
           <h2 className="mt-2 font-heading font-semibold">{t('topics.lockedTitle')}</h2>

@@ -1,37 +1,24 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Cards, ListChecks, Lightning, Fire, ArrowLeft } from '@phosphor-icons/react';
+import {
+  Cards, ListChecks, Lightning, Textbox, MagnifyingGlass, Keyboard,
+  ArrowsLeftRight, Repeat, Fire, ArrowLeft,
+} from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, errMsg, CATEGORY_META } from '../lib/api';
 import { BackLink, useConfirm } from '../components/shared';
+import { ExerciseCard } from '../components/reviewExercises';
+import { MODES, MODE_META, shuffle } from '../lib/review';
 import { useT } from '../i18n';
 import { useSeo } from '../lib/seo';
 
-/* Fisher–Yates, not `sort(() => Math.random() - 0.5)`.
- *
- * A comparator that returns a random sign is not a shuffle: sort assumes a
- * consistent ordering, and given an inconsistent one it produces a
- * systematically skewed permutation. Measured on the three options an MCQ
- * actually builds, the correct answer landed first 43.7% of the time and
- * second only 18.8%, against 33.3% for each if it were uniform — so answering
- * "the first one" every time scored 44% without reading anything.
- *
- * This is the same problem reading_bank/_balance.py exists to solve for the
- * question bank, for the reason its docstring gives: a candidate who noticed
- * could score above their real level by guessing, which makes the measure
- * useless. The review MCQ is where mastery is decided and XP is awarded, so it
- * needs the same guarantee. Fisher–Yates is uniform by construction. */
-function shuffle(a) {
-  const out = [...a];
-  for (let i = out.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-  return out;
-}
-
 /* The category sprint is two minutes, as the mode chooser says. */
 const SPRINT_SECONDS = 120;
+
+const MODE_ICON = {
+  flashcards: Cards, mcq: ListChecks, cloze: Textbox, spot: MagnifyingGlass,
+  typeit: Keyboard, pair: ArrowsLeftRight, transfer: Repeat, sprint: Lightning,
+};
 
 export default function Review() {
   // A hook rather than an element, so no early return — loading, empty,
@@ -44,11 +31,11 @@ export default function Review() {
   const [confirm, confirmDialog] = useConfirm();
   const category = params.get('category');
   const [queue, setQueue] = useState(null);
-  const [mode, setMode] = useState(null); // flashcards | mcq | sprint
+  const [mode, setMode] = useState(null);
+  const [items, setItems] = useState([]);
+  const [starting, setStarting] = useState(null); // the mode being prepared
   const [idx, setIdx] = useState(0);
-  const [flipped, setFlipped] = useState(false);
   const [results, setResults] = useState([]);
-  const [picked, setPicked] = useState(null);
   const [summary, setSummary] = useState(null);
   const [sprintLeft, setSprintLeft] = useState(SPRINT_SECONDS);
 
@@ -58,15 +45,6 @@ export default function Review() {
       .catch((e) => toast.error(errMsg(e)));
   };
   useEffect(load, [category]);
-
-  const items = useMemo(() => shuffle(queue?.due || []), [queue]);
-  const currentItem = items[idx];
-  const options = useMemo(() => {
-    if (!currentItem) return [];
-    const opts = new Set([currentItem.correction, currentItem.error_text]);
-    if (currentItem.distractor) opts.add(currentItem.distractor);
-    return shuffle([...opts]);
-  }, [currentItem]);
 
   /* The timer callback captured `results` from the render that created the
      interval, so a sprint that ran out of time submitted the answers as they
@@ -106,7 +84,7 @@ export default function Review() {
   }, [mode, summary]);
 
   const finish = async (finalResults) => {
-    if (!finalResults.length) { setMode(null); return; }
+    if (!finalResults.length) { setMode(null); setItems([]); return; }
     try {
       const { data } = await api.post('/api/review/submit', { mode, results: finalResults });
       setSummary(data);
@@ -116,27 +94,48 @@ export default function Review() {
   };
   finishRef.current = finish;
 
-  /* MCQ and sprint send what the learner picked and let the server decide;
-     a flashcard has no comparable answer, so it sends a self-rating. The
-     client used to send `correct` directly, which made XP forgeable. */
-  const answer = ({ picked: pickedAnswer, selfRated }) => {
+  /* Every mode sends what the learner picked or typed and lets the server
+     decide; a flashcard has no comparable answer, so it sends a self-rating.
+     The client used to send `correct` directly, which made XP forgeable. */
+  const answer = ({ answer: given, selfRated, note }) => {
     const m = items[idx];
-    const entry = pickedAnswer !== undefined
-      ? { mistake_id: m.mistake_id, answer: pickedAnswer }
-      : { mistake_id: m.mistake_id, self_rated_correct: selfRated };
+    const entry = { mistake_id: m.mistake_id };
+    if (given === undefined || given === null) entry.self_rated_correct = !!selfRated;
+    else entry.answer = given;
+    if (note) entry.note = note;
     const next = [...results, entry];
     setResults(next);
-    setFlipped(false); setPicked(null);
     if (idx + 1 >= items.length) finish(next);
     else setIdx(idx + 1);
   };
 
-  const start = (m) => { setMode(m); setIdx(0); setResults([]); setSummary(null); setFlipped(false); setPicked(null); setSprintLeft(SPRINT_SECONDS); sprintEndsRef.current = null; sprintOverRef.current = false; };
+  /* Each mode asks for its own queue rather than filtering the hub's.
+     Whether a mistake can be drilled a given way is the server's judgement —
+     it is the side that knows which sentence the mistake was made in — and the
+     rule-transfer drills do not exist until the mode that needs them is
+     opened, which is what this request pays for. */
+  const start = async (m) => {
+    setStarting(m);
+    try {
+      const { data } = await api.get('/api/review/queue', {
+        params: { ...(category ? { category } : {}), mode: m },
+      });
+      if (!data.due?.length) { toast.error(t('rev.modeEmpty')); return; }
+      setItems(shuffle(data.due));
+      setMode(m); setIdx(0); setResults([]); setSummary(null);
+      setSprintLeft(SPRINT_SECONDS);
+      sprintEndsRef.current = null; sprintOverRef.current = false;
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setStarting(null);
+    }
+  };
 
   /* Leaves a session without submitting — answers so far are discarded. */
   const quitSession = async () => {
     if (results.length && !(await confirm(t('rev.quitConfirm'), { danger: true }))) return;
-    setMode(null); setIdx(0); setResults([]); setFlipped(false); setPicked(null);
+    setMode(null); setIdx(0); setResults([]); setItems([]);
   };
 
   /* The dialog travels with the button rather than sitting in one page
@@ -164,10 +163,17 @@ export default function Review() {
         <div className="card mt-6 space-y-3 p-8">
           <p className="font-heading text-5xl font-bold text-primary">+{summary.xp_earned} XP</p>
           <p className="text-gray-600">{t('rev.summary', { correct, total: graded.length, mastered: summary.newly_mastered.length, xp: summary.total_xp })}</p>
+          {/* An accent slip is marked wrong, so it has to be named: the learner
+              knew the word and would otherwise read the card as "no idea". */}
+          {graded.some((r) => r.note === 'accent') && (
+            <p className="text-sm text-amber-700">
+              {t('rev.accentTally', { n: graded.filter((r) => r.note === 'accent').length })}
+            </p>
+          )}
           {summary.badges?.map((b) => <p key={b} className="pill mx-auto bg-amber-50 text-amber-700">🏅 {b}</p>)}
         </div>
         <div className="mt-6 flex justify-center gap-3">
-          <button className="btn-primary" onClick={() => { setMode(null); setSummary(null); load(); }}>{t('rev.continue')}</button>
+          <button className="btn-primary" onClick={() => { setMode(null); setSummary(null); setItems([]); load(); }}>{t('rev.continue')}</button>
           <Link to="/dashboard" className="btn-outline">{t('common.dashboard')}</Link>
         </div>
       </main>
@@ -176,6 +182,7 @@ export default function Review() {
 
   /* ---- hub ---- */
   if (!mode) {
+    const counts = queue.mode_counts || {};
     return (
       <main className="mx-auto max-w-5xl px-4 py-10">
         <BackLink />
@@ -195,59 +202,93 @@ export default function Review() {
                 three mode buttons, which asked the learner to choose a way of
                 practising before they had seen a single thing they got wrong —
                 so "Category sprint" was a guess, not a decision. */}
-            <section className="card mt-8 p-6" data-testid="mistake-list">
-              <h2 className="font-heading text-lg font-bold text-gray-900">
+            {/* A table, so the three things a mistake is made of — what you
+                wrote, what it should be, why — line up in columns down the
+                list. Read as a stack of sentences they had to be re-parsed one
+                by one; in columns the corrections can be scanned on their own.
+                Below ~44rem the columns stop fitting, so the card scrolls
+                sideways rather than crushing the explanation to two words a
+                line, the same as the other tables in the app. */}
+            <section className="card mt-8" data-testid="mistake-list">
+              <h2 className="px-5 pt-6 font-heading text-lg font-bold text-gray-900">
                 {t('rev.listTitle', { n: queue.due.length })}
               </h2>
-              <ol className="mt-4 space-y-2.5">
-                {queue.due.map((m, i) => (
-                  <li key={m.mistake_id}
-                    className="rounded-xl border border-gray-100 bg-gray-50/60 p-4">
-                    <div className="flex items-start gap-3">
-                      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white text-[11px] font-bold tabular-nums text-gray-500 shadow-sm">
-                        {i + 1}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm leading-relaxed">
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full min-w-[44rem] text-sm">
+                  <thead>
+                    <tr className="border-y border-gray-100 text-left text-xs font-bold uppercase tracking-wide text-gray-500">
+                      <th className="w-10 px-5 py-3" />
+                      <th className="px-5 py-3">{t('rev.colError')}</th>
+                      <th className="px-5 py-3">{t('rev.colCorrection')}</th>
+                      <th className="px-5 py-3">{t('rev.colExplanation')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {queue.due.map((m, i) => (
+                      <tr key={m.mistake_id}
+                        className="border-b border-gray-50 align-top last:border-0">
+                        <td className="px-5 py-4 text-[11px] font-bold tabular-nums text-gray-400">
+                          {i + 1}
+                        </td>
+                        <td className="px-5 py-4 leading-relaxed">
                           <span className="text-red-600 line-through decoration-red-300">
                             {m.error_text}
                           </span>
-                          <span className="mx-2 text-gray-400">→</span>
-                          <span className="font-semibold text-green-700">{m.correction}</span>
-                        </p>
-                        {m.explanation && (
-                          <p className="mt-1.5 text-[13px] leading-relaxed text-gray-600">
-                            {m.explanation}
-                          </p>
-                        )}
-                      </div>
-                      {m.times_repeated > 1 && (
-                        <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold tabular-nums text-amber-700"
-                          title={t('rev.seenTimesTitle', { n: m.times_repeated })}>
-                          ×{m.times_repeated}
-                        </span>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ol>
+                          {m.times_repeated > 1 && (
+                            <span className="ml-2 inline-block rounded-full bg-amber-50 px-2 py-0.5 align-middle text-[11px] font-bold tabular-nums text-amber-700"
+                              title={t('rev.seenTimesTitle', { n: m.times_repeated })}>
+                              ×{m.times_repeated}
+                            </span>
+                          )}
+                          {/* The sentence it was written in, which is what the
+                              drills below put back on screen. */}
+                          {m.context_sentence && (
+                            <span className="mt-1 block text-[12px] italic leading-relaxed text-gray-400">
+                              {m.context_sentence}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-5 py-4 font-semibold leading-relaxed text-green-700">
+                          {m.correction}
+                        </td>
+                        <td className="px-5 py-4 text-[13px] leading-relaxed text-gray-600">
+                          {m.explanation}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </section>
 
             <h2 className="mt-10 font-heading text-lg font-bold text-gray-900">
               {t('rev.chooseMode')}
             </h2>
+            <p className="mt-1 text-sm text-gray-500">{t('rev.chooseModeSub')}</p>
             <div className="mt-4 grid gap-5 md:grid-cols-3">
-              {[
-                ['flashcards', Cards, 'rev.modeFlashTitle', 'rev.modeFlashDesc'],
-                ['mcq', ListChecks, 'rev.modeMcqTitle', 'rev.modeMcqDesc'],
-                ['sprint', Lightning, 'rev.modeSprintTitle', 'rev.modeSprintDesc'],
-              ].map(([key, Icon, title, desc]) => (
-                <button key={key} className="card card-hover p-6 text-left" onClick={() => start(key)} data-testid={`mode-${key}`}>
-                  <Icon size={28} weight="duotone" className="text-primary" />
-                  <h3 className="mt-3 font-heading text-lg font-semibold">{t(title)}</h3>
-                  <p className="mt-2 text-sm text-gray-600">{t(desc)}</p>
-                </button>
-              ))}
+              {MODES.map((key) => {
+                const Icon = MODE_ICON[key];
+                // For the modes built on the fly this is a forecast rather
+                // than a count — the drills do not exist until the mode is
+                // opened, and a few of them will not come out. Starting with
+                // fewer cards than the card promised is handled; starting with
+                // none says so.
+                const n = counts[key] ?? 0;
+                const busy = starting === key;
+                return (
+                  <button key={key} disabled={!n || starting != null}
+                    className="card card-hover p-6 text-left disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={() => start(key)} data-testid={`mode-${key}`}>
+                    <Icon size={28} weight="duotone" className="text-primary" />
+                    <h3 className="mt-3 font-heading text-lg font-semibold">{t(MODE_META[key].title)}</h3>
+                    <p className="mt-2 text-sm text-gray-600">{t(MODE_META[key].desc)}</p>
+                    <p className="mt-3 text-xs font-bold uppercase tracking-wide text-gray-400">
+                      {busy ? t('rev.modePreparing')
+                        : n ? t('rev.modeCount', { n }) : t('rev.modeNone')}
+                    </p>
+                  </button>
+                );
+              })}
             </div>
           </>
         )}
@@ -258,100 +299,23 @@ export default function Review() {
   const m = items[idx];
   if (!m) return null;
   const meta = CATEGORY_META[m.category] || {};
-  const progress = `${idx + 1} / ${items.length}`;
 
-  /* ---- flashcards ---- */
-  if (mode === 'flashcards') {
-    return (
-      <main className="mx-auto max-w-xl px-4 py-12">
-        {quitButton}
-        <div className="flex items-center justify-between text-sm text-gray-500"><span>{t('rev.progress', { progress })}</span><span className="pill" style={{ background: meta.color }}>{meta.label}</span></div>
-        <div className="card flip-in mt-4 min-h-[260px] p-8" key={`${idx}-${flipped}`}>
-          {!flipped ? (
-            <>
-              <p className="text-xs uppercase tracking-wide text-gray-400">{t('rev.yourSentence')}</p>
-              <p className="mt-3 text-lg leading-relaxed text-red-700">{m.error_text}</p>
-              <p className="mt-6 text-sm text-gray-500">{t('rev.thinkThenFlip')}</p>
-            </>
-          ) : (
-            <>
-              <p className="text-xs uppercase tracking-wide text-gray-400">{t('rev.correction')}</p>
-              <p className="mt-3 text-lg font-medium leading-relaxed text-green-700">{m.correction}</p>
-              <p className="mt-4 text-sm text-gray-600">{m.explanation}</p>
-            </>
-          )}
-        </div>
-        <div className="mt-5 flex justify-center gap-3">
-          {!flipped ? (
-            <button className="btn-primary" onClick={() => setFlipped(true)} data-testid="flip-button">{t('rev.flip')}</button>
-          ) : (
-            <>
-              <button className="btn-outline !border-amber-300 !text-amber-600" onClick={() => answer({ selfRated: false })} data-testid="shaky-button">{t('rev.shaky')}</button>
-              <button className="btn-primary !bg-green-600 hover:!bg-green-500" onClick={() => answer({ selfRated: true })} data-testid="gotit-button">{t('rev.gotIt')}</button>
-            </>
-          )}
-        </div>
-      </main>
-    );
-  }
-
-  /* ---- mcq & sprint ---- */
   return (
     <main className="mx-auto max-w-xl px-4 py-12">
       {quitButton}
       <div className="flex items-center justify-between text-sm text-gray-500">
-        <span>{mode === 'sprint' ? t('rev.sprintProgress', { clock: `${Math.floor(sprintLeft / 60)}:${String(sprintLeft % 60).padStart(2, '0')}` }) : t('rev.mcqProgress', { progress })}</span>
+        <span>
+          {mode === 'sprint'
+            ? t('rev.sprintProgress', { clock: `${Math.floor(sprintLeft / 60)}:${String(sprintLeft % 60).padStart(2, '0')}` })
+            : t('rev.modeProgress', { label: t(MODE_META[mode].title), progress: `${idx + 1} / ${items.length}` })}
+        </span>
         <span className="pill" style={{ background: meta.color }}>{meta.label}</span>
       </div>
-      <div className="card mt-4 p-8">
-        <p className="text-xs uppercase tracking-wide text-gray-400">{t('rev.whichCorrect')}</p>
-        <p className="mt-3 text-lg text-gray-800">« {m.error_text} »</p>
-        <div className="mt-5 space-y-3">
-          {options.map((opt) => {
-            const isCorrect = opt === m.correction;
-            const state = picked == null ? '' : isCorrect ? '!border-green-500 bg-green-50' : opt === picked ? '!border-red-400 bg-red-50' : 'opacity-50';
-            return (
-              <button key={opt} disabled={picked != null}
-                className={`block w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-left text-sm transition hover:border-primary ${state}`}
-                /* MCQ waits to be dismissed; the sprint still advances itself.
-                   Every card used to move on 900ms after the pick — less time
-                   than it takes to find the explanation on the page, let alone
-                   read it, so the one sentence saying WHY the answer was wrong
-                   went unread. But the sprint is two minutes against the clock
-                   and says so on the card that starts it: a button to press
-                   between questions is the one thing that mode must not have. */
-                onClick={() => {
-                  setPicked(opt);
-                  if (mode === 'sprint') setTimeout(() => answer({ picked: opt }), 700);
-                }}>
-                {opt}
-              </button>
-            );
-          })}
-        </div>
-
-        {picked != null && mode !== 'sprint' && (
-          <div className="mt-6 border-t border-gray-100 pt-5">
-            <p className={`text-sm font-bold ${
-              picked === m.correction ? 'text-green-700' : 'text-red-600'}`}>
-              {picked === m.correction ? t('rev.answerRight') : t('rev.answerWrong')}
-            </p>
-            {picked !== m.correction && (
-              <p className="mt-1.5 text-sm text-gray-700">
-                {t('rev.theAnswerIs')} <span className="font-semibold text-green-700">{m.correction}</span>
-              </p>
-            )}
-            {m.explanation && (
-              <p className="mt-2.5 text-sm leading-relaxed text-gray-600">{m.explanation}</p>
-            )}
-            <button className="btn-primary mt-5 w-full justify-center"
-              onClick={() => answer({ picked })} data-testid="review-next">
-              {idx + 1 >= items.length ? t('rev.finish') : t('rev.next')}
-            </button>
-          </div>
-        )}
+      <div className="mt-4">
+        <ExerciseCard key={m.mistake_id} mode={mode} item={m}
+          sprint={mode === 'sprint'} isLast={idx + 1 >= items.length}
+          onAnswer={answer} />
       </div>
     </main>
   );
 }
-

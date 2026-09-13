@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Link, NavLink, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Fire, SignOut, List, X, SquaresFour, ArrowLeft } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
-import { ACCENTS, CATEGORY_META, announcePaywall, paywallDetail } from '../lib/api';
+import { CATEGORY_META, announcePaywall, paywallDetail } from '../lib/api';
 import { FREE_TRIAL_TOTAL, FREE_WRITING, WRITING_TASKS, countWords, freeWordStatus, wordStatus } from '../lib/tcf';
 import { LANGUAGES, useI18n, useT } from '../i18n';
 
@@ -275,28 +275,10 @@ export function ScrollToTop() {
 }
 
 /* ------------------------------------------------------ AccentToolbar ---- */
-export function AccentToolbar({ textareaRef, onInsert }) {
-  return (
-    <div className="flex flex-wrap gap-1.5 rounded-xl border border-gray-200 bg-gray-50 p-2" data-testid="accent-toolbar">
-      {ACCENTS.map((c) => (
-        <button key={c} type="button"
-          className="h-8 w-8 rounded-lg bg-white text-sm font-medium shadow-sm transition hover:bg-primary hover:text-white"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => {
-            const ta = textareaRef?.current;
-            if (!ta) return onInsert?.(c);
-            const start = ta.selectionStart ?? ta.value.length;
-            const end = ta.selectionEnd ?? start;
-            const next = ta.value.slice(0, start) + c + ta.value.slice(end);
-            onInsert(c, next, start + c.length);
-            requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(start + c.length, start + c.length); });
-          }}>
-          {c}
-        </button>
-      ))}
-    </div>
-  );
-}
+/* Lives in its own file now — see AccentToolbar.jsx for why. Re-exported here
+   because three pages import it from this module and there is nothing wrong
+   with where they ask for it. */
+export { AccentToolbar } from './AccentToolbar';
 
 /* -------------------------------------------------------- CreditsBadge ---- */
 /* Shown before the editor. Discovering the limit only after writing 150 words

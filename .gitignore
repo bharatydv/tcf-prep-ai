@@ -50,3 +50,8 @@ docker-compose.override.yml
 fuck_tcf_export/
 fuck_tcf_reading_export/
 backend/media/
+
+# Learners' own speaking recordings. Never in git, and never under
+# backend/media/ either — see RECORDINGS_ROOT in server.py for why that
+# distinction matters.
+backend/recordings/

@@ -129,6 +129,11 @@ export default function PracticeWrite() {
     await streamAnalysis(BACKEND_URL, {
       text,
       prompt_id: activePrompt?.prompt_id || null,
+      // A theme topic has no prompt_id — it is not a row in `prompts` — so
+      // this is the only thing tying the work back to the subject it was
+      // chosen from, and the theme picker reads it to say which subjects have
+      // been written about.
+      theme_id: themeId || null,
       topic,
       task_type: taskType,
       source: 'practice',

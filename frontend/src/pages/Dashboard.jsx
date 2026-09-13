@@ -9,6 +9,7 @@ import {
   BarChart, Bar, Cell, LineChart, Line,
 } from 'recharts';
 import { api, errMsg, CATEGORY_META } from '../lib/api';
+import { RecordingPlayer } from '../components/RecordingPlayer';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
 
@@ -72,6 +73,9 @@ export default function Dashboard() {
   const [error, setError] = useState('');
   const [skill, setSkill] = useState('all');
   const [days, setDays] = useState(30);
+  // Which row has its recording open. One at a time: two players going
+  // at once is never what the click meant.
+  const [playing, setPlaying] = useState(null);
   const navigate = useNavigate();
 
   // Every call used to swallow its error, so a backend outage left the page
@@ -109,11 +113,15 @@ export default function Dashboard() {
       label: s.tcf_level || '—',
       errors: s.error_count ?? 0,
       href: `/feedback/${s.submission_id}`,
+      // Only the single-recording speaking flow keeps one, and only since it
+      // started keeping them — so this is per attempt, not per skill.
+      hasAudio: Boolean(s.has_audio),
     }));
     const fromPapers = (rows, kind, idKey) => (rows || []).map((r) => ({
       id: r[idKey],
       at: r.created_at,
       skill: kind,
+      hasAudio: false,
       score: r.total ? Math.round((r.score / r.total) * 100) : null,
       // A comprehension paper records no CEFR level, so it names the paper it
       // was — "Test 7" is true, and an invented level would not be.
@@ -456,7 +464,7 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((a) => (
+              {filtered.flatMap((a) => [
                 <tr key={`${a.skill}-${a.id}`} className="border-t border-gray-100 hover:bg-gray-50/60">
                   <td className="whitespace-nowrap px-4 py-3 tabular-nums text-gray-600 sm:px-6">
                     {(a.at || '').slice(0, 10)}
@@ -473,12 +481,32 @@ export default function Dashboard() {
                   <td className="px-4 py-3 tabular-nums text-gray-900 sm:px-6">{a.score ?? '—'}</td>
                   <td className="px-4 py-3 tabular-nums text-gray-600 sm:px-6">{a.errors}</td>
                   <td className="px-4 py-3 sm:px-6">
-                    {a.href
-                      ? <Link to={a.href} className="font-semibold text-primary">{t('dash.view')}</Link>
-                      : <span className="text-gray-300">—</span>}
+                    <span className="flex items-center justify-end gap-3">
+                      {/* Loaded only when asked for. One <audio> per row would
+                          be a metadata request per attempt on a page that
+                          opens with a hundred of them. */}
+                      {a.hasAudio && (
+                        <button type="button" data-testid="dash-listen"
+                          onClick={() => setPlaying(playing === a.id ? null : a.id)}
+                          className="inline-flex items-center gap-1 font-semibold text-rose-600 hover:underline">
+                          <Microphone size={14} weight="fill" />
+                          {playing === a.id ? t('dash.hideAudio') : t('dash.listen')}
+                        </button>
+                      )}
+                      {a.href
+                        ? <Link to={a.href} className="font-semibold text-primary">{t('dash.view')}</Link>
+                        : <span className="text-gray-300">—</span>}
+                    </span>
+                  </td>
+                </tr>,
+              a.hasAudio && playing === a.id && (
+                <tr key={`${a.skill}-${a.id}-audio`} className="border-t border-gray-100 bg-gray-50/40">
+                  <td colSpan="6" className="px-4 py-4 sm:px-6">
+                    <RecordingPlayer submissionId={a.id} />
                   </td>
                 </tr>
-              ))}
+              ),
+              ])}
               {!filtered.length && (
                 <tr>
                   <td colSpan="6" className="px-4 py-8 text-center text-sm text-gray-400 sm:px-6">

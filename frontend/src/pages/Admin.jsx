@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import { api, errMsg, catColor } from '../lib/api';
+import { useConfirm } from '../components/shared';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
 
@@ -589,19 +590,35 @@ function Submissions() {
   const [subs, setSubs] = useState(null);
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
+  const [confirm, confirmDialog] = useConfirm();
   useEffect(() => {
     setSubs(null);
     api.get('/api/admin/submissions', { params: { limit: PAGE_SIZE, offset } })
       .then((r) => { setSubs(r.data.submissions); setTotal(r.data.total ?? r.data.submissions.length); })
       .catch((e) => toast.error(errMsg(e)));
   }, [offset]);
+
+  /* Deletes the recording, not the attempt. The grade, the transcript and the
+     mistakes drilled out of it all survive — this is for taking a learner's
+     voice off the disk on request, which is the only reason to reach for it. */
+  const deleteAudio = async (id) => {
+    if (!(await confirm(t('admin.audioDeleteConfirm'), { danger: true }))) return;
+    try {
+      await api.delete(`/api/admin/submissions/${id}/audio`);
+      setSubs((rows) => rows.map(
+        (r) => (r.submission_id === id ? { ...r, has_audio: false } : r)));
+      toast.success(t('admin.audioDeleted'));
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+
   if (!subs) return <Spinner />;
   return (
     <section className="card overflow-hidden">
+      {confirmDialog}
       <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
-          <tr>{['admin.thDate', 'admin.thUser', 'admin.thSource', 'admin.thLevel', 'admin.thScore', 'admin.thErrors', 'admin.thExcerpt'].map((k) => <th key={k} className="px-5 py-3">{t(k)}</th>)}</tr>
+          <tr>{['admin.thDate', 'admin.thUser', 'admin.thSource', 'admin.thLevel', 'admin.thScore', 'admin.thErrors', 'admin.thAudio', 'admin.thExcerpt'].map((k) => <th key={k} className="px-5 py-3">{t(k)}</th>)}</tr>
         </thead>
         <tbody>
           {subs.map((s) => (
@@ -612,6 +629,19 @@ function Submissions() {
               <td className="px-5 py-3 font-semibold">{s.tcf_level}</td>
               <td className="px-5 py-3">{s.overall_score}</td>
               <td className="px-5 py-3">{s.errors?.length ?? 0}</td>
+              <td className="whitespace-nowrap px-5 py-3">
+                {s.has_audio ? (
+                  <span className="flex items-center gap-3">
+                    <a href={`/api/submissions/${s.submission_id}/audio`}
+                      target="_blank" rel="noreferrer"
+                      className="font-semibold text-primary hover:underline"
+                      data-testid="admin-audio-play">{t('admin.audioPlay')}</a>
+                    <button type="button" onClick={() => deleteAudio(s.submission_id)}
+                      className="font-semibold text-red-600 hover:underline"
+                      data-testid="admin-audio-delete">{t('admin.audioDelete')}</button>
+                  </span>
+                ) : <span className="text-gray-300">—</span>}
+              </td>
               <td className="max-w-xs px-5 py-3 text-gray-500">{(s.original_text || '').slice(0, 80)}…</td>
             </tr>
           ))}

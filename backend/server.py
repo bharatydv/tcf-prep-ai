@@ -33,7 +33,7 @@ import jwt
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response, HTTPException, Depends, Query, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 
@@ -52,6 +52,7 @@ from sqlalchemy.orm import (
 import reading_bank
 import listening_bank
 import exam_sets
+import review_exercises as rx
 
 load_dotenv()
 
@@ -95,6 +96,19 @@ PUBLIC_URL = os.environ.get(
 # keeps a fresh checkout working before any bucket exists.
 MEDIA_BASE_URL = os.environ.get("MEDIA_BASE_URL", "").rstrip("/")
 MEDIA_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "media")
+
+# Where a learner's own speaking recordings are kept.
+#
+# Deliberately NOT under MEDIA_ROOT, and never resolved through media_url().
+# That path is a public static mount in development and a PUBLIC BUCKET in
+# production — correct for 1,560 exam clips that are the same for everyone, and
+# the wrong place entirely for a recording of somebody's voice. These are
+# reachable only through /api/submissions/{id}/audio, which checks who is
+# asking. Keeping them in a separate tree means a future MEDIA_BASE_URL change,
+# or a bucket made public by mistake, cannot expose them by accident.
+RECORDINGS_ROOT = os.environ.get(
+    "RECORDINGS_ROOT",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "recordings"))
 
 
 def media_url(path: str) -> str:
@@ -602,6 +616,23 @@ class Submission(Base):
     # was lowered instead of an unexplained score.
     caps_applied: Mapped[Any] = mapped_column(JSONB, default=list)
     source: Mapped[str] = mapped_column(String(20), default="practice")
+    # Which theme the topic came from, when it came from one.
+    #
+    # A theme topic is sent as free text with no prompt_id — it is not a row in
+    # `prompts` — so before this there was nothing on a submission saying which
+    # theme the learner had picked, and the theme pickers could not tell a
+    # subject already written about from one never opened. Empty for free
+    # writing, for a pasted text, and for every submission made before this
+    # column existed; the pickers read that as "not written yet", which is all
+    # anyone can honestly say about them.
+    theme_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    # The learner's own recording, for the speaking sources. Relative to
+    # RECORDINGS_ROOT ("speaking/<user>/<submission>.webm") and served only by
+    # /api/submissions/{id}/audio, never by media_url() — see RECORDINGS_ROOT.
+    # Empty for everything written rather than spoken, and empty for a
+    # roleplay, which is a dozen separate turn recordings and no single file.
+    audio_path: Mapped[str] = mapped_column(Text, default="")
+    audio_mime: Mapped[str] = mapped_column(String(40), default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), index=True)
 
@@ -621,6 +652,12 @@ class Mistake(Base):
     correction: Mapped[str] = mapped_column(Text)
     explanation: Mapped[str] = mapped_column(Text)
     distractor: Mapped[str] = mapped_column(Text)
+    # {"stem", "answer", "hint"} for the rule-transfer drill: the same rule
+    # asked again about a different subject, so the learner has to have learned
+    # the rule rather than the sentence. Generated once, the first time someone
+    # opens that mode on this mistake, and kept because it is worth more on the
+    # second meeting than the first.
+    transfer: Mapped[Any] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(20), default="new")
@@ -1430,6 +1467,24 @@ async def get_current_user(request: Request,
     if not token_is_current(claims, user):
         raise HTTPException(status_code=401, detail="Session ended")
     return user
+
+
+async def get_optional_user(request: Request,
+                            db: AsyncSession = Depends(get_db)) -> Optional[User]:
+    """The signed-in user, or None. Never raises.
+
+    For pages that show MORE to somebody signed in but must still render for
+    everybody — and for crawlers, which carry no cookie and would otherwise be
+    served a 401 for a page that has public content on it.
+
+    It reuses get_current_user rather than repeating the token checks, so a
+    revoked session or a token minted before a password change is treated as
+    signed out here too instead of quietly staying valid on this path.
+    """
+    try:
+        return await get_current_user(request, db)
+    except HTTPException:
+        return None
 
 
 async def get_admin_user(user: User = Depends(get_current_user)) -> User:
@@ -2507,9 +2562,10 @@ _LEGACY_DISTRACTORS = {
 # A distractor is only a question if it is wrong in the way the learner was
 # wrong. For conjugation that means another form of the SAME verb.
 _DISTRACTOR_RULE = {
-    "conjugation": ("Give a DIFFERENT CONJUGATED FORM OF THE SAME VERB — wrong "
-                    "person, wrong tense, or wrong auxiliary. Keep the rest of "
-                    "the sentence identical to the correction."),
+    "conjugation": ("Give a DIFFERENT CONJUGATED FORM OF THE SAME VERB, KEEPING "
+                    "THE SAME SUBJECT — wrong tense, wrong mood, or wrong "
+                    "ending. Keep the rest of the sentence identical to the "
+                    "correction."),
     "prepositions": ("Change ONLY the preposition, to another one a learner "
                      "confuses with it. Keep every other word identical."),
     "gender_number": ("Change ONLY the gender or number agreement — the "
@@ -2550,6 +2606,10 @@ async def generate_distractor(error_text: str, correction: str,
               f"Write ONE wrong alternative to the correction. {rule}\n"
               f"It must be wrong, must differ from both sentences above, and "
               f"must be the same length and register as the correction.\n"
+              f"It must be a mistake a real learner would plausibly make: do "
+              f"NOT change the subject, do NOT differ only by an accent or by "
+              f"punctuation, and do NOT pair a subject with a verb form nobody "
+              f"would ever write.\n"
               f"Return ONLY the sentence.")
     try:
         provider = (await get_provider("writing_grader_provider")
@@ -2561,14 +2621,66 @@ async def generate_distractor(error_text: str, correction: str,
             raw = _strip_fences(raw).strip().strip('"')
             # Matching either sentence makes it useless in a different way: as
             # the correction it gives two right answers, as the error it is a
-            # duplicate of an option already on screen.
-            if (raw and raw.lower() != correction.lower()
-                    and raw.lower() != (error_text or "").lower()):
+            # duplicate of an option already on screen. The comparison is
+            # accent- and punctuation-blind on purpose — « il a mange » next to
+            # « il a mangé » is not a third option, it is the answer printed
+            # twice with a typo, and a plain `!=` let every one of those
+            # through.
+            if rx.valid_distractor(raw, error_text, correction):
                 return raw[:200]
     except Exception:  # noqa: BLE001
         log.warning("Distractor generation failed for a %s mistake; the card "
                     "will show two options.", category)
     return ""
+
+
+async def generate_transfer(error_text: str, correction: str, explanation: str,
+                            category: str, db=None) -> dict:
+    """A second sentence testing the same rule, so the rule is what gets tested.
+
+    A learner who meets « il faut que tu fasses » four times learns that
+    sentence. Asking them for « il faut que nous ___ » is the only card in the
+    set that can tell the difference between having learned the rule and having
+    learned the answer — which is also why it is the one card that cannot be
+    derived from the row and has to be written.
+
+    Empty dict when it cannot be made; the mode simply does not offer that
+    mistake, the same way the other forms drop out when their inputs are
+    missing.
+    """
+    prompt = (f'A French learner wrote: "{error_text}"\n'
+              f'The correction is: "{correction}"\n'
+              f'The rule they broke: "{explanation}"\n\n'
+              f"Write a NEW short French sentence that tests the SAME rule with "
+              f"a DIFFERENT subject and a different verb or noun, so that "
+              f"remembering the sentence above does not help.\n"
+              f"Put exactly one blank, written as ____, where the form being "
+              f"tested belongs.\n"
+              f'Return ONLY JSON: {{"stem": "...", "answer": "...", '
+              f'"hint": "a five-word reminder of the rule, in English"}}\n'
+              f"The answer must be what fills the blank, and must not appear "
+              f"anywhere in the stem.")
+    try:
+        provider = (await get_provider("writing_grader_provider")
+                    if db is not None else WRITING_GRADER_PROVIDER)
+        raw = await _grade_with_provider(
+            provider, "You write short French grammar drills.", prompt)
+        if not raw:
+            return {}
+        data = _extract_json(raw)
+        drill = {"stem": str(data.get("stem") or "")[:300],
+                 "answer": str(data.get("answer") or "")[:120],
+                 "hint": str(data.get("hint") or "")[:120]}
+        # Validated by the same builder that will have to serve it, rather than
+        # by a second opinion here that could disagree with it.
+        if "transfer" in rx.build_forms({"error_text": error_text,
+                                         "correction": correction,
+                                         "transfer": drill}):
+            return drill
+    except Exception:  # noqa: BLE001
+        log.warning("Transfer drill generation failed for a %s mistake; that "
+                    "mistake is skipped in transfer mode.", category)
+    return {}
 
 
 def normalize_error_text(text: str) -> str:
@@ -2651,7 +2763,8 @@ async def record_mistakes(db: AsyncSession, user_id: str, source: str,
 async def persist_submission(db: AsyncSession, user: User, text: str,
                              prompt_id: Optional[str], analysis: dict,
                              source: str = "practice",
-                             consume: bool = True) -> dict:
+                             consume: bool = True,
+                             theme_id: Optional[str] = None) -> dict:
     """Save a graded piece of work. `consume=False` for flows metered by their
     own allowance, so they do not also spend a monthly AI credit."""
     sub = Submission(
@@ -2668,6 +2781,7 @@ async def persist_submission(db: AsyncSession, user: User, text: str,
         word_count=analysis.get("word_count") or len(text.split()),
         caps_applied=analysis.get("caps_applied") or [],
         source=source,
+        theme_id=(theme_id or "")[:64],
         created_at=now_utc(),
     )
     db.add(sub)
@@ -4200,6 +4314,10 @@ class ConverseGradeIn(BaseModel):
 class AnalyzeIn(BaseModel):
     text: str = Field(min_length=1, max_length=MAX_TEXT_CHARS)
     prompt_id: Optional[str] = None
+    # The theme the topic was chosen from, so the theme picker can say which
+    # subjects have been written about. Not a foreign key on purpose: a theme
+    # the admin later retires should not take a learner's work with it.
+    theme_id: Optional[str] = Field(default=None, max_length=64)
     topic: Optional[str] = Field(default=None, max_length=4000)
     label: Optional[str] = Field(default=None, max_length=300)  # paste / topic pages
     source: Optional[str] = "practice"  # practice | paste
@@ -4283,10 +4401,15 @@ class ReviewResult(BaseModel):
     answer: Optional[str] = Field(default=None, max_length=600)
     # Self-assessment on a flashcard, where there is nothing to compare.
     self_rated_correct: Optional[bool] = None
+    # Why the learner thought their answer was right — the free-text half of
+    # the minimal-pair card. Stored with the session and never graded.
+    note: Optional[str] = Field(default=None, max_length=600)
 
 
 class ReviewSubmitIn(BaseModel):
-    mode: str  # flashcards | mcq | sprint
+    # One of review_exercises.MODES. An unknown one grades every answer against
+    # the correction, which is what every mode did before there were eight.
+    mode: str = Field(max_length=20)
     results: List[ReviewResult]
 
 
@@ -4989,6 +5112,23 @@ MIGRATIONS = [
     "ALTER TABLE reading_questions ADD COLUMN IF NOT EXISTS source_uuid VARCHAR(64) DEFAULT ''",
     "CREATE INDEX IF NOT EXISTS ix_listening_attempts_user_id "
     "ON listening_attempts (user_id)",
+    # The rule-transfer drill. Empty on every existing row, and filled the
+    # first time that mode asks for it rather than by a backfill: it costs a
+    # model call per mistake, and most mistakes are mastered before anyone
+    # reaches for it.
+    "ALTER TABLE mistakes ADD COLUMN IF NOT EXISTS transfer JSONB "
+    "DEFAULT '{}'::jsonb",
+    # Where a speaking submission's recording is kept. Empty on every existing
+    # row and staying that way: nothing was saved before this, so there is no
+    # backfill to run — those attempts keep their transcript and say plainly
+    # that the recording was not kept.
+    "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS theme_id VARCHAR(64) "
+    "DEFAULT ''",
+    "CREATE INDEX IF NOT EXISTS ix_submissions_user_theme "
+    "ON submissions (user_id, theme_id)",
+    "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS audio_path TEXT DEFAULT ''",
+    "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS audio_mime VARCHAR(40) "
+    "DEFAULT ''",
 ]
 
 
@@ -5657,7 +5797,7 @@ async def analyze_stream(body: AnalyzeIn,
                 # a proxy does not drop a connection whose work is already done.
                 save = asyncio.create_task(persist_submission(
                     sdb, user, body.text, body.prompt_id, analysis,
-                    source=source, consume=False))
+                    source=source, consume=False, theme_id=body.theme_id))
                 while True:
                     try:
                         sub = await asyncio.wait_for(asyncio.shield(save),
@@ -5716,7 +5856,65 @@ async def create_submission(body: AnalyzeIn,
         await refund_credit(db, user)
         raise HTTPException(status_code=503, detail=ai_error_detail(analysis))
     return await persist_submission(db, user, body.text, body.prompt_id,
-                                    analysis, source=source, consume=False)
+                                    analysis, source=source, consume=False,
+                                    theme_id=body.theme_id)
+
+
+# ----------------------------------------------------------------------------
+# Speaking recordings
+# ----------------------------------------------------------------------------
+# The container a stored recording gets on disk, so a downloaded file opens in
+# whatever the learner plays it with instead of arriving extensionless.
+_AUDIO_EXT_BY_MIME = {
+    "audio/webm": "webm", "audio/mp4": "m4a", "audio/mpeg": "mp3",
+    "audio/wav": "wav", "audio/ogg": "ogg", "audio/aac": "aac",
+    "audio/flac": "flac", "audio/x-caf": "caf",
+}
+
+
+def recording_file(relative: str) -> str:
+    """Absolute path of a stored recording, or "" if it escapes the tree.
+
+    The relative path comes out of the database and the database is not the
+    attacker here — but it is one `..` away from being an arbitrary file read
+    served to whoever asked, and the check is two lines.
+    """
+    root = os.path.realpath(RECORDINGS_ROOT)
+    full = os.path.realpath(os.path.join(root, relative or ""))
+    return full if full.startswith(root + os.sep) else ""
+
+
+async def store_recording(db: AsyncSession, submission_id: str, user_id: str,
+                          data: bytes, mime: str) -> str:
+    """Keep the learner's recording and point the submission at it.
+
+    Never fatal. The learner came here for a correction and has one by the time
+    this runs; losing the playback copy is worth a line in the log, not a 500
+    and a refunded credit for work that was in fact delivered.
+    """
+    ext = _AUDIO_EXT_BY_MIME.get(mime, "webm")
+    relative = f"speaking/{user_id}/{submission_id}.{ext}"
+    try:
+        target = recording_file(relative)
+        if not target:
+            return ""
+
+        def write():
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, "wb") as fh:
+                fh.write(data)
+
+        await asyncio.to_thread(write)
+        await db.execute(
+            sa_update(Submission)
+            .where(Submission.submission_id == submission_id)
+            .values(audio_path=relative, audio_mime=mime))
+        await db.commit()
+        return relative
+    except Exception:  # noqa: BLE001
+        log.warning("Could not keep the recording for %s; the transcript and "
+                    "the grade are unaffected.", submission_id, exc_info=True)
+        return ""
 
 
 @app.get("/api/submissions")
@@ -5732,14 +5930,17 @@ async def list_submissions(user: User = Depends(get_current_user),
         select(Submission.submission_id, Submission.created_at,
                Submission.tcf_level, Submission.overall_score,
                Submission.word_count, Submission.source,
-               func.coalesce(func.jsonb_array_length(Submission.errors), 0))
+               func.coalesce(func.jsonb_array_length(Submission.errors), 0),
+               # Whether there is one, never where it is: the path names a file
+               # on the API host and the client has no use for it.
+               func.coalesce(Submission.audio_path, "") != "")
         .where(Submission.user_id == user.user_id)
         .order_by(Submission.created_at.desc()).limit(100))).all()
     return {"submissions": [
         {"submission_id": sid, "created_at": created, "tcf_level": level,
          "overall_score": score, "word_count": words, "source": source,
-         "error_count": int(n or 0)}
-        for sid, created, level, score, words, source, n in rows]}
+         "error_count": int(n or 0), "has_audio": bool(has_audio)}
+        for sid, created, level, score, words, source, n, has_audio in rows]}
 
 
 @app.get("/api/submissions/{submission_id}")
@@ -5753,7 +5954,80 @@ async def get_submission(submission_id: str,
         raise HTTPException(status_code=404, detail="Submission not found")
     if sub.user_id != user.user_id and user.role != "admin":
         raise HTTPException(status_code=403, detail="Access denied")
-    return {"submission": _row_to_dict(sub)}
+    out = _row_to_dict(sub, drop=("audio_path",))
+    out["has_audio"] = bool((sub.audio_path or "").strip())
+    return {"submission": out}
+
+
+@app.get("/api/submissions/{submission_id}/audio")
+async def submission_audio(submission_id: str,
+                           download: bool = False,
+                           user: User = Depends(get_current_user),
+                           db: AsyncSession = Depends(get_db)):
+    """Play or download one's own recording.
+
+    Behind the session rather than behind an unguessable path, and served from
+    here rather than from /media, because /media is a public bucket in
+    production. Same owner-or-admin rule as the submission it belongs to: a
+    recording of somebody's voice is not less private than the transcript of
+    it, and the transcript is already checked.
+    """
+    res = await db.execute(
+        select(Submission).where(Submission.submission_id == submission_id))
+    sub = res.scalar_one_or_none()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    if sub.user_id != user.user_id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    path = recording_file(sub.audio_path) if sub.audio_path else ""
+    if not path or not os.path.isfile(path):
+        # Either it was never kept — every attempt before this feature — or an
+        # admin has since deleted it. The page falls back to the transcript.
+        raise HTTPException(status_code=404, detail="No recording was kept "
+                                                    "for this attempt")
+    mime = sub.audio_mime or "audio/webm"
+    ext = _AUDIO_EXT_BY_MIME.get(mime, "webm")
+    stamp = (sub.created_at or now_utc()).strftime("%Y-%m-%d")
+    headers = {}
+    if download:
+        headers["Content-Disposition"] = (
+            f'attachment; filename="prepfrancais-{stamp}-{submission_id}.{ext}"')
+    return FileResponse(path, media_type=mime, headers=headers)
+
+
+@app.delete("/api/admin/submissions/{submission_id}/audio")
+async def admin_delete_recording(submission_id: str,
+                                 admin: User = Depends(get_admin_user),
+                                 db: AsyncSession = Depends(get_db)):
+    """Delete a stored recording. The submission, grade and transcript stay.
+
+    The file goes first and the row second: a row still pointing at a file that
+    is gone answers 404 and the page falls back to the transcript, which is the
+    same thing it does for every attempt recorded before this existed. A file
+    left behind with no row pointing at it is the one outcome nobody can see or
+    clean up.
+    """
+    res = await db.execute(
+        select(Submission).where(Submission.submission_id == submission_id))
+    sub = res.scalar_one_or_none()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    path = recording_file(sub.audio_path) if sub.audio_path else ""
+    if path and os.path.isfile(path):
+        try:
+            await asyncio.to_thread(os.remove, path)
+        except OSError:
+            log.warning("Could not remove recording %s", path, exc_info=True)
+            raise HTTPException(status_code=500,
+                                detail="The recording could not be deleted")
+    await db.execute(
+        sa_update(Submission)
+        .where(Submission.submission_id == submission_id)
+        .values(audio_path="", audio_mime=""))
+    await db.commit()
+    log.info("Admin %s deleted the recording for %s", admin.user_id, submission_id)
+    return {"deleted": True, "submission_id": submission_id}
 
 
 # ----------------------------------------------------------------------------
@@ -6190,8 +6464,54 @@ XP_PER_CORRECT = 10
 XP_CATEGORY_CLEAR_BONUS = 50
 
 
+async def _context_sentences(db: AsyncSession, mistakes) -> Dict[str, str]:
+    """The sentence each mistake was actually made in, by mistake_id.
+
+    Read back from the submission rather than copied onto the mistake row when
+    it was written. The text is already in the database, one row is shared by
+    every error in the same piece of work, and a copy would outlive the
+    submission it quotes. Two queries for a whole queue either way.
+
+    Without this every exercise is a fragment, and a fragment is not always a
+    question: « aller au marché » has no subject, so no conjugation of it is
+    right or wrong. That is the second half of what review_exercises exists to
+    fix, and it is the half that needs the database.
+    """
+    refs = [m for m in mistakes if (m.ref_id or "").strip()]
+    if not refs:
+        return {}
+
+    texts: Dict[str, str] = {}
+    sub_ids = {m.ref_id for m in refs if m.source != "simulator"}
+    exam_ids = {m.ref_id for m in refs if m.source == "simulator"}
+    if sub_ids:
+        rows = await db.execute(
+            select(Submission.submission_id, Submission.original_text)
+            .where(Submission.submission_id.in_(sub_ids)))
+        texts.update({sid: text or "" for sid, text in rows.all()})
+    if exam_ids:
+        # A simulator mistake points at the attempt, not at one of its three
+        # tâches, and nothing records which one it came from. Searching all
+        # three costs nothing and finds the right sentence anyway.
+        rows = await db.execute(
+            select(ExamAttempt.attempt_id, ExamAttempt.task1,
+                   ExamAttempt.task2, ExamAttempt.task3)
+            .where(ExamAttempt.attempt_id.in_(exam_ids)))
+        for attempt_id, *tasks in rows.all():
+            texts[attempt_id] = "\n\n".join(
+                ((t or {}).get("text") or "") for t in tasks)
+
+    out: Dict[str, str] = {}
+    for m in refs:
+        sentence = rx.sentence_containing(texts.get(m.ref_id, ""), m.error_text)
+        if sentence:
+            out[m.mistake_id] = sentence
+    return out
+
+
 @app.get("/api/review/queue")
 async def review_queue(category: Optional[str] = None,
+                       mode: Optional[str] = None,
                        limit: int = Query(20, le=50),
                        user: User = Depends(get_current_user),
                        db: AsyncSession = Depends(get_db)):
@@ -6204,8 +6524,13 @@ async def review_queue(category: Optional[str] = None,
     stmt = stmt.order_by(Mistake.srs_due_at.asc()).limit(limit)
     res = await db.execute(stmt)
     due = res.scalars().all()
+    contexts = await _context_sentences(db, due)
+
     # Fill in any missing MCQ distractors now, concurrently, rather than one at
-    # a time inside the grading request.
+    # a time inside the grading request. Only for the modes that put a third
+    # option on screen — the other six cards are built from the row and cost
+    # nothing, and paying for a distractor to run a spelling sprint the learner
+    # did not ask for is a model call spent on a card nobody will see.
     #
     # _LEGACY_DISTRACTORS are the old per-category constants. They are already
     # written into existing rows, so retiring the fallback in code is not
@@ -6213,18 +6538,50 @@ async def review_queue(category: Optional[str] = None,
     # would keep offering « ils a fait » forever. Listed rather than dropped in
     # a migration because a regeneration that fails should leave the row alone
     # and try again next time, not blank it.
-    pending = [m for m in due
-               if not (m.distractor or "").strip()
-               or m.distractor in _LEGACY_DISTRACTORS]
-    if pending:
-        generated = await asyncio.gather(*[
-            generate_distractor(m.error_text, m.correction, m.category, db=db)
-            for m in pending], return_exceptions=True)
-        for m, d in zip(pending, generated):
-            if isinstance(d, str) and d.strip():
-                m.distractor = d
-        await db.commit()
-    return {"due": [_row_to_dict(m) for m in due]}
+    if mode is None or mode in rx.DISTRACTOR_MODES:
+        pending = [m for m in due
+                   if not (m.distractor or "").strip()
+                   or m.distractor in _LEGACY_DISTRACTORS]
+        if pending:
+            generated = await asyncio.gather(*[
+                generate_distractor(m.error_text, m.correction, m.category,
+                                    db=db)
+                for m in pending], return_exceptions=True)
+            for m, d in zip(pending, generated):
+                if isinstance(d, str) and d.strip():
+                    m.distractor = d
+            await db.commit()
+
+    # The rule-transfer drill is written, not derived, so it is generated only
+    # when that mode is opened. A row that has been tried and could not be
+    # drilled is marked, so the next session does not pay to fail again.
+    if mode in rx.TRANSFER_MODES:
+        pending = [m for m in due if not (m.transfer or {})]
+        if pending:
+            drills = await asyncio.gather(*[
+                generate_transfer(m.error_text, m.correction, m.explanation,
+                                  m.category, db=db)
+                for m in pending], return_exceptions=True)
+            for m, drill in zip(pending, drills):
+                m.transfer = drill if isinstance(drill, dict) and drill \
+                    else {"failed": True}
+            await db.commit()
+
+    items, counts = [], {name: 0 for name in rx.MODES}
+    for m in due:
+        row = _row_to_dict(m)
+        row["context_sentence"] = contexts.get(m.mistake_id, "")
+        row["forms"] = rx.build_forms(row)
+        for name in rx.available_modes(row["forms"]):
+            counts[name] += 1
+        # A drill nobody has tried to write yet still counts: the mode is
+        # offered, and generating it is what opening the mode does.
+        if "transfer" not in row["forms"] and not (m.transfer or {}):
+            counts["transfer"] += 1
+        items.append(row)
+    if mode:
+        items = [i for i in items if mode in rx.available_modes(i["forms"])]
+    return {"due": items, "mode_counts": counts}
 
 
 @app.post("/api/review/submit")
@@ -6252,19 +6609,37 @@ async def review_submit(body: ReviewSubmitIn,
                                   Mistake.mistake_id.in_(wanted)))
         by_id = {m.mistake_id: m for m in res.scalars().all()}
 
+    # Spot-the-error and the minimal pair are graded against the sentence, not
+    # against the correction, so the sentences come back here too — and they
+    # are rebuilt from the submission rather than taken from the request, so a
+    # client cannot mark its own paper by sending a sentence of its choosing.
+    contexts = await _context_sentences(db, list(by_id.values()))
+
     now = now_utc()
     for r in body.results:
         m = by_id.get(r.mistake_id)
         if not m:
             continue
-        # MCQ and sprint send the picked answer, which the server checks against
-        # the stored correction. Flashcards have no comparable answer, so the
-        # learner's own "I got it" is the only signal available there.
-        if r.answer is not None:
-            correct = normalize_error_text(r.answer) == normalize_error_text(m.correction)
-        else:
-            correct = bool(r.self_rated_correct)
-        graded.append({"mistake_id": m.mistake_id, "correct": correct})
+        # Every mode sends what the learner picked or typed, and the server
+        # decides. What it is compared against depends on the mode: the
+        # correction for an MCQ, the guilty segment for spot-the-error, the
+        # corrected sentence for a minimal pair, the drill's own answer for a
+        # rule transfer. A result with no answer at all is a flashcard, where
+        # the learner's own "I got it" is the only signal there is.
+        row = _row_to_dict(m)
+        row["context_sentence"] = contexts.get(m.mistake_id, "")
+        correct, note = rx.grade(body.mode, row, answer=r.answer,
+                                 self_rated=r.self_rated_correct)
+        entry = {"mistake_id": m.mistake_id, "correct": correct}
+        if note:
+            entry["note"] = note  # 'accent': the right word, typed bare
+        if r.note:
+            # The learner's own reason, from the minimal-pair card. Kept beside
+            # the result so the session is a record of what they thought, not
+            # only of what they clicked. Never graded — a sentence of French
+            # about French is not something this endpoint can mark.
+            entry["learner_note"] = r.note
+        graded.append(entry)
         if correct:
             xp += XP_PER_CORRECT
             streak_ok = (m.srs_consecutive_got_it or 0) + 1
@@ -6530,6 +6905,32 @@ def _reading_correction(q: ReadingQuestion, picked: Optional[str]) -> dict:
     }
 
 
+async def _papers_sat(db: AsyncSession, model, user_id: str) -> Dict[int, dict]:
+    """How each paper went last time, by test number.
+
+    Only timed sittings appear here, because only timed sittings are recorded:
+    practice mode marks a question at a time through /check and writes no
+    attempt row. So a paper the learner has only practised looks untouched,
+    which is the truth about what the database knows.
+
+    DISTINCT ON rather than reading every attempt and reducing in Python: a
+    learner with four hundred sittings is the one this page must not get slower
+    for, and it is their own history that would do it.
+    """
+    latest = (await db.execute(
+        select(model.test_number, model.score, model.total, model.created_at)
+        .where(model.user_id == user_id)
+        .distinct(model.test_number)
+        .order_by(model.test_number, model.created_at.desc()))).all()
+    counts = dict((await db.execute(
+        select(model.test_number, func.count())
+        .where(model.user_id == user_id)
+        .group_by(model.test_number))).all())
+    return {number: {"score": score, "total": total, "created_at": created,
+                     "attempts": int(counts.get(number, 1))}
+            for number, score, total, created in latest}
+
+
 @app.get("/api/reading/tests")
 async def reading_tests(user: User = Depends(get_current_user),
                         db: AsyncSession = Depends(get_db)):
@@ -6551,13 +6952,19 @@ async def reading_tests(user: User = Depends(get_current_user),
     counts = {row[0]: {"question_count": row[1],
                        "level_from": row[2], "level_to": row[3]}
               for row in res.all()}
+    # What the learner already did with each paper, so the picker can offer to
+    # sit it again or go back through it rather than starting every card from
+    # nothing. Served with the catalogue for the same reason free_tests_left
+    # is: the page needs it before a paper is opened, not after.
+    sat = await _papers_sat(db, ReadingAttempt, user.user_id)
     return {
         "tests": [
             {"test_number": n,
              "question_count": counts.get(n, {}).get("question_count", 0),
              "level_from": counts.get(n, {}).get("level_from") or "A1",
              "level_to": counts.get(n, {}).get("level_to") or "C2",
-             "is_ready": counts.get(n, {}).get("question_count", 0) > 0}
+             "is_ready": counts.get(n, {}).get("question_count", 0) > 0,
+             "last_attempt": sat.get(n)}
             for n in sorted(reading_bank.READING_TESTS)],
         # Served with the catalogue so the picker knows the allowance BEFORE a
         # paper is opened. Refusing at hand-in would be correct and useless:
@@ -6756,13 +7163,15 @@ async def listening_tests(user: User = Depends(get_current_user),
     counts = {row[0]: {"question_count": row[1],
                        "level_from": row[2], "level_to": row[3]}
               for row in res.all()}
+    sat = await _papers_sat(db, ListeningAttempt, user.user_id)
     return {
         "tests": [
             {"test_number": n,
              "question_count": counts.get(n, {}).get("question_count", 0),
              "level_from": counts.get(n, {}).get("level_from") or "A1",
              "level_to": counts.get(n, {}).get("level_to") or "C2",
-             "is_ready": counts.get(n, {}).get("question_count", 0) > 0}
+             "is_ready": counts.get(n, {}).get("question_count", 0) > 0,
+             "last_attempt": sat.get(n)}
             for n in sorted(listening_bank.LISTENING_TESTS)],
         # Counted separately from reading: one allowance must not spend the
         # other. None means unlimited.
@@ -6908,6 +7317,7 @@ async def speaking_analyze(question: str = Form(...),
                            audio: UploadFile = File(...),
                            task_type: Optional[int] = Form(None),
                            mime_type: Optional[str] = Form(None),
+                           theme_id: Optional[str] = Form(None),
                            user: User = Depends(get_current_user),
                            db: AsyncSession = Depends(get_db),
                            _rl=Depends(ai_rate_limit)):
@@ -6979,7 +7389,13 @@ async def speaking_analyze(question: str = Form(...),
     analysis["transcript"] = transcript
     sub = await persist_submission(
         db, user, transcript, None, analysis,
-        source="speaking", consume=False)
+        source="speaking", consume=False, theme_id=theme_id)
+    # Kept after the submission exists, because the file is named after it.
+    # This is the one flow with a single recording behind a single grade; the
+    # roleplay below is a dozen turn uploads and no one file to keep, so it
+    # stays transcript-only and its result page says so.
+    analysis["has_audio"] = bool(await store_recording(
+        db, sub["submission_id"], user.user_id, audio_bytes, mime))
     analysis["submission_id"] = sub.get("submission_id")
     analysis["streak"] = sub.get("streak")
     return public_analysis(analysis)
@@ -7098,12 +7514,26 @@ async def recent_topics(task_type: Optional[int] = None,
 
 @app.get("/api/recent-topics/{topic_id}")
 async def recent_topic(topic_id: str,
-                       user: User = Depends(get_current_user),
+                       user: Optional[User] = Depends(get_optional_user),
                        db: AsyncSession = Depends(get_db)):
-    """Topic detail. Never spends an unlock — merely opening a page must not
-    cost the learner one of their three free model answers. The answer is
-    returned only if already unlocked (or premium); otherwise the client shows
-    a Reveal button that calls the POST below."""
+    """Topic detail. Public — the consigne, not the model answer.
+
+    This used to require a session, which made every topic page invisible: a
+    crawler got a 401, the page was noindex, and the one thing on this site
+    nobody else has — real recent consignes, which is exactly what candidates
+    search for by wording — earned nothing.
+
+    The split is the same one the product already makes. The consigne is a
+    published exam prompt and giving it away is what brings people here; the
+    MODEL ANSWER is the product, and it stays behind an account and the
+    three-unlock allowance. A signed-out visitor sees the question and is told
+    plainly what an account adds.
+
+    Never spends an unlock: merely opening a page must not cost the learner one
+    of their three free model answers. The answer is returned only if already
+    unlocked (or premium); otherwise the client shows a Reveal button that
+    calls the POST below.
+    """
     res = await db.execute(
         select(RecentTopic).where(RecentTopic.topic_id == topic_id,
                                   RecentTopic.is_active == True))  # noqa: E712
@@ -7112,8 +7542,18 @@ async def recent_topic(topic_id: str,
         raise HTTPException(status_code=404, detail="Topic not found")
     t = _row_to_dict(t_obj)
     model_answer = t.pop("model_answer", "")
+    if user is None:
+        # Signed out: the consigne and nothing else. `remaining` is None here
+        # to mean "not applicable", which is the same value premium uses —
+        # the client distinguishes them by whether it has a session, and
+        # neither is offered a Reveal button.
+        t["model_answer_locked"] = True
+        t["model_answers_remaining"] = None
+        t["requires_account"] = True
+        return {"topic": t}
     unlocked = user.model_answer_topic_ids or []
     premium = is_premium(user)
+    t["requires_account"] = False
     t["model_answers_remaining"] = (
         None if premium
         else max(0, FREE_MODEL_ANSWER_LIMIT - len(unlocked)))
@@ -8618,7 +9058,15 @@ async def admin_submissions(admin: User = Depends(get_admin_user),
     res = await db.execute(
         select(Submission).order_by(Submission.created_at.desc())
         .limit(limit).offset(offset))
-    return {"submissions": [_row_to_dict(s) for s in res.scalars().all()],
+    # has_audio rather than audio_path, for the same reason the learner's own
+    # list says it that way: the panel needs to know a recording exists so it
+    # can offer to play or delete it, and never needs the filename.
+    rows = []
+    for s in res.scalars().all():
+        row = _row_to_dict(s, drop=("audio_path",))
+        row["has_audio"] = bool((s.audio_path or "").strip())
+        rows.append(row)
+    return {"submissions": rows,
             "total": total or 0, "limit": limit, "offset": offset}
 
 
@@ -9184,6 +9632,55 @@ async def list_themes(task_type: Optional[int] = None,
             d["question_count"] = count
         out.append(d)
     return {"themes": out}
+
+
+@app.get("/api/themes/attempts")
+async def theme_attempts(skill: Optional[str] = None,
+                         user: User = Depends(get_current_user),
+                         db: AsyncSession = Depends(get_db)):
+    """The last thing the learner wrote or said on each theme.
+
+    Its own endpoint rather than a field on /api/themes, which is public,
+    unauthenticated and called on mount by four pages — giving it a per-user
+    answer would make it uncacheable for the three that do not need one. The
+    pickers ask for both and join them.
+
+    `skill` narrows to the sources that skill produces, so the writing picker
+    does not report a theme as done because it was spoken about, which is a
+    different exercise with a different tâche.
+    """
+    stmt = select(Submission.theme_id, Submission.submission_id,
+                  Submission.created_at, Submission.overall_score,
+                  Submission.tcf_level).where(
+        Submission.user_id == user.user_id,
+        func.coalesce(Submission.theme_id, "") != "")
+    if skill == "speaking":
+        stmt = stmt.where(Submission.source.in_(("speaking", "conversation")))
+    elif skill == "writing":
+        stmt = stmt.where(Submission.source.notin_(("speaking", "conversation")))
+    # Newest per theme, and the count beside it, the same shape and for the
+    # same reason as _papers_sat above.
+    latest = (await db.execute(
+        stmt.distinct(Submission.theme_id)
+        .order_by(Submission.theme_id, Submission.created_at.desc()))).all()
+
+    counted = select(Submission.theme_id, func.count()).where(
+        Submission.user_id == user.user_id,
+        func.coalesce(Submission.theme_id, "") != "")
+    if skill == "speaking":
+        counted = counted.where(
+            Submission.source.in_(("speaking", "conversation")))
+    elif skill == "writing":
+        counted = counted.where(
+            Submission.source.notin_(("speaking", "conversation")))
+    counts = dict((await db.execute(
+        counted.group_by(Submission.theme_id))).all())
+
+    return {"attempts": {
+        theme_id: {"submission_id": sub_id, "created_at": created,
+                   "score": score, "tcf_level": level,
+                   "attempts": int(counts.get(theme_id, 1))}
+        for theme_id, sub_id, created, score, level in latest}}
 
 
 @app.get("/api/themes/{theme_id}/questions")
@@ -10868,9 +11365,12 @@ async def theme_access(theme_id: str,
 @app.get("/api/themes/progress")
 async def themes_progress(user: User = Depends(get_current_user),
                           db: AsyncSession = Depends(get_db)):
-    """Per-user practice progress. Returns the total number of practice
-    submissions the user has made (used to show simple progress in the UI).
-    A finer per-theme breakdown can be added once submissions store theme_id."""
+    """Per-user practice progress: how many practice submissions in total.
+
+    The per-theme breakdown this used to say was waiting on a theme_id now
+    exists — submissions carry one, and /api/themes/attempts is the endpoint
+    that reads it. This stays as the one number the header shows.
+    """
     total = await db.scalar(
         select(func.count()).select_from(Submission).where(
             Submission.user_id == user.user_id,

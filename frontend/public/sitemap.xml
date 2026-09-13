@@ -50,22 +50,6 @@
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://prepfrancais.com/recent-topics</loc>
-    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/recent-topics"/>
-    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/recent-topics"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/recent-topics"/>
-    <changefreq>weekly</changefreq>
-    <priority>0.9</priority>
-  </url>
-  <url>
-    <loc>https://prepfrancais.com/fr/recent-topics</loc>
-    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/recent-topics"/>
-    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/recent-topics"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/recent-topics"/>
-    <changefreq>weekly</changefreq>
-    <priority>0.9</priority>
-  </url>
-  <url>
     <loc>https://prepfrancais.com/practice</loc>
     <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/practice"/>
     <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/practice"/>
@@ -178,22 +162,6 @@
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://prepfrancais.com/reading/practice</loc>
-    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/reading/practice"/>
-    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/reading/practice"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/reading/practice"/>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://prepfrancais.com/fr/reading/practice</loc>
-    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/reading/practice"/>
-    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/reading/practice"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/reading/practice"/>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
-  </url>
-  <url>
     <loc>https://prepfrancais.com/listening</loc>
     <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/listening"/>
     <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/listening"/>
@@ -208,22 +176,6 @@
     <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/listening"/>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://prepfrancais.com/listening/practice</loc>
-    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/listening/practice"/>
-    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/listening/practice"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/listening/practice"/>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://prepfrancais.com/fr/listening/practice</loc>
-    <xhtml:link rel="alternate" hreflang="en" href="https://prepfrancais.com/listening/practice"/>
-    <xhtml:link rel="alternate" hreflang="fr" href="https://prepfrancais.com/fr/listening/practice"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://prepfrancais.com/listening/practice"/>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/resources</loc>
@@ -594,20 +546,20 @@
     <priority>0.3</priority>
   </url>
   <url>
-    <loc>https://prepfrancais.com/blog/tcf-canada-clb-chart</loc>
-    <lastmod>2026-09-03</lastmod>
+    <loc>https://prepfrancais.com/blog/tcf-canada-exam-centers-india</loc>
+    <lastmod>2026-09-04</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/blog/tcf-canada-exam-centers-canada</loc>
-    <lastmod>2026-09-03</lastmod>
+    <lastmod>2026-09-04</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://prepfrancais.com/blog/tcf-canada-exam-centers-india</loc>
-    <lastmod>2026-09-03</lastmod>
+    <loc>https://prepfrancais.com/blog/tcf-canada-clb-chart</loc>
+    <lastmod>2026-09-04</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>

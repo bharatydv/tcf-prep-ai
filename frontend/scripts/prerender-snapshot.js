@@ -127,13 +127,30 @@ async function snapshot() {
   console.log(`[snapshot] blog: index + ${posts.length} post(s) `
     + `(${apiPosts.length} from the API)`);
 
-  /* The recent-topics listing only. A topic DETAIL needs a session and answers
-     a signed-out visitor with "please log in", so there is nothing worth
-     freezing — see the matching note in generate-sitemap.js. */
+  /* The listing AND every topic detail.
+     The detail endpoint used to need a session and answered a signed-out
+     visitor with "please log in", so there was nothing worth freezing. It is
+     public now — the consigne, never the model answer — and a consigne is the
+     one thing on this site people search for by its exact wording, so each one
+     is frozen and prerendered as a page of its own. */
   try {
-    write('recent-topics', await getJson('/api/recent-topics'));
+    const listing = await getJson('/api/recent-topics');
+    write('recent-topics', listing);
     written += 1;
-    console.log('[snapshot] recent-topics: listing');
+    const topics = listing.topics || [];
+    let details = 0;
+    for (const topic of topics) {
+      if (!topic.topic_id) continue;
+      try {
+        write(path.join('recent-topics', topic.topic_id),
+          await getJson(`/api/recent-topics/${topic.topic_id}`));
+        details += 1;
+        written += 1;
+      } catch (e) {
+        console.warn(`[snapshot] topic ${topic.topic_id} skipped: ${e.message}`);
+      }
+    }
+    console.log(`[snapshot] recent-topics: listing + ${details} topic(s)`);
   } catch (e) {
     console.warn(`[snapshot] recent-topics skipped: ${e.message}`);
   }
