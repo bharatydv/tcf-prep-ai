@@ -114,7 +114,9 @@ export const PAGES = [
     visual: 'sections', extra: 'nclc', family: 'all', tips: 4, faqs: 5,
     related: ['tcf-canada-practice', 'tcf-canada-mock-test', 'tcf-canada-nclc-7',
       'tcf-canada-speaking', 'tcf-canada-writing', 'tcf-canada-listening',
-      'tcf-canada-reading', 'tcf-canada-exam-simulator'],
+      'tcf-canada-reading', 'tcf-canada-exam-simulator',
+      'tcf-canada-speaking-task-1', 'tcf-canada-speaking-task-2', 'tcf-canada-speaking-task-3',
+      'tcf-canada-writing-task-1', 'tcf-canada-writing-task-2', 'tcf-canada-writing-task-3'],
   },
   /* ---------------------------------------------------------- broad terms -- */
   {
@@ -123,7 +125,9 @@ export const PAGES = [
     facts: [['4', 'f1'], ['6', 'f2'], ['3 + 3', 'f3'], ['0 $', 'f4']],
     visual: 'sections', family: 'all', tips: 4, faqs: 4,
     related: ['tcf-canada', 'tcf-canada-writing', 'tcf-canada-speaking',
-      'tcf-canada-reading', 'tcf-canada-listening', 'tcf-canada-mock-test'],
+      'tcf-canada-reading', 'tcf-canada-listening', 'tcf-canada-mock-test',
+      'tcf-canada-writing-task-1', 'tcf-canada-writing-task-2', 'tcf-canada-writing-task-3',
+      'tcf-canada-speaking-task-1', 'tcf-canada-speaking-task-2', 'tcf-canada-speaking-task-3'],
   },
   {
     slug: 'tcf-canada-mock-test', k: 'mock', icon: GraduationCap, tone: 'emerald',
@@ -139,7 +143,9 @@ export const PAGES = [
     facts: [['60 min', 'f1'], ['12 min', 'f2'], ['3', 'f3'], ['0', 'f4']],
     visual: 'timers', family: 'all', tips: 4, faqs: 4,
     related: ['tcf-canada', 'tcf-canada-mock-test', 'tcf-canada-speaking',
-      'tcf-canada-writing', 'tcf-canada-practice', 'tcf-canada-nclc-7'],
+      'tcf-canada-writing', 'tcf-canada-practice', 'tcf-canada-nclc-7',
+      'tcf-canada-speaking-task-1', 'tcf-canada-speaking-task-2', 'tcf-canada-speaking-task-3',
+      'tcf-canada-writing-task-1', 'tcf-canada-writing-task-2', 'tcf-canada-writing-task-3'],
   },
   {
     slug: 'tcf-canada-nclc-7', k: 'nclc7', icon: Scales, tone: 'amber',
@@ -147,7 +153,9 @@ export const PAGES = [
     facts: [['458 - 502', 'f1'], ['453 - 498', 'f2'], ['10 - 11', 'f3'], ['10 - 11', 'f4']],
     visual: 'targets', extra: 'nclc', family: 'all', tips: 4, faqs: 5,
     related: ['tcf-canada', 'tcf-canada-practice', 'tcf-canada-mock-test',
-      'tcf-canada-writing', 'tcf-canada-speaking', 'tcf-canada-exam-simulator'],
+      'tcf-canada-writing', 'tcf-canada-speaking', 'tcf-canada-exam-simulator',
+      'tcf-canada-writing-task-1', 'tcf-canada-writing-task-2', 'tcf-canada-writing-task-3',
+      'tcf-canada-speaking-task-1', 'tcf-canada-speaking-task-2', 'tcf-canada-speaking-task-3'],
   },
   /* --------------------------------------------------------------- skills -- */
   {

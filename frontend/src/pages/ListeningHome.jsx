@@ -55,14 +55,17 @@ export default function ListeningHome() {
       </section>
 
       {/* MODE CHOICE */}
+      {/* The page's main heading: it sits above the smaller
+          section heading below, so it is the h1. */}
       <PageIntro
+        as="h1"
         title={t('listen.pageTitle')}
         description={t('listen.pageDesc')}
       />
 
       <section className="mx-auto max-w-5xl px-4 pt-10 sm:px-6">
         <div className="mb-6 text-center">
-          <h1 className="font-heading text-2xl font-extrabold text-gray-900">{t('listen.chooseTitle')}</h1>
+          <h2 className="font-heading text-2xl font-extrabold text-gray-900">{t('listen.chooseTitle')}</h2>
           <p className="mx-auto mt-2 max-w-lg text-sm text-gray-600">{t('listen.chooseSub')}</p>
         </div>
 

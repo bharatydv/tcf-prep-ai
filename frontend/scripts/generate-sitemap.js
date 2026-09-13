@@ -20,17 +20,18 @@ const STATIC = [
   ['/', 1.0, 'weekly'],
   ['/tef-tcf-writing-guide', 0.9, 'monthly'],
   ['/blog', 0.9, 'weekly'],
-  ['/recent-topics', 0.9, 'weekly'],
   ['/practice', 0.8, 'monthly'],
   ['/practice/tasks', 0.7, 'monthly'],
   ['/practice/themes', 0.7, 'monthly'],
   ['/speaking', 0.8, 'monthly'],
   ['/speaking/tasks', 0.7, 'monthly'],
   ['/speaking/themes', 0.7, 'monthly'],
+  /* /reading/practice and /listening/practice are deliberately absent: both
+     redirect a signed-out visitor to /login, so submitting them for indexing
+     offered search engines a login form. The hubs below are the public pages
+     a crawler should be pointed at. */
   ['/reading', 0.7, 'monthly'],
-  ['/reading/practice', 0.6, 'monthly'],
   ['/listening', 0.7, 'monthly'],
-  ['/listening/practice', 0.6, 'monthly'],
   ['/resources', 0.7, 'monthly'],
   ['/combinations', 0.6, 'monthly'],
   ['/pricing', 0.8, 'monthly'],
@@ -139,14 +140,46 @@ async function dynamicRoutes() {
      lastmod IS emitted here, because here it is true — it is the post's own
      updated_at, not the time the build ran. */
   merged.forEach((p) => p.slug && out.push(urlEntry(`/blog/${p.slug}`, 0.8, 'monthly', p.updated_at || p.created_at)));
-  /* Topic DETAIL pages are deliberately not listed.
+  /* Topic DETAIL pages, back in.
    *
-   * They used to be, at priority 0.7 each. /api/recent-topics/{id} requires a
-   * session, so the page answers a signed-out visitor — and every crawler —
-   * with "please log in": a soft 404 submitted for indexing. The listing page
-   * /recent-topics is public and is in STATIC above, which is the right thing
-   * to point a crawler at. If these pages are ever made to render their
-   * consigne to a signed-out visitor, put them back. */
+   * They were removed when /api/recent-topics/{id} required a session: the
+   * page answered a signed-out visitor — and every crawler — with "please log
+   * in", which is a soft 404 submitted for indexing. That endpoint is public
+   * now and returns the consigne without the model answer, so each topic is a
+   * real page with content nobody else has.
+   *
+   * No alternates: a consigne is exam material, published in French and never
+   * translated, so both locales serve the same text. The page canonicalises to
+   * this unprefixed URL, which is what RecentTopicDetail's localized={false}
+   * declares. */
+  /* The LISTING is conditional, which is why it lives here and not in STATIC.
+   *
+   * /api/recent-topics answers `{"topics": []}` in production today, so the
+   * page prerendered to a heading and nothing else - and both locales of it
+   * were submitted for indexing anyway. An empty page in a sitemap is worse
+   * than an absent one: it spends crawl budget to prove there is nothing worth
+   * coming back for, on a site whose problem is already that Google will not
+   * spend crawl budget here. The moment a topic exists the listing has content
+   * and returns, with its detail pages beside it.
+   *
+   * Same reasoning as the /reading/practice exclusion in STATIC above: never
+   * submit a URL that has nothing to show a crawler. */
+  if (API) {
+    try {
+      const { topics = [] } = await fetchJson(`${API}/api/recent-topics`);
+      if (topics.length) {
+        out.push(...localisedEntries('/recent-topics', 0.9, 'weekly'));
+        topics.forEach((topic) => topic.topic_id && out.push(
+          urlEntry(`/recent-topics/${topic.topic_id}`, 0.7, 'monthly',
+            topic.updated_at || topic.created_at)));
+        console.warn(`[sitemap] recent topics: ${topics.length}`);
+      } else {
+        console.warn('[sitemap] recent topics: none - listing left out of the sitemap');
+      }
+    } catch (e) {
+      console.warn('[sitemap] recent-topics unreachable:', e.message);
+    }
+  }
   return out;
 }
 
