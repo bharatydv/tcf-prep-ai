@@ -2,17 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Microphone, Stop, ArrowClockwise, UploadSimple,
-  CheckCircle, XCircle, Sparkle, Lightning,
+  Sparkle, Lightning,
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api } from '../lib/api';
-import { startRecording as startCapture, appendAudio, isRecordingSupported } from '../lib/recorder';
+import {
+  startRecording as startCapture, appendAudio, isRecordingSupported, listenForSpeech,
+} from '../lib/recorder';
 import { SPEAKING_TASKS, fmtClock } from '../lib/tcf';
 import { saveTask } from '../lib/speakingExam';
 import { useAuth } from '../context/AuthContext';
 import { BackLink, CreditsBadge } from '../components/shared';
-import { SpeakButton } from '../components/SpeakButton';
-import { SpeakingGrid } from '../components/SpeakingGrid';
+import { SpeakingResult } from '../components/SpeakingResult';
 import { useSpeak } from '../lib/speak';
 import { useT } from '../i18n';
 import { useSeo } from '../lib/seo';
@@ -21,27 +22,13 @@ import { useSeo } from '../lib/seo';
 const TACHE_INFO = {
   1: { title: 'Tâche 1 : Entretien Dirigé', range: '2 min' },
   2: { title: 'Tâche 2 : Exercice en Interaction', range: '2 min de préparation + 3 min 30' },
-  3: { title: "Tâche 3 : Expression d'un Point de Vue", range: '2 min de préparation + 2 min 30' },
+  3: { title: "Tâche 3 : Expression d'un Point de Vue", range: '2 min 30' },
 };
 
-// Each note names one sound in one word. The word gets a play button of its
-// own, because "the nasal vowel in « etranger » was not produced distinctly"
-// is advice you cannot act on until you have heard the vowel done right.
-const ISSUE_KEYS = ['vowel', 'nasal', 'liaison', 'consonant', 'stress', 'rhythm'];
-
-/* How much an error costs, mirroring VALID_SEVERITIES in backend/server.py.
-   Absent on a correction the grader did not weigh, which is why there is no
-   default entry here to fall back to. */
-const SEVERITY_TONE = {
-  major: 'bg-rose-100 text-rose-700',
-  moderate: 'bg-amber-100 text-amber-700',
-  minor: 'bg-gray-100 text-gray-500',
-};
-
-const CAT_LABELS = {
-  prepositions: 'Prépositions', spelling: 'Orthographe', conjugation: 'Conjugaison',
-  gender_number: 'Accord', anglicism: 'Anglicismes', improvement: 'Améliorations C1',
-};
+/* How long the clock will wait for a candidate who never speaks. Past this it
+   starts anyway: a recorder left running on an open microphone grows without
+   limit, and an answer that has not begun by now is not going to fill 2:30. */
+const SPEECH_WAIT_LIMIT = 120;
 
 export default function SpeakingRecord() {
   // One synthesiser for the page: pressing a second play button stops the
@@ -81,9 +68,12 @@ export default function SpeakingRecord() {
   const [elapsed, setElapsed] = useState(0);
   const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState(null);
-  // Preparation phase: tache 2 and 3 give the candidate 2 minutes before
-  // speaking, exactly as in the real exam.
+  // Preparation phase: tache 2 gives the candidate 2 minutes before speaking,
+  // exactly as in the real exam.
   const [prepLeft, setPrepLeft] = useState(null);
+  // Recording, but the countdown has not begun: tache 3 waits for the first
+  // words. See clockStartsOnSpeech in lib/tcf.js.
+  const [awaitingSpeech, setAwaitingSpeech] = useState(false);
 
   const spec = SPEAKING_TASKS[tacheNum] || null;
   const maxSeconds = spec?.speakSeconds ?? null;
@@ -96,11 +86,17 @@ export default function SpeakingRecord() {
   // the official cut-off fired late. The clock is derived from a timestamp.
   const startedAtRef = useRef(0);
   const fileInputRef = useRef(null);
+  // Teardown for the speech detector, and the guard that starts the clock
+  // anyway if it never hears anything.
+  const listenRef = useRef(null);
+  const silenceRef = useRef(null);
 
   useEffect(() => () => {
     if (timerRef.current) clearInterval(timerRef.current);
     if (audioUrl) URL.revokeObjectURL(audioUrl);
+    stopListening();
     captureRef.current?.cancel();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audioUrl]);
 
   // Load the chosen question (passed via ?q=) or a random one from the theme.
@@ -128,6 +124,7 @@ export default function SpeakingRecord() {
     setAudioUrl('');
     setAudioMeta(null);
     setElapsed(0);
+    setAwaitingSpeech(false);
     setResult(null);
   };
 
@@ -148,6 +145,25 @@ export default function SpeakingRecord() {
     setAudioUrl(URL.createObjectURL(file));
   };
 
+  const stopListening = () => {
+    listenRef.current?.();
+    listenRef.current = null;
+    if (silenceRef.current) clearTimeout(silenceRef.current);
+    silenceRef.current = null;
+  };
+
+  // Separate from the recorder, so a tache whose clock starts on speech can
+  // arm the microphone and still show 00:00 until the candidate begins.
+  const startClock = () => {
+    stopListening();
+    if (timerRef.current) clearInterval(timerRef.current);
+    setAwaitingSpeech(false);
+    setElapsed(0);
+    startedAtRef.current = Date.now();
+    timerRef.current = setInterval(
+      () => setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000)), 250);
+  };
+
   const startRecording = async () => {
     if (!user) return navigate('/login');
     if (!isRecordingSupported()) return toast.error(t('speak.noRecorder'));
@@ -156,9 +172,19 @@ export default function SpeakingRecord() {
       captureRef.current = await startCapture({ basename: 'answer' });
       setRecording(true);
       setElapsed(0);
-      startedAtRef.current = Date.now();
-      timerRef.current = setInterval(
-        () => setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000)), 250);
+      if (!spec?.clockStartsOnSpeech) return startClock();
+      // Nothing is lost while it waits: the recorder has been running since
+      // the button, so whatever is said before the clock starts is still in
+      // the audio the grader receives.
+      const stop = listenForSpeech(captureRef.current.stream, startClock);
+      // No AudioContext to listen with — start the clock rather than leave a
+      // countdown waiting on a detector that will never fire.
+      if (!stop) return startClock();
+      listenRef.current = stop;
+      setAwaitingSpeech(true);
+      // A microphone that hears nothing at all must not leave the recorder
+      // running indefinitely, so the clock starts by itself in the end.
+      silenceRef.current = setTimeout(startClock, SPEECH_WAIT_LIMIT * 1000);
     } catch (err) {
       toast.error(t('speak.micDenied'));
     }
@@ -168,6 +194,8 @@ export default function SpeakingRecord() {
     const capture = captureRef.current;
     if (!capture || !recording) return;
     setRecording(false);
+    setAwaitingSpeech(false);
+    stopListening();
     if (timerRef.current) clearInterval(timerRef.current);
     captureRef.current = null;
     try {
@@ -321,21 +349,27 @@ export default function SpeakingRecord() {
                 </button>
                 <p className="mt-4 font-heading text-lg font-bold text-gray-900">
                   {recording
-                    ? (maxSeconds
-                        ? t('speak.recordingOf', { clock: `${mm}:${ss}`, max: fmtClock(maxSeconds) })
-                        : t('speak.recording', { clock: `${mm}:${ss}` }))
+                    ? awaitingSpeech
+                      ? t('speak.listening')
+                      : (maxSeconds
+                          ? t('speak.recordingOf', { clock: `${mm}:${ss}`, max: fmtClock(maxSeconds) })
+                          : t('speak.recording', { clock: `${mm}:${ss}` }))
                     : spec?.prepSeconds ? t('speak.pressToPrepare') : t('speak.pressToSpeak')}
                 </p>
                 <p className="mt-1 text-sm text-gray-500">
                   {recording
-                    ? maxSeconds
-                      ? t('speak.autoStop', { max: fmtClock(maxSeconds) })
-                      : t('speak.pressAgain')
+                    ? awaitingSpeech
+                      ? t('speak.listeningHint', { max: fmtClock(maxSeconds) })
+                      : maxSeconds
+                        ? t('speak.autoStop', { max: fmtClock(maxSeconds) })
+                        : t('speak.pressAgain')
                     : spec?.prepSeconds
                       ? t('speak.prepThenSpeak', { prep: spec.prepSeconds / 60, speak: fmtClock(spec.speakSeconds) })
-                      : t('speak.answerAloud')}
+                      : spec?.clockStartsOnSpeech
+                        ? t('speak.clockOnSpeech', { max: fmtClock(spec.speakSeconds) })
+                        : t('speak.answerAloud')}
                 </p>
-                {recording && maxSeconds && (
+                {recording && maxSeconds && !awaitingSpeech && (
                   <div className="mx-auto mt-4 h-1.5 w-full max-w-md overflow-hidden rounded-full bg-gray-100">
                     <div
                       className={`h-full rounded-full transition-all ${elapsed > maxSeconds * 0.85 ? 'bg-red-500' : 'bg-primary'}`}
@@ -374,179 +408,8 @@ export default function SpeakingRecord() {
                 {t('speak.backToSitting')}
               </button>
             )}
-            {result.language_mix?.detected && (
-              <div className="flex items-start gap-3 rounded-3xl border border-amber-200 bg-amber-50 p-4"
-                data-testid="language-mix">
-                <XCircle size={20} weight="fill" className="mt-0.5 shrink-0 text-amber-500" />
-                <div>
-                  <p className="font-heading text-sm font-bold text-amber-900">
-                    {t('speak.mixedTitle', {
-                      languages: (result.language_mix.languages || []).join(', '),
-                    })}
-                  </p>
-                  <p className="mt-0.5 text-xs leading-relaxed text-amber-800/80">
-                    {t('speak.mixedBody')}
-                  </p>
-                  {result.language_mix.sample && (
-                    <p className="mt-1 text-xs italic text-amber-800/70">
-                      « {result.language_mix.sample} »
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
+            <SpeakingResult result={result} tts={tts} />
 
-            <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft">
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  {result.answers_question ? (
-                    <CheckCircle size={28} weight="fill" className="text-green-500" />
-                  ) : (
-                    <XCircle size={28} weight="fill" className="text-amber-500" />
-                  )}
-                  <div>
-                    <p className="font-heading text-base font-bold text-gray-900">
-                      {result.answers_question ? t('speak.relevant') : t('speak.notRelevant')}
-                    </p>
-                    <p className="text-sm text-gray-600">{result.relevance_comment}</p>
-                  </div>
-                </div>
-                <div className="text-center">
-                  <p className="text-xs uppercase tracking-wide text-gray-400">{t('speak.level')}</p>
-                  <p className="font-heading text-3xl font-extrabold text-primary">{result.tcf_level}</p>
-                </div>
-              </div>
-            </div>
-
-            <SpeakingGrid result={result} />
-
-            <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft">
-              <p className="font-heading text-sm font-bold text-gray-900">{t('speak.transcript')}</p>
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-gray-700">
-                {result.transcript || t('speak.noSpeechLine')}
-              </p>
-
-              {/* The same answer with the mistakes taken out and nothing else
-                  changed. It sits in this card rather than its own because it
-                  is only worth anything read against the line above it: every
-                  difference between the two is a mistake that was made. The
-                  better-written version is further down and is a different
-                  question — not what went wrong, but what could have been. */}
-              {(result.corrected_version || '').trim() && (
-                <div className="mt-4 border-t border-violet-50 pt-4" data-testid="corrected-version">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-heading text-sm font-bold text-gray-900">
-                      {t('speak.correctedTitle')}
-                    </p>
-                    <SpeakButton text={result.corrected_version} id="corrected" {...tts} />
-                  </div>
-                  <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-gray-700">
-                    {result.corrected_version}
-                  </p>
-                  <p className="mt-2 text-xs leading-relaxed text-gray-400">
-                    {t('speak.correctedNote')}
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {Array.isArray(result.errors) && result.errors.length > 0 && (
-              <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft">
-                <p className="font-heading text-sm font-bold text-gray-900">{t('speak.corrections')}</p>
-                <div className="mt-3 space-y-3">
-                  {result.errors.map((e, i) => (
-                    <div key={i} className="rounded-2xl border border-violet-50 bg-violet-50/40 p-4">
-                      <div className="flex flex-wrap items-center gap-2 text-sm">
-                        <span className="text-red-500 line-through">{e.error}</span>
-                        <span className="text-gray-400">→</span>
-                        <span className="font-semibold text-green-600">{e.correction}</span>
-                        {/* Reading that « Elle peut accepter » is right does not
-                            tell you how it sounds, which is the whole subject
-                            of a speaking test. */}
-                        <SpeakButton text={e.correction} id={`fix-${i}`} {...tts} />
-                        <span className="ml-auto flex items-center gap-1.5">
-                          {SEVERITY_TONE[e.severity] && (
-                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${SEVERITY_TONE[e.severity]}`}>
-                              {t(`speak.severity.${e.severity}`)}
-                            </span>
-                          )}
-                          <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase text-primary">{CAT_LABELS[e.category] || e.category}</span>
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-gray-500">{e.explanation}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {Array.isArray(result.pronunciation_errors) && result.pronunciation_errors.length > 0 && (
-              <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft"
-                data-testid="pronunciation-notes">
-                <p className="font-heading text-sm font-bold text-gray-900">{t('speak.pronunciation')}</p>
-                <div className="mt-3 space-y-3">
-                  {result.pronunciation_errors.map((e, i) => (
-                    <div key={i} className="rounded-2xl border border-sky-50 bg-sky-50/40 p-4">
-                      <div className="flex flex-wrap items-center gap-2 text-sm">
-                        <span className="font-semibold text-gray-900">{e.word}</span>
-                        <SpeakButton text={e.word} id={`say-${i}`} {...tts} />
-                        <span className="ml-auto rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold uppercase text-sky-700">
-                          {ISSUE_KEYS.includes(e.issue) ? t(`speak.issue.${e.issue}`) : e.issue}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-gray-500">{e.explanation}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* The candidate's own answer, rewritten well. Deliberately after
-                the corrections: the errors say what went wrong one line at a
-                time, and this is the same answer as a whole, which is the thing
-                worth listening to twice. */}
-            {(result.enhanced_version || '').trim() && (
-              <div className="rounded-3xl border border-emerald-100 bg-emerald-50/40 p-6 shadow-soft"
-                data-testid="enhanced-version">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="flex items-center gap-2 font-heading text-sm font-bold text-emerald-900">
-                    <Sparkle size={16} weight="fill" className="text-emerald-600" />
-                    {t('speak.enhancedTitle')}
-                  </p>
-                  <SpeakButton text={result.enhanced_version} id="enhanced" {...tts} />
-                </div>
-                <p className="mt-3 text-sm leading-relaxed text-gray-800">
-                  {result.enhanced_version}
-                </p>
-                <p className="mt-3 text-xs leading-relaxed text-emerald-800/80">
-                  {t('speak.enhancedNote')}
-                </p>
-              </div>
-            )}
-
-            {Array.isArray(result.suggestions) && result.suggestions.length > 0 && (
-              <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft">
-                <p className="font-heading text-sm font-bold text-gray-900">{t('speak.suggestions')}</p>
-                <ul className="mt-3 space-y-2">
-                  {result.suggestions.map((s, i) => (
-                    <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
-                      <CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-primary" /> {s}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {Array.isArray(result.vocabulary_suggestions) && result.vocabulary_suggestions.length > 0 && (
-              <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft">
-                <p className="font-heading text-sm font-bold text-gray-900">{t('speak.vocabulary')}</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {result.vocabulary_suggestions.map((v, i) => (
-                    <span key={i} className="rounded-full bg-fuchsia-50 px-3 py-1 text-xs font-medium text-fuchsia-700">{v}</span>
-                  ))}
-                </div>
-              </div>
-            )}
 
             <div className="flex justify-center">
               <button onClick={resetRecording} className="btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600">

@@ -8,7 +8,10 @@ import {
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api } from '../lib/api';
-import { startRecording as startCapture, appendAudio, isRecordingSupported } from '../lib/recorder';
+import {
+  startRecording as startCapture, appendAudio, isRecordingSupported, listenForSpeech,
+} from '../lib/recorder';
+import { SPEAKING_TASKS } from '../lib/tcf';
 import { useAuth } from '../context/AuthContext';
 import { BackLink } from '../components/shared';
 import { SpeakingGrid } from '../components/SpeakingGrid';
@@ -91,6 +94,10 @@ const TACHE1_CONSIGNE =
   + "projets. Rebondissez sur ses réponses avec des questions de relance, une à la fois, "
   + "comme un examinateur du TCF Canada.";
 
+/* How long the clock will wait for a candidate who never speaks, before
+   starting anyway: an open microphone recording silence grows without limit. */
+const SPEECH_WAIT_LIMIT = 120;
+
 // Tâche 2's 5 min 30 s already includes 2 min of preparation, so speaking time is the remainder.
 const TACHE_PREP_SECONDS = { 1: 0, 2: 120, 3: 0 };
 const TACHE_SPEAK_SECONDS = { 1: 120, 2: 210, 3: 270 };
@@ -107,6 +114,11 @@ function RecorderModal({ question, tacheNum, tacheTitle, onCancel, onComplete })
 
   const [phase, setPhase] = useState('brief');   // brief | prep | countdown | recording
   const [prepLeft, setPrepLeft] = useState(prepSeconds);
+  // Recording, but the clock has not begun. A tache with no preparation starts
+  // it on the candidate's first words instead of on the button — otherwise
+  // reading the question would eat the answer. See lib/tcf.js.
+  const clockOnSpeech = !!SPEAKING_TASKS[tacheNum]?.clockStartsOnSpeech;
+  const [awaitingSpeech, setAwaitingSpeech] = useState(false);
   const [tick, setTick] = useState(3);
   const [left, setLeft] = useState(speakSeconds);
   const [checking, setChecking] = useState(false);
@@ -116,10 +128,27 @@ function RecorderModal({ question, tacheNum, tacheTitle, onCancel, onComplete })
   const captureRef = useRef(null);
   const canceledRef = useRef(false);
   const leftRef = useRef(speakSeconds);
+  // Teardown for the speech detector, and the guard that starts the clock
+  // anyway if the microphone never hears anything.
+  const listenRef = useRef(null);
+  const silenceRef = useRef(null);
+
+  const stopListening = () => {
+    listenRef.current?.();
+    listenRef.current = null;
+    if (silenceRef.current) clearTimeout(silenceRef.current);
+    silenceRef.current = null;
+  };
+
+  const startClock = () => {
+    stopListening();
+    setAwaitingSpeech(false);
+  };
 
   useEffect(() => { leftRef.current = left; }, [left]);
 
   const releaseStream = () => {
+    stopListening();
     captureRef.current?.cancel();
     captureRef.current = null;
   };
@@ -168,6 +197,14 @@ function RecorderModal({ question, tacheNum, tacheTitle, onCancel, onComplete })
     try {
       captureRef.current = await startCapture({ basename: 'answer' });
       setPhase('recording');
+      if (!clockOnSpeech) return;
+      // The recorder runs from here either way, so nothing said while it
+      // waits is lost from the audio the grader receives.
+      const stop = listenForSpeech(captureRef.current.stream, startClock);
+      if (!stop) return;   // no AudioContext to listen with: run the clock now
+      listenRef.current = stop;
+      setAwaitingSpeech(true);
+      silenceRef.current = setTimeout(startClock, SPEECH_WAIT_LIMIT * 1000);
     } catch (err) {
       toast.error(t('st.micDenied'));
       cancel();
@@ -224,7 +261,7 @@ function RecorderModal({ question, tacheNum, tacheTitle, onCancel, onComplete })
   }, [phase, tick]);
 
   useEffect(() => {
-    if (phase !== 'recording') { speakEndsRef.current = null; return undefined; }
+    if (phase !== 'recording' || awaitingSpeech) { speakEndsRef.current = null; return undefined; }
     if (speakEndsRef.current == null) speakEndsRef.current = Date.now() + left * 1000;
 
     const read = () => {
@@ -242,7 +279,7 @@ function RecorderModal({ question, tacheNum, tacheTitle, onCancel, onComplete })
       document.removeEventListener('visibilitychange', onVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase]);
+  }, [phase, awaitingSpeech]);
 
   const spoken = speakSeconds - left;
   const progress = Math.min(100, (spoken / speakSeconds) * 100);
@@ -330,7 +367,9 @@ function RecorderModal({ question, tacheNum, tacheTitle, onCancel, onComplete })
                 <Stop size={30} weight="fill" />
               </button>
               <p className="mt-4 font-heading text-3xl font-extrabold tabular-nums text-gray-900">{fmt(left)}</p>
-              <p className="mt-1 text-xs text-gray-500">{t('st.timeLeft')}</p>
+              <p className="mt-1 text-xs text-gray-500">
+                {awaitingSpeech ? t('st.listening') : t('st.timeLeft')}
+              </p>
               <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-red-100">
                 <div className="h-full rounded-full bg-gradient-to-r from-red-500 to-rose-600 transition-all duration-1000"
                   style={{ width: `${progress}%` }} />

@@ -36,10 +36,14 @@ export const FREE_TRIAL_TOTAL = 6;
  * what stood between us and an expensive request. */
 export const FREE_WRITING = { warnWords: 180, maxChars: 6000 };
 
+/* `clockStartsOnSpeech` belongs to a tâche with no preparation: the recorder
+   arms on the button, but the countdown holds at zero until the candidate
+   actually speaks, so reading the question costs them none of their time. */
 export const SPEAKING_TASKS = {
   1: { prepSeconds: 0, speakSeconds: 120, name: 'Tâche 1 — Entretien dirigé' },
   2: { prepSeconds: 120, speakSeconds: 210, name: 'Tâche 2 — Exercice en interaction' },
-  3: { prepSeconds: 120, speakSeconds: 150, name: "Tâche 3 — Expression d'un point de vue" },
+  3: { prepSeconds: 0, speakSeconds: 150, clockStartsOnSpeech: true,
+    name: "Tâche 3 — Expression d'un point de vue" },
 };
 
 export const countWords = (text) =>

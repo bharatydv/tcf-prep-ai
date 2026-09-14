@@ -120,7 +120,84 @@ export async function startRecording({ basename = 'answer' } = {}) {
   };
 
   recorder.start();
-  return { recorder, stop, cancel, mimeType: recorder.mimeType || preferred };
+  // `stream` is handed back so a caller can listen to the same microphone it
+  // is recording from — see listenForSpeech. It stays owned by this handle:
+  // stop() and cancel() release the tracks.
+  return { recorder, stream, stop, cancel, mimeType: recorder.mimeType || preferred };
+}
+
+
+/* Voice activity: the moment the candidate actually starts speaking.
+ *
+ * Tache 3 gives no preparation, so its clock cannot start on the button — the
+ * candidate is still reading the question. It starts on the first sound loud
+ * enough to be speech, and the silence before that costs them nothing. The
+ * recording runs from the button either way, so anything said in the gap is
+ * still captured.
+ *
+ * Returns a teardown function, or null when the browser has no AudioContext —
+ * the signal for the caller to start its clock straight away rather than wait
+ * for a detector that will never fire.
+ */
+const SPEECH_RMS = 0.02;    // quiet speech, comfortably above room tone
+const SPEECH_FRAMES = 3;    // ~180 ms, so a click or a chair creak cannot start it
+
+export function listenForSpeech(stream, onSpeech,
+                                { rms = SPEECH_RMS, frames = SPEECH_FRAMES } = {}) {
+  const Ctx = typeof window !== 'undefined'
+    && (window.AudioContext || window.webkitAudioContext);
+  if (!Ctx || !stream) return null;
+  let ctx;
+  try {
+    ctx = new Ctx();
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    source.connect(analyser);
+    // Byte time-domain data rather than float: getFloatTimeDomainData is
+    // missing on older Safari, which is exactly where recording already needed
+    // special handling. 128 is silence, so (v - 128) / 128 is the sample.
+    const buf = new Uint8Array(analyser.fftSize);
+    let hot = 0;
+    let deaf = 0;
+    let timer = null;
+    const stop = () => {
+      if (timer) clearInterval(timer);
+      timer = null;
+      try { source.disconnect(); } catch { /* already torn down */ }
+      try { ctx.close(); } catch { /* already closed */ }
+    };
+    // setInterval rather than requestAnimationFrame: rAF stops in a hidden
+    // tab, and a candidate who starts speaking with the tab in the background
+    // must still start the clock.
+    timer = setInterval(() => {
+      // A context that never reaches "running" hears nothing at all — Safari
+      // can refuse to resume one created after an await, even inside a click.
+      // Give up after a second and report speech, so the caller starts its
+      // clock instead of stalling the candidate in front of a dead detector.
+      if (ctx.state !== 'running') {
+        deaf += 1;
+        if (deaf > 16) { stop(); onSpeech(); }
+        return;
+      }
+      deaf = 0;
+      analyser.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i += 1) {
+        const sample = (buf[i] - 128) / 128;
+        sum += sample * sample;
+      }
+      hot = Math.sqrt(sum / buf.length) >= rms ? hot + 1 : 0;
+      if (hot >= frames) { stop(); onSpeech(); }
+    }, 60);
+    // Chrome hands back a suspended context until a user gesture. This is
+    // called from the record button, so resuming here is permitted.
+    ctx.resume?.().catch(() => {});
+    return stop;
+  } catch {
+    try { ctx?.close(); } catch { /* nothing to close */ }
+    return null;
+  }
 }
 
 /* Uploads carry the true type in a field of its own, so the server never has

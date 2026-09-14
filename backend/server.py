@@ -1819,7 +1819,7 @@ SPEAKING_TASKS = {
         "name": "Tâche 1 — Entretien dirigé"},
     2: {"prep_seconds": 120, "speak_seconds": 210, "min_words": 60,
         "name": "Tâche 2 — Exercice en interaction"},
-    3: {"prep_seconds": 120, "speak_seconds": 150, "min_words": 90,
+    3: {"prep_seconds": 0,   "speak_seconds": 150, "min_words": 90,
         "name": "Tâche 3 — Expression d'un point de vue"},
 }
 
