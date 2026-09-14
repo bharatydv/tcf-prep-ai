@@ -5,9 +5,10 @@
  * block each one gets, the numbers in its fact strip, where its buttons go and
  * which siblings it links to.
  *
- * Copy is NOT here. Every string lives under `tcfCanada.<k>.*` in i18n/en.json
- * and i18n/fr.json, keyed off the `k` below, so these pages translate like
- * the rest of the app instead of hard-coding English into the bundle.
+ * Copy is NOT here. Every string lives under `tcfCanada.<k>.*` in
+ * i18n/en.tcfCanada.json, keyed off the `k` below — fifteen landing pages of
+ * marketing prose that is edited far more often than this file, and that the
+ * homepage should not have to download to render.
  *
  * The numbers in `facts` are the official TCF Canada constraints and must
  * agree with lib/tcf.js (WRITING_TASKS / SPEAKING_TASKS), which mirrors the

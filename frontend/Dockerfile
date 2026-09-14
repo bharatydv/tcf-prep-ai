@@ -66,6 +66,27 @@ COPY . .
 ARG SITEMAP_API=https://prepfrancais.com
 ENV SITEMAP_API=$SITEMAP_API
 
+# The community groups, baked into the bundle at build time.
+#
+# These CANNOT come from frontend/.env.local: .dockerignore excludes .env* from
+# the build context on purpose, so that file does not exist in this stage. A
+# link set only there works on a laptop and silently does nothing in
+# production, which is the worst of both.
+#
+# Defaults live here rather than in a secret because a group invite is a public
+# link by definition — it ends up in the JavaScript every visitor downloads.
+# Override per host from the root .env, the same way SITEMAP_API is overridden.
+#
+# REACT_APP_* is read at BUILD time, so rotating an invite — after a group
+# fills up, or the link leaks somewhere it should not have — means editing the
+# value and rebuilding the frontend. src/lib/community.js drops anything that
+# is not an absolute https: URL, and renders nothing at all when both are
+# empty.
+ARG REACT_APP_WHATSAPP_URL=https://chat.whatsapp.com/KCQnQYRp1cO77pOLyzyo4P
+ENV REACT_APP_WHATSAPP_URL=$REACT_APP_WHATSAPP_URL
+ARG REACT_APP_TELEGRAM_URL=
+ENV REACT_APP_TELEGRAM_URL=$REACT_APP_TELEGRAM_URL
+
 # Prerendering, with a fallback to the plain build.
 #
 # Without this the image shipped an empty shell that only fills in once

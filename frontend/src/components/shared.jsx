@@ -4,7 +4,7 @@ import { Fire, SignOut, List, X, SquaresFour, ArrowLeft } from '@phosphor-icons/
 import { useAuth } from '../context/AuthContext';
 import { CATEGORY_META, announcePaywall, paywallDetail } from '../lib/api';
 import { FREE_TRIAL_TOTAL, FREE_WRITING, WRITING_TASKS, countWords, freeWordStatus, wordStatus } from '../lib/tcf';
-import { LANGUAGES, useI18n, useT } from '../i18n';
+import { useI18n, useT } from '../i18n';
 
 /* --------------------------------------------------------- ComingSoon ---- */
 /* A skill that is not ready yet. Deliberately a full replacement for the page
@@ -62,38 +62,12 @@ export function BackLink({ to, fallback = '/', label, className = '', testid = '
   );
 }
 
-/* ---------------------------------------------------------- LangToggle ---- */
-/* Two locales only, so a segmented control beats a dropdown: the alternative
-   is always visible and one tap away.
-   shrink-0 is load-bearing: the toggle sits in a flex row next to the auth
-   buttons, and without it flex compresses the control while `overflow-hidden`
-   silently slices the labels off — which strands anyone who cannot read the
-   language they are currently in. */
-function LangToggle({ lang, setLang }) {
-  return (
-    <div className="inline-flex shrink-0 overflow-hidden rounded-lg border border-violet-200"
-      role="group" aria-label="Language">
-      {LANGUAGES.map((l) => (
-        <button key={l.code} onClick={() => setLang(l.code)}
-          aria-pressed={lang === l.code}
-          title={l.name}
-          data-testid={`lang-${l.code}`}
-          className={`shrink-0 px-2.5 py-1 text-xs font-bold transition ${
-            lang === l.code ? 'bg-primary text-white' : 'bg-white text-gray-500 hover:text-primary'
-          }`}>
-          {l.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 /* ------------------------------------------------------------- Header ---- */
 export function Header() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const { t, lang, setLang } = useI18n();
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const menuButtonRef = useRef(null);
 
@@ -155,7 +129,6 @@ export function Header() {
         </nav>
 
         <div className="hidden shrink-0 items-center gap-2.5 hdr:flex xl:gap-3">
-          <LangToggle lang={lang} setLang={setLang} />
           {user ? (
             <>
               {user.current_streak > 0 && (
@@ -200,7 +173,6 @@ export function Header() {
       </div>
       {open && (
         <div id="mobile-menu" className="max-h-[calc(100dvh-4rem)] overflow-y-auto border-t border-gray-100 bg-white px-4 py-3 hdr:hidden">
-          <div className="pb-2"><LangToggle lang={lang} setLang={setLang} /></div>
           {[...links, ...extraLinks].map((l) => (
             <Link key={l.to} to={l.to} className="block py-2.5 text-sm font-medium text-gray-700">{l.label}</Link>
           ))}

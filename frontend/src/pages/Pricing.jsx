@@ -2,9 +2,8 @@ import { useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { CheckCircle } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
-import { useI18n, useT } from '../i18n';
+import { useT } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
-import { pathForLocale } from '../lib/locale';
 import { useBillingPlans } from '../lib/plans';
 import { useCheckout } from '../lib/checkout';
 import { track } from '../lib/api';
@@ -24,7 +23,6 @@ export default function Pricing() {
   // be the catalogue's rather than a guess — the whole point of the schema is
   // that it agrees with what the page charges.
   const { plans, currency, configured, loading } = useBillingPlans();
-  const { lang } = useI18n();
   /* Checkout lives in lib/checkout.js so the landing page can open the same
      one. This page is now a caller like any other. */
   const { subscribe, busy, promptDialog } = useCheckout();
@@ -44,7 +42,7 @@ export default function Pricing() {
    * prices would publish a figure the server has not confirmed. */
   const offerSchema = useMemo(() => {
     if (loading || !plans.length) return null;
-    const url = `${SITE_URL}${pathForLocale(lang, '/pricing')}`;
+    const url = `${SITE_URL}/pricing`;
     return {
       '@context': 'https://schema.org',
       '@type': 'Product',
@@ -68,7 +66,7 @@ export default function Pricing() {
         url,
       })),
     };
-  }, [plans, currency, loading, t, lang]);
+  }, [plans, currency, loading, t]);
   const cta = user ? '/dashboard' : '/register';
 
   return (

@@ -4,7 +4,7 @@ import {
   Sparkle, MagnifyingGlass, ArrowRight, CalendarBlank, Star,
 } from '@phosphor-icons/react';
 import { api } from '../lib/api';
-import { formatDate, useI18n } from '../i18n';
+import { formatDate, useT } from '../i18n';
 import { useSeo } from '../lib/seo';
 import { PageIntro } from '../components/PageIntro';
 
@@ -40,7 +40,7 @@ export default function Blog() {
   // shell's canonical, which points at the homepage.
   useSeo({ titleKey: 'seo.blog.title', descKey: 'seo.blog.desc', path: '/blog' });
 
-  const { t, lang } = useI18n();
+  const t = useT();
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
@@ -183,7 +183,7 @@ export default function Blog() {
                     <p className="mt-3 text-sm leading-relaxed text-gray-600">{featured.excerpt}</p>
                     <div className="mt-5 flex items-center justify-between">
                       <span className="flex items-center gap-1.5 text-xs text-gray-500">
-                        <CalendarBlank size={14} /> {formatDate(featured.created_at, lang)}
+                        <CalendarBlank size={14} /> {formatDate(featured.created_at)}
                       </span>
                       <span className="flex items-center gap-1 text-sm font-semibold text-primary">
                         {t('blog.read')} <ArrowRight size={15} weight="bold" />
@@ -225,7 +225,7 @@ export default function Blog() {
                         <p className="mt-2 flex-1 text-sm leading-relaxed text-gray-600">{p.excerpt}</p>
                         <div className="mt-4 flex items-center justify-between">
                           <span className="flex items-center gap-1.5 text-xs text-gray-400">
-                            <CalendarBlank size={14} /> {formatDate(p.created_at, lang)}
+                            <CalendarBlank size={14} /> {formatDate(p.created_at)}
                           </span>
                           <span className="flex items-center gap-1 text-sm font-semibold text-primary">
                             {t('blog.read')} <ArrowRight size={15} weight="bold" />

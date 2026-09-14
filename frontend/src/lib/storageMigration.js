@@ -1,8 +1,8 @@
 /* One-time rename of the localStorage namespace, monfrancais.* -> prepfrancais.*
  *
  * The keys carry the brand name, so the rebrand would have orphaned everything
- * already in a returning visitor's browser: their interface language, the
- * dismissed-state of the verify-email banner, the anonymous-session marker, and
+ * already in a returning visitor's browser: the dismissed-state of the
+ * verify-email banner, the anonymous-session marker, and
  * — the one that actually costs someone work — a half-finished exam-simulator
  * draft, which is the whole reason that key exists.
  *

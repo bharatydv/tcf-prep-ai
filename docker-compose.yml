@@ -98,6 +98,12 @@ services:
         # Override on a staging host so its build does not prerender production
         # content: SITEMAP_API=https://staging.example.com docker compose build
         SITEMAP_API: ${SITEMAP_API:-https://prepfrancais.com}
+        # The community groups. Defaults are in frontend/Dockerfile, which is
+        # also where the reason they cannot live in frontend/.env.local is
+        # written down. Set either here to override for one host:
+        #   REACT_APP_TELEGRAM_URL=https://t.me/... docker compose build
+        REACT_APP_WHATSAPP_URL: ${REACT_APP_WHATSAPP_URL:-https://chat.whatsapp.com/KCQnQYRp1cO77pOLyzyo4P}
+        REACT_APP_TELEGRAM_URL: ${REACT_APP_TELEGRAM_URL:-}
     container_name: tcf_frontend
     restart: always
     logging: *logging

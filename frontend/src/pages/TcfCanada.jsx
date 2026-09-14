@@ -26,9 +26,8 @@ import {
 import { Reveal, ScoreRing, Faq, useInView } from '../components/landing';
 import { RouteFallback } from '../components/shared';
 import { useAuth } from '../context/AuthContext';
-import { useI18n, useNamespace } from '../i18n';
+import { useNamespace, useT } from '../i18n';
 import { Seo, SITE_URL, breadcrumbSchema } from '../lib/seo';
-import { pathForLocale } from '../lib/locale';
 import { track } from '../lib/api';
 import { WRITING_TASKS, SPEAKING_TASKS, fmtClock } from '../lib/tcf';
 import NotFound from './NotFound';
@@ -482,7 +481,7 @@ export default function TcfCanada({ slug }) {
 }
 
 function TcfCanadaPage({ page, slug }) {
-  const { t, lang } = useI18n();
+  const t = useT();
   const { user } = useAuth();
   const p = useMemo(() => scoped(t, page.k), [t, page.k]);
   const c = toneOf(page.tone);
@@ -502,13 +501,12 @@ function TcfCanadaPage({ page, slug }) {
       ? [[t('tcfCanada.ui.home'), '/'], [p('crumb'), path]]
       : [[t('tcfCanada.ui.home'), '/'], [t('tcfCanada.hub.crumb'), '/tcf-canada'], [p('crumb'), path]];
     return [
-      // Locale-aware, so a French page's breadcrumb names French URLs.
-      breadcrumbSchema(trail, lang),
+      breadcrumbSchema(trail),
       {
         '@context': 'https://schema.org',
         '@type': 'FAQPage',
-        inLanguage: lang === 'fr' ? 'fr-CA' : 'en',
-        url: SITE_URL + pathForLocale(lang, path),
+        inLanguage: 'en',
+        url: SITE_URL + path,
         mainEntity: range(page.faqs).map((n) => ({
           '@type': 'Question',
           name: p(`q${n}`),
@@ -516,7 +514,7 @@ function TcfCanadaPage({ page, slug }) {
         })),
       },
     ];
-  }, [t, p, lang, page.k, page.faqs, path]);
+  }, [t, p, page.k, page.faqs, path]);
 
   const crumbs = page.k === 'hub'
     ? [[t('tcfCanada.ui.home'), '/'], [p('crumb'), path]]

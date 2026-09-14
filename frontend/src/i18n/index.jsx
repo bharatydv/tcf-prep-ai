@@ -1,45 +1,38 @@
-/* Minimal two-language i18n.
+/* Minimal interface dictionary.
  *
- * Why not i18next: this project is pinned to TypeScript 4.9.5 by CRA 5, and
- * current i18next requires a TS 5+ peer. Forcing it with --legacy-peer-deps
- * would leave a broken resolution in the tree for whoever installs next. Two
- * locales with {{var}} interpolation do not need 40 kB of library.
+ * The site is English-only. This used to carry a second French dictionary and
+ * a locale-routed shell; both are gone. The audience is learning French, not
+ * reading French, so a translated interface bought nothing and cost a second
+ * copy of every string to keep in step — and a second set of URLs for search
+ * engines to treat as duplicates of the first.
  *
- * Loading: English is bundled statically because it is also the fallback for
- * any key missing from another dictionary. French is fetched with a dynamic
- * import, so an English-speaking visitor never downloads it — the two files
- * are ~117 kB of raw JSON between them and both used to sit in the entry
- * chunk. The provider holds its children back until the active dictionary has
- * arrived, so a French visitor never sees a frame of English first.
+ * Why a dictionary at all, rather than literals in the components: the copy is
+ * long-form marketing prose, it is edited far more often than the components
+ * around it, and keeping it in one file is what lets that happen without
+ * touching JSX. {{var}} interpolation is the only feature it needs.
  *
  * Usage:
- *   const { t, lang, setLang } = useI18n();
+ *   const t = useT();
  *   t('write.analyse')                     -> "Analyse my text"
  *   t('words.count', { n: 12 })            -> "12 words"
  *
  * Rules:
- *  - Interface text goes through t().
- *  - Exam material (consignes, model answers, the learner's own French, and
- *    the corrections themselves) is NEVER translated — it is the exam.
- *  - AI explanations stay English by product decision; the French examples
- *    inside them stay French.
+ *  - Interface text goes through t() and is written in English.
+ *  - French stays where it carries meaning the English does not: the exam's
+ *    own vocabulary (tâche, consigne, expression écrite/orale), and all exam
+ *    material — consignes, model answers, the learner's own French, and the
+ *    corrections themselves. That is the exam; translating it would change
+ *    what is being practised.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import en from './en.json';
-import { pathForLocale, stripLocale } from '../lib/locale';
 
-/* Loaded dictionaries. English is always present; others arrive on demand and
-   are cached here so switching back and forth costs one fetch each, not one
-   per toggle. */
+/* The active dictionary. Module-level rather than state: it is written once at
+   import and then only ever extended with a namespace, and the `loaded`
+   counter below is what re-renders consumers when that happens. */
 const DICTS = { en };
 
-const LOADERS = {
-  en: () => Promise.resolve(en),
-  fr: () => import(/* webpackChunkName: "locale-fr" */ './fr.json').then((m) => m.default || m),
-};
-
-/* Namespaces kept OUT of the dictionaries above and fetched with the page that
- * uses them.
+/* Namespaces kept OUT of en.json and fetched with the page that uses them.
  *
  * A JSON import is all-or-nothing: webpack does not tree-shake object keys, so
  * every string in en.json ships in the entry chunk whether or not anything on
@@ -52,38 +45,8 @@ const LOADERS = {
  * hold its render until that resolves, or its strings render blank.
  */
 const NAMESPACE_LOADERS = {
-  tcfCanada: {
-    en: () => import(/* webpackChunkName: "ns-tcf-en" */ './en.tcfCanada.json'),
-    fr: () => import(/* webpackChunkName: "ns-tcf-fr" */ './fr.tcfCanada.json'),
-  },
+  tcfCanada: () => import(/* webpackChunkName: "ns-tcf-en" */ './en.tcfCanada.json'),
 };
-
-export const LANGUAGES = [
-  { code: 'en', label: 'EN', name: 'English' },
-  { code: 'fr', label: 'FR', name: 'Français' },
-];
-
-const STORAGE_KEY = 'prepfrancais.lang';
-
-/* Browser French of any region (fr, fr-CA, fr-FR) starts in French; everyone
-   else starts in English, which is the safer default for an audience that is
-   learning French rather than already speaking it.
-
-   Only consulted when the URL does not say. Since locale routing landed, the
-   address is the authority: /fr/pricing is French and /pricing is English, for
-   everybody, including a returning visitor whose last choice was the other
-   one. Two reasons it has to work that way — a shared link must open in the
-   language it was shared in, and a page whose content does not match its own
-   canonical URL is the exact duplicate-content problem hreflang exists to
-   solve. The toggle is one click away, and it remembers. */
-export function detectLanguage() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved && LOADERS[saved]) return saved;
-  } catch { /* storage blocked (private mode) — fall through to detection */ }
-  const navLangs = [navigator.language, ...(navigator.languages || [])].filter(Boolean);
-  return navLangs.some((l) => l.toLowerCase().startsWith('fr')) ? 'fr' : 'en';
-}
 
 /* "a{{n}}b" -> "a12b". Missing vars are left visible rather than blanked, so a
    broken string is obvious in review instead of silently losing information. */
@@ -93,13 +56,12 @@ function interpolate(template, vars) {
     (vars[key] === undefined || vars[key] === null ? match : String(vars[key])));
 }
 
-/* Long-form date in the active language. Kept here rather than in each page so
-   a French UI never renders "August 9, 2026". fr-CA over fr-FR to match the
-   Canadian audience the product targets. */
-export function formatDate(value, lang) {
+/* Long-form date. Kept here rather than in each page so every screen agrees on
+   one format. */
+export function formatDate(value) {
   if (!value) return '';
   try {
-    return new Date(value).toLocaleDateString(lang === 'fr' ? 'fr-CA' : 'en-US',
+    return new Date(value).toLocaleDateString('en-US',
       { year: 'numeric', month: 'long', day: 'numeric' });
   } catch { return String(value).slice(0, 10); }
 }
@@ -111,76 +73,28 @@ function lookup(dict, key) {
 
 const I18nContext = createContext(null);
 
-export function I18nProvider({ children, initialLang }) {
-  // The URL wins. detectLanguage() is the fallback for a path that carries no
-  // locale of its own, which today means every English page.
-  const [lang, setLangState] = useState(
-    () => (LOADERS[initialLang] ? initialLang : detectLanguage()));
-  // Bumped once a dictionary lands, to re-render with the newly available
-  // strings. DICTS itself is a module-level cache, not state.
-  const [loaded, setLoaded] = useState(() => Object.keys(DICTS).join(','));
+export function I18nProvider({ children }) {
+  /* Bumped once a namespace lands, to re-render with the newly available
+     strings. DICTS itself is a module-level cache, not state. */
+  const [loaded, setLoaded] = useState('');
 
-  const ready = Boolean(DICTS[lang]);
-
-  useEffect(() => {
-    if (DICTS[lang]) return;
-    let cancelled = false;
-    (LOADERS[lang] || LOADERS.en)()
-      .then((dict) => {
-        if (cancelled) return;
-        DICTS[lang] = dict;
-        setLoaded(Object.keys(DICTS).join(','));
-      })
-      .catch(() => {
-        // A failed chunk must not strand the app on a blank screen: fall back
-        // to English rather than never becoming ready.
-        if (!cancelled) setLangState('en');
-      });
-    return () => { cancelled = true; };
-  }, [lang]);
-
-  /* Switching language is a NAVIGATION, not a state change.
-   *
-   * The locale lives in the URL and <BrowserRouter basename> reads it once, at
-   * mount, so flipping `lang` in place would leave a French page sitting at an
-   * English address — every link on it wrong, its canonical lying, and the
-   * address bar unshareable. A full load to the other locale's URL is the
-   * honest move, and on a prerendered page it is a cheap one.
-   *
-   * The choice is still stored: it is what a later visit to a locale-less
-   * entry point reads.
-   */
-  const setLang = useCallback((next) => {
-    if (!LOADERS[next]) return;
-    try { localStorage.setItem(STORAGE_KEY, next); } catch { /* non-fatal */ }
-    if (next === lang) return;
-    const route = stripLocale(window.location.pathname);
-    window.location.assign(
-      pathForLocale(next, route) + window.location.search + window.location.hash);
-  }, [lang]);
-
-  // Screen readers and browser translation prompts both key off this.
-  useEffect(() => { document.documentElement.lang = lang; }, [lang]);
-
-  /* Pull a split-out namespace into the active dictionary.
+  /* Pull a split-out namespace into the dictionary.
    *
    * Idempotent and safe to call from several components at once: the check
    * against the already-merged dictionary is what stops a second fetch, and
    * webpack dedupes concurrent imports of the same chunk anyway.
    *
-   * DICTS is replaced rather than mutated for the language being extended, so
-   * the `loaded` bump below is what re-renders consumers — mutating in place
-   * would leave every t() call returning the old answer until something else
-   * happened to re-render. */
+   * DICTS.en is replaced rather than mutated, so the `loaded` bump below is
+   * what re-renders consumers — mutating in place would leave every t() call
+   * returning the old answer until something else happened to re-render. */
   const loadNamespace = useCallback(async (name) => {
-    const loaders = NAMESPACE_LOADERS[name];
-    if (!loaders) return true;
-    if (DICTS[lang] && DICTS[lang][name]) return true;
-    const load = loaders[lang] || loaders.en;
+    const load = NAMESPACE_LOADERS[name];
+    if (!load) return true;
+    if (DICTS.en[name]) return true;
     try {
       const mod = await load();
-      DICTS[lang] = { ...DICTS[lang], [name]: mod.default || mod };
-      setLoaded(`${Object.keys(DICTS).join(',')}:${lang}.${name}`);
+      DICTS.en = { ...DICTS.en, [name]: mod.default || mod };
+      setLoaded(`en.${name}`);
       return true;
     } catch {
       // A failed chunk must not wedge the page that asked for it. The strings
@@ -188,35 +102,21 @@ export function I18nProvider({ children, initialLang }) {
       // reload, which is better than a permanent spinner.
       return false;
     }
-  }, [lang]);
+  }, []);
 
   const t = useCallback((key, vars) => {
-    const hit = lookup(DICTS[lang], key);
+    const hit = lookup(DICTS.en, key);
     if (typeof hit === 'string') return interpolate(hit, vars);
-    // Fall back to English before giving up, so a gap in fr.json degrades to
-    // readable English rather than a raw key.
-    const fallback = lookup(DICTS.en, key);
-    if (typeof fallback === 'string') return interpolate(fallback, vars);
     if (process.env.NODE_ENV === 'development') {
       console.warn(`[i18n] missing key: ${key}`);
     }
     return key;
-    // `loaded` is in the dependency list on purpose: it is how a dictionary
+    // `loaded` is in the dependency list on purpose: it is how a namespace
     // arriving asynchronously re-renders every consumer of t().
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lang, loaded]);
+  }, [loaded]);
 
-  const value = useMemo(() => ({ lang, setLang, t, loadNamespace }),
-    [lang, setLang, t, loadNamespace]);
-
-  if (!ready) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-white" role="status" aria-live="polite">
-        <span className="sr-only">Loading…</span>
-        <div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" />
-      </div>
-    );
-  }
+  const value = useMemo(() => ({ t, loadNamespace }), [t, loadNamespace]);
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
@@ -232,26 +132,22 @@ export const useT = () => useI18n().t;
 
 /* Wait for a split-out namespace before rendering strings from it.
  *
- * Returns false until the namespace is in the active dictionary. A caller MUST
- * honour that — rendering anyway means every one of its t() calls returns a
- * raw key on the first paint, and on a prerendered page that key is what gets
- * captured into the static HTML.
- *
- * Re-runs on a language change, because the dictionary that just became
- * active has not got the namespace yet.
+ * Returns false until the namespace is in the dictionary. A caller MUST honour
+ * that — rendering anyway means every one of its t() calls returns a raw key on
+ * the first paint, and on a prerendered page that key is what gets captured
+ * into the static HTML.
  */
 export function useNamespace(name) {
-  const { lang, loadNamespace } = useI18n();
-  const [ready, setReady] = useState(
-    () => Boolean(DICTS[lang] && DICTS[lang][name]));
+  const { loadNamespace } = useI18n();
+  const [ready, setReady] = useState(() => Boolean(DICTS.en[name]));
 
   useEffect(() => {
-    if (DICTS[lang] && DICTS[lang][name]) { setReady(true); return undefined; }
+    if (DICTS.en[name]) { setReady(true); return undefined; }
     let cancelled = false;
     setReady(false);
     loadNamespace(name).then((ok) => { if (!cancelled) setReady(ok); });
     return () => { cancelled = true; };
-  }, [lang, name, loadNamespace]);
+  }, [name, loadNamespace]);
 
   return ready;
 }

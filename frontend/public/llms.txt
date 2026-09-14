@@ -6,7 +6,7 @@
 > spaced repetition.
 
 Site: https://prepfrancais.com
-Languages: French and English interface; all exam material stays in French.
+Languages: English interface; all exam material stays in French.
 
 ## Direct answers
 
@@ -110,13 +110,14 @@ anglicismes · améliorations C1 (style upgrades, which never count as errors)
 
 ## Languages and URLs
 
-The interface exists in English and French. English pages are unprefixed and
-French pages live under /fr — /pricing and /fr/pricing are the same page in the
-two languages, and each names the other with hreflang. Exam material (consignes,
-model answers, corrections) is French in both, because it is the exam.
+The interface is English. Every page has exactly one address and no hreflang
+alternates. A French interface lived under /fr for one release; those URLs now
+redirect to their English page and should not be cited.
 
-Blog posts are written once, in one language, and have a single unprefixed
-address; there is no /fr twin to cite.
+French remains where it carries the meaning: the exam's own vocabulary (tâche,
+consigne, expression écrite, expression orale, compréhension écrite/orale) and
+all exam material — consignes, model answers, the learner's own writing and
+speech, and the corrections themselves. That is the exam, not a translation.
 
 ## Usage
 

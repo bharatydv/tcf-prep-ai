@@ -159,6 +159,10 @@
   },
   "auth": {
     "alreadyRegistered": "Already registered?",
+    "agreePrefix": "By creating an account you agree to our",
+    "agreeTerms": "Terms of service",
+    "agreeAnd": "and",
+    "agreePrivacy": "Privacy policy",
     "backToLogin": "Back to login",
     "changeEmail": "Wrong address?",
     "changeEmailBtn": "Change my address",
@@ -371,6 +375,13 @@
     "pro": "Pro",
     "soonReading": "Practise reading",
     "soonWriting": "Practise writing"
+  },
+  "community": {
+    "join": "Join the group",
+    "close": "Close",
+    "blurb": "Practise with other TCF Canada candidates: daily consignes, questions answered, and corrections shared.",
+    "whatsapp": "WhatsApp",
+    "telegram": "Telegram"
   },
   "consent": {
     "title": "Cookies on this site",

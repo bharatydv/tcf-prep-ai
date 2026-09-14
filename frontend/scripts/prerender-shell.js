@@ -35,9 +35,8 @@ const NOT_PRERENDERABLE = [
   path.join('practice', 'simulator'),
   /* These two are NOT behind ProtectedRoute — the components redirect to
      /login themselves when signed out, which react-snap follows. The result
-     was four sitemap URLs (two locales each) serving a login form: duplicate
-     titles, canonical pointing at /login, and hreflang aimed at a page that is
-     not in the sitemap. Every hreflang error on the site came from these. */
+     was sitemap URLs serving a login form: duplicate titles, and a canonical
+     pointing at /login. */
   path.join('reading', 'practice'),
   path.join('listening', 'practice'),
   path.join('admin', 'blog'),
@@ -54,17 +53,9 @@ function save() {
   console.log('[prerender] saved pristine shell -> build/app-shell.html');
 }
 
-/* Every protected route exists once per language, so each has to be pruned
-   twice. Without the French half, react-snap's crawl of /fr/dashboard — which
-   redirects to the login form exactly as the English one does — would bake
-   that form into build/fr/dashboard/index.html, and a signed-in French learner
-   hard-loading their dashboard would be shown a login page until React took
-   over. The English bug this script was written for, in the other locale. */
-const localised = (route) => [route, path.join('fr', route)];
-
 function prune() {
   let removed = 0;
-  for (const route of NOT_PRERENDERABLE.flatMap(localised)) {
+  for (const route of NOT_PRERENDERABLE) {
     const file = path.join(BUILD, route, 'index.html');
     if (!fs.existsSync(file)) continue;
     fs.rmSync(path.join(BUILD, route), { recursive: true, force: true });

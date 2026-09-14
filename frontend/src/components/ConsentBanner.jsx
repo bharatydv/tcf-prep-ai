@@ -81,7 +81,15 @@ export default function ConsentBanner() {
 
   if (!open) return null;
 
-  const answer = (value) => { applyConsent(value); setOpen(false); };
+  const answer = (value) => {
+    applyConsent(value);
+    setOpen(false);
+    /* Announced, because this banner is not the only thing that cares whether
+       the bottom edge of the screen is free: CommunityButton holds itself back
+       until consent has been answered, and without an event it would keep
+       waiting until the next full page load. */
+    window.dispatchEvent(new Event('prepfrancais:consent-answered'));
+  };
 
   return (
     <div
