@@ -4,7 +4,7 @@ import {
   PenNib, Clock, ListChecks, Target, ArrowRight, CheckCircle, Sparkle,
 } from '@phosphor-icons/react';
 import { BackLink } from '../components/shared';
-import { useI18n } from '../i18n';
+import { useT } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
 
 /* ------------------------------------------------------------------ data ---
@@ -31,7 +31,7 @@ const TIPS = [1, 2, 3, 4, 5].map((n) => `guide.tip${n}`);
 
 /* -------------------------------------------------------------------- page - */
 export default function TefTcfWritingGuide() {
-  const { t, lang } = useI18n();
+  const t = useT();
 
   // Article + FAQ markup. It was correct before but was appended by an effect,
   // so the crawlers it exists for — the ones that do not run JavaScript — never
@@ -43,7 +43,7 @@ export default function TefTcfWritingGuide() {
       '@type': 'Article',
       headline: `${t('guide.heroA')} ${t('guide.heroB')}`,
       description: t('guide.docDesc'),
-      inLanguage: lang === 'fr' ? 'fr-CA' : 'en',
+      inLanguage: 'en',
       author: { '@type': 'Organization', name: 'prepfrancais' },
       publisher: {
         '@type': 'Organization',
@@ -57,14 +57,14 @@ export default function TefTcfWritingGuide() {
     {
       '@context': 'https://schema.org',
       '@type': 'FAQPage',
-      inLanguage: lang === 'fr' ? 'fr-CA' : 'en',
+      inLanguage: 'en',
       mainEntity: FAQ.map((f) => ({
         '@type': 'Question',
         name: t(f.q),
         acceptedAnswer: { '@type': 'Answer', text: t(f.a) },
       })),
     },
-  ]), [t, lang]);
+  ]), [t]);
 
   return (
     <main className="overflow-x-clip bg-white">

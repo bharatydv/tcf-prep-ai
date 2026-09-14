@@ -3,7 +3,7 @@ import { Link, useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, CalendarBlank, User } from '@phosphor-icons/react';
 import { api } from '../lib/api';
 import { BackLink } from '../components/shared';
-import { formatDate, useI18n } from '../i18n';
+import { formatDate, useT } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
 
 /* Very small, safe markdown -> HTML for headings, bold, links, lists, paragraphs.
@@ -115,7 +115,7 @@ function renderContent(src) {
 }
 
 export default function BlogPost() {
-  const { t, lang } = useI18n();
+  const t = useT();
   const { slug } = useParams();
   const navigate = useNavigate();
   const [post, setPost] = useState(null);
@@ -178,10 +178,6 @@ export default function BlogPost() {
         path={`/blog/${slug}`}
         type="article"
         image={post.cover_image}
-        /* No French translation exists: a post is written once, in one
-           language, and only the shell around it is localised. Claiming an
-           alternate would point hreflang at the same English text. */
-        localized={false}
         jsonLd={articleSchema}
       />
       {/* HERO */}
@@ -193,7 +189,7 @@ export default function BlogPost() {
           </h1>
           <div className="mt-4 flex flex-wrap items-center gap-4 text-sm text-gray-500">
             <span className="flex items-center gap-1.5"><User size={15} /> {post.author || 'prepfrancais'}</span>
-            <span className="flex items-center gap-1.5"><CalendarBlank size={15} /> {formatDate(post.created_at, lang)}</span>
+            <span className="flex items-center gap-1.5"><CalendarBlank size={15} /> {formatDate(post.created_at)}</span>
             {Array.isArray(post.tags) && post.tags.map((tag) => (
               <span key={tag} className="pill bg-white/80 capitalize text-primary">{tag}</span>
             ))}

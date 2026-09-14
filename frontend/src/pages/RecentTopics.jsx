@@ -99,15 +99,12 @@ export function RecentTopicDetail() {
      candidates search for a consigne by its wording — and a unique title and
      description per topic is what lets that search find it.
 
-     `localized={false}`: a consigne is exam material, published in French and
-     never translated. Both locales serve the same text, so the French URL
-     canonicalises to the English one rather than claiming to be a
-     translation. */
+     The consigne itself stays in French: it is the exam's own wording, and
+     it is what a candidate types into a search box. */
   useSeo({
     title: topic?.title || t('seo.topics.title'),
     description: (topic?.topic_text || '').slice(0, 155) || t('seo.topics.desc'),
     path: `/recent-topics/${topicId}`,
-    localized: false,
   });
   const [writing, setWriting] = useState(false);
   const [text, setText] = useState('');

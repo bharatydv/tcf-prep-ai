@@ -20,9 +20,8 @@ import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { api, errMsg, track } from './api';
-import { pathForLocale } from './locale';
 import { useAuth } from '../context/AuthContext';
-import { useI18n } from '../i18n';
+import { useT } from '../i18n';
 import { usePrompt } from '../components/shared';
 
 /* The gateway's checkout script, fetched once and only when someone actually
@@ -57,7 +56,7 @@ function loadGatewayScript(src, globalName) {
 
 export function useCheckout() {
   const { user, refreshUser } = useAuth();
-  const { t, lang } = useI18n();
+  const t = useT();
   const navigate = useNavigate();
   const [busy, setBusy] = useState('');
   const [prompt, promptDialog] = usePrompt();
@@ -113,10 +112,8 @@ export function useCheckout() {
           notes: checkout.notes,
           theme: { color: '#7C3AED' },
           handler: () => {
-            // Locale-aware: a French buyer must not be dropped onto the
-            // English confirmation page mid-purchase.
             window.location.assign(
-              `${pathForLocale(lang, '/billing/return')}?sub=${encodeURIComponent(subId)}`);
+              `/billing/return?sub=${encodeURIComponent(subId)}`);
             resolve(true);
           },
           modal: {
@@ -134,7 +131,7 @@ export function useCheckout() {
         rzp.open();
       })
       .catch(() => { toast.error(t('billing.noLink')); resolve(false); });
-  }), [lang, t]);
+  }), [t]);
 
   /* Cashfree's redirect. An order is not a link: Cashfree rejected this
      account for Subscriptions and for Payment Links, so checkout is the Orders

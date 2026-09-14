@@ -229,40 +229,43 @@ order step is what answers that, and without it every checkout 502s.
 
 ## Languages and URLs
 
-English is unprefixed, French lives under `/fr`. `/pricing` and `/fr/pricing`
-are one page in two languages, each naming the other with `hreflang`, and both
-are prerendered and listed in the sitemap.
+**The interface is English. The exam material is French.** That split is the
+whole policy, and it is the one thing to keep in mind when adding copy.
 
-The asymmetry is deliberate: every URL this site has indexed is unprefixed, and
-moving them under `/en` would trade a known ranking for a redirect chain and a
-recovery period. Adding `/fr` costs nothing that already exists.
+English, because the audience is learning French rather than reading it: a
+learner who could navigate a French interface comfortably would not need the
+product. French stays wherever it carries meaning the English does not — the
+exam's own vocabulary (*tâche*, *consigne*, *expression écrite/orale*,
+*compréhension écrite/orale*), the French examples inside a tip, and all exam
+material: consignes, model answers, the learner's own writing and speech, and
+the corrections themselves. That is the exam. Translating it would change what
+is being practised.
 
-Routing is one `<BrowserRouter basename>`, set from the address before the
-router mounts — not a prefix on each of the sixty route declarations. Inside
-the router every path is already relative to the locale: `useLocation()` on
-`/fr/pricing` returns `/pricing`, and `<Link to="/pricing">` from a French page
-goes to `/fr/pricing` by itself. So internal links stay inside their locale
-with no call site changed, and only `src/lib/locale.js`, `<Seo>` and the
-language toggle ever mention the prefix.
+Interface strings live in `src/i18n/en.json` and go through `t()`. It is a
+dictionary rather than literals in the JSX because the copy is long-form
+marketing prose edited far more often than the components around it.
+`en.tcfCanada.json` is split out and loaded by `useNamespace('tcfCanada')` —
+58 kB of fifteen landing pages' copy that the homepage should not wait on.
 
-**The URL is the authority on language**, not localStorage. A shared link opens
-in the language it was shared in, and a page whose content disagrees with its
-own canonical URL is the duplicate-content problem `hreflang` exists to solve.
-The toggle still remembers the choice — it is what a later visit to a
-locale-less entry point reads — and switching language is a full navigation,
-because `basename` is read once at mount.
+### The retired `/fr` locale
 
-Content that exists in only one language passes `localized={false}` to `<Seo>`:
-it canonicalises to its unprefixed URL from either locale and claims no
-alternate. Blog posts are the case that matters — a post is written once and
-only the shell around it is translated.
+A French interface shipped under `/fr` for one release and was removed. It
+doubled every string to keep in step and handed search engines a second address
+for every page, for an audience that did not want it.
 
-Four lists must agree when a public route is added. `tcfCanada/slugs.js` (or
+Its URLs still redirect, and should keep redirecting: `frontend/nginx.conf`
+issues a real 301, and `src/lib/locale.js` does the same client-side for a
+deploy where some other proxy hands every path to `index.html` untouched. Both
+match `/fr` and `/fr/...` exactly — `/french-guide` and `/fr-tcf` are English
+pages whose slugs merely start the same way.
+
+One page, one address, and no `hreflang` anywhere: not in `<Seo>`, not in the
+sitemap, not in the shell. `<Seo>` actively clears any alternate it finds.
+
+Three lists must agree when a public route is added: `tcfCanada/slugs.js` (or
 `App.js`) for the router, `scripts/generate-sitemap.js`, and
-`package.json -> reactSnap.include` — the last two now emit both locales from
-one entry. And `public/robots.txt`, which matches path prefixes literally and
-has no notion of a locale: a private path needs listing twice, or its French
-twin is crawlable.
+`package.json -> reactSnap.include`. A private one goes in `public/robots.txt`
+and in `scripts/prerender-shell.js -> NOT_PRERENDERABLE`.
 
 ## Future work (out of scope by design)
 - Google OAuth sign-in

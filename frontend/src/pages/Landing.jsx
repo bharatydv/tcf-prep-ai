@@ -8,7 +8,7 @@ import {
 import { toast } from 'sonner';
 import { Reveal, ScoreRing, Faq, useInView } from '../components/landing';
 import { useAuth } from '../context/AuthContext';
-import { useI18n } from '../i18n';
+import { useT } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
 import { track } from '../lib/api';
 import { useBillingPlans, formatPrice } from '../lib/plans';
@@ -27,7 +27,7 @@ const FAQ_NUMBERS = [1, 2, 3, 4];
 
 export default function Landing() {
   const { user } = useAuth();
-  const { t, lang } = useI18n();
+  const t = useT();
   const navigate = useNavigate();
   const [simTopic, setSimTopic] = useState('');
   const [simAnswer, setSimAnswer] = useState('');
@@ -48,14 +48,14 @@ export default function Landing() {
   const faqSchema = useMemo(() => ({
     '@context': 'https://schema.org',
     '@type': 'FAQPage',
-    inLanguage: lang === 'fr' ? 'fr-CA' : 'en',
+    inLanguage: 'en',
     url: `${SITE_URL}/`,
     mainEntity: FAQ_NUMBERS.map((n) => ({
       '@type': 'Question',
       name: t(`land.faq${n}q`),
       acceptedAnswer: { '@type': 'Answer', text: t(`land.faq${n}a`) },
     })),
-  }), [t, lang]);
+  }), [t]);
 
   const startSimulator = () => {
     if (!user) { toast.info(t('land.registerToast')); return navigate('/register'); }

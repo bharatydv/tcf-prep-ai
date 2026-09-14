@@ -63,48 +63,19 @@ const STATIC = [
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-/* English is unprefixed, French lives under /fr — the same rule as
-   src/lib/locale.js, repeated because this script is CommonJS and cannot
-   import an ES module. If that rule changes, it changes in both. */
-const LOCALES = ['en', 'fr'];
-const localePath = (lang, route) => {
-  const full = (lang === 'fr' ? '/fr' : '') + route;
-  return full.length > 1 && full.endsWith('/') ? full.slice(0, -1) : full;
-};
-
-/* hreflang, in the sitemap as well as on the page.
- *
- * The on-page tags are written by JavaScript, so they only exist for a crawler
- * once something has rendered the page. These do not depend on that, and they
- * are the signal Google documents as the most reliable of the three.
- *
- * Every entry names every version INCLUDING ITSELF. A non-reciprocal set is
- * the usual reason an hreflang cluster is ignored wholesale. */
-function alternates(route) {
-  return LOCALES.map((lang) =>
-    `    <xhtml:link rel="alternate" hreflang="${lang}" `
-    + `href="${esc(SITE + localePath(lang, route))}"/>`)
-    .concat(`    <xhtml:link rel="alternate" hreflang="x-default" `
-      + `href="${esc(SITE + localePath('en', route))}"/>`);
-}
-
-function urlEntry(loc, priority, changefreq, lastmod, xhtml = []) {
+/* One language, so one URL per page and no hreflang. The site shipped a French
+   interface under /fr for a release; those URLs are 301'd to their English
+   page (frontend/nginx.conf, src/lib/locale.js) and are deliberately absent
+   here — a sitemap should only ever list the address a page settles on. */
+function urlEntry(loc, priority, changefreq, lastmod) {
   return [
     '  <url>',
     `    <loc>${esc(SITE + loc)}</loc>`,
-    ...xhtml,
     lastmod ? `    <lastmod>${String(lastmod).slice(0, 10)}</lastmod>` : '',
     `    <changefreq>${changefreq}</changefreq>`,
     `    <priority>${priority.toFixed(1)}</priority>`,
     '  </url>',
   ].filter(Boolean).join('\n');
-}
-
-/* One route, both languages, each pointing at the other. */
-function localisedEntries(route, priority, changefreq) {
-  const xhtml = alternates(route);
-  return LOCALES.map((lang) =>
-    urlEntry(localePath(lang, route), priority, changefreq, null, xhtml));
 }
 
 const { readRepoPosts, mergeBySlug } = require('./repo-blog');
@@ -132,12 +103,7 @@ async function dynamicRoutes() {
     console.warn(`[sitemap] blog: ${posts.length} from the API, `
       + `${merged.length - posts.length} more from the repo`);
   }
-  /* Posts are listed once, unprefixed, with no alternates: an article is
-     written in one language and only the shell around it is translated, so a
-     /fr/blog/... entry would submit the same English text at a second address.
-     src/pages/BlogPost.jsx passes localized={false} for the same reason.
-
-     lastmod IS emitted here, because here it is true — it is the post's own
+  /* lastmod IS emitted here, because here it is true — it is the post's own
      updated_at, not the time the build ran. */
   merged.forEach((p) => p.slug && out.push(urlEntry(`/blog/${p.slug}`, 0.8, 'monthly', p.updated_at || p.created_at)));
   /* Topic DETAIL pages, back in.
@@ -148,15 +114,12 @@ async function dynamicRoutes() {
    * now and returns the consigne without the model answer, so each topic is a
    * real page with content nobody else has.
    *
-   * No alternates: a consigne is exam material, published in French and never
-   * translated, so both locales serve the same text. The page canonicalises to
-   * this unprefixed URL, which is what RecentTopicDetail's localized={false}
-   * declares. */
+   */
   /* The LISTING is conditional, which is why it lives here and not in STATIC.
    *
    * /api/recent-topics answers `{"topics": []}` in production today, so the
-   * page prerendered to a heading and nothing else - and both locales of it
-   * were submitted for indexing anyway. An empty page in a sitemap is worse
+   * page prerendered to a heading and nothing else - and was submitted for
+   * indexing anyway. An empty page in a sitemap is worse
    * than an absent one: it spends crawl budget to prove there is nothing worth
    * coming back for, on a site whose problem is already that Google will not
    * spend crawl budget here. The moment a topic exists the listing has content
@@ -168,7 +131,7 @@ async function dynamicRoutes() {
     try {
       const { topics = [] } = await fetchJson(`${API}/api/recent-topics`);
       if (topics.length) {
-        out.push(...localisedEntries('/recent-topics', 0.9, 'weekly'));
+        out.push(urlEntry('/recent-topics', 0.9, 'weekly'));
         topics.forEach((topic) => topic.topic_id && out.push(
           urlEntry(`/recent-topics/${topic.topic_id}`, 0.7, 'monthly',
             topic.updated_at || topic.created_at)));
@@ -193,11 +156,10 @@ async function dynamicRoutes() {
    * the post's own and is worth having. Saying nothing is better than saying
    * something false: an absent lastmod is simply not a signal.
    */
-  const entries = STATIC.flatMap(([loc, p, f]) => localisedEntries(loc, p, f))
+  const entries = STATIC.map(([loc, p, f]) => urlEntry(loc, p, f))
     .concat(await dynamicRoutes());
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
-        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${entries.join('\n')}
 </urlset>
 `;
