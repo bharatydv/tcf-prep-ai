@@ -159,6 +159,10 @@
   },
   "auth": {
     "alreadyRegistered": "Already registered?",
+    "agreePrefix": "By creating an account you agree to our",
+    "agreeTerms": "Terms of service",
+    "agreeAnd": "and",
+    "agreePrivacy": "Privacy policy",
     "backToLogin": "Back to login",
     "changeEmail": "Wrong address?",
     "changeEmailBtn": "Change my address",

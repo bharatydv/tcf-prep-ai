@@ -115,6 +115,28 @@ export default function Register() {
             {t('auth.createButton')}
           </button>
         </form>
+        {/* The acceptance itself, directly under the button that performs it.
+            Registering is what agrees to these, so the sentence has to be
+            visible at that moment and not only in the footer — and both
+            documents have to be reachable without leaving the form, which is
+            why they are links rather than the bare words.
+
+            New tab, and therefore <a> rather than <Link>: a half-filled
+            registration form is state the router does not keep, so navigating
+            away to read the terms and coming back would hand someone an empty
+            form and ask them to type their details a second time. rel is not
+            optional with target=_blank — without noopener the opened page gets
+            a handle on this one through window.opener. */}
+        <p className="mt-4 text-center text-xs leading-relaxed text-gray-500">
+          {t('auth.agreePrefix')}{' '}
+          <a href="/terms" target="_blank" rel="noopener noreferrer"
+            className="font-semibold text-primary hover:underline"
+            data-testid="register-terms-link">{t('auth.agreeTerms')}</a>
+          {' '}{t('auth.agreeAnd')}{' '}
+          <a href="/privacy" target="_blank" rel="noopener noreferrer"
+            className="font-semibold text-primary hover:underline"
+            data-testid="register-privacy-link">{t('auth.agreePrivacy')}</a>.
+        </p>
         <p className="mt-6 text-center text-sm text-gray-600">
           {t('auth.alreadyRegistered')} <Link to="/login" className="font-semibold text-primary">{t('auth.loginButton')}</Link>
         </p>
