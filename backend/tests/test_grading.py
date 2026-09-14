@@ -4,6 +4,8 @@ A grader reply that cannot be read costs the learner a correction and the
 credit that paid for it, so the parsing is tested against the shapes models
 actually return rather than the shape the prompt asks for.
 """
+import json
+
 import pytest
 
 import server as m
@@ -526,3 +528,89 @@ class TestStreamingSessionLifetime:
         assert not leaks, (
             "analyze_stream's generator still references the request-scoped "
             f"session, which is closed before the stream runs: {leaks}")
+
+
+SPOKEN_OK = {"errors": [], "overall_score": 60, "tcf_level": "B2",
+             "answers_question": True, "relevance_comment": "ok",
+             "suggestions": [], "criteria": {}}
+
+# Long enough that the length caps leave the level alone, so a test that is
+# about retrying is not really testing the word floor.
+LONG_ANSWER = ("Je m'appelle Marie et je travaille dans la communication. " * 30)
+
+
+class TestAnUnreadableReplyIsReAsked:
+    """A grader reply that cannot be read earns one more attempt.
+
+    The speaking graders used to give up on the first one, so a tache 1
+    interview that the candidate had just finished ended with "sa reponse
+    etait incomplete ou illisible" and no grade at all.
+    """
+
+    def _replies(self, monkeypatch, replies):
+        """Serve `replies` in order and return the prompts they were asked with."""
+        asked = []
+
+        async def fake_grade(provider, system_prompt, user_text):
+            asked.append(user_text)
+            return replies[len(asked) - 1]
+
+        monkeypatch.setattr(m, "_grade_with_provider", fake_grade)
+        monkeypatch.setattr(m, "_grader_backend",
+                            lambda provider: (None, "key", "model-x"))
+        return asked
+
+    def _history(self):
+        return [{"role": "agent", "text": "Presentez-vous."},
+                {"role": "candidate", "text": LONG_ANSWER}]
+
+    async def test_interview_survives_a_truncated_first_reply(self, monkeypatch):
+        good = json.dumps(SPOKEN_OK)
+        asked = self._replies(monkeypatch, [good[:60], good])
+        out = await m.grade_interaction("Entretien dirige", self._history(),
+                                        task_type=1)
+        assert len(asked) == 2
+        assert "ai_unavailable" not in out
+        assert out["tcf_level"] == "B2"
+
+    async def test_a_truncated_reply_is_asked_for_a_shorter_one(self, monkeypatch):
+        """Re-asking verbatim would run out of budget in the same place."""
+        good = json.dumps(SPOKEN_OK)
+        asked = self._replies(monkeypatch, [good[:60], good])
+        await m.grade_interaction("Entretien dirige", self._history(), task_type=1)
+        assert "cut off" in asked[1]
+
+    async def test_a_reply_with_no_json_is_asked_to_drop_the_prose(self, monkeypatch):
+        good = json.dumps(SPOKEN_OK)
+        asked = self._replies(monkeypatch, ["Sure, here is the grade!", good])
+        await m.grade_interaction("Entretien dirige", self._history(), task_type=1)
+        assert "could not be parsed" in asked[1]
+
+    async def test_two_unreadable_replies_still_say_which_failure_it_was(
+            self, monkeypatch):
+        """bad_reply, not unavailable: the learner is not sent to billing."""
+        good = json.dumps(SPOKEN_OK)
+        self._replies(monkeypatch, [good[:60], good[:60]])
+        out = await m.grade_interaction("Entretien dirige", self._history(),
+                                        task_type=1)
+        assert out["ai_unavailable"] is True
+        assert m.ai_error_detail(out) == m.AI_BAD_REPLY_DETAIL
+
+    async def test_the_monologue_grader_retries_too(self, monkeypatch):
+        good = json.dumps(SPOKEN_OK)
+        asked = self._replies(monkeypatch, [good[:60], good])
+        out = await m.analyze_speaking_with_ai(LONG_ANSWER, "Parlez de vous",
+                                               task_type=3)
+        assert len(asked) == 2
+        assert "ai_unavailable" not in out
+        assert out["tcf_level"] == "B2"
+
+    async def test_a_provider_that_never_answers_is_not_re_asked(self, monkeypatch):
+        """No reply is a key, quota or network problem; asking again costs a
+        second failed call and cannot help."""
+        asked = self._replies(monkeypatch, [None, None])
+        out = await m.grade_interaction("Entretien dirige", self._history(),
+                                        task_type=1)
+        assert len(asked) == 1
+        assert out["ai_unavailable"] is True
+        assert m.ai_error_detail(out) == m.AI_UNAVAILABLE_DETAIL
