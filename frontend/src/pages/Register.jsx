@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { CommunityInline } from '../components/CommunityButton';
 import { EnvelopeSimple, Lock, User, Eye, EyeSlash } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
@@ -67,6 +68,12 @@ export default function Register() {
           <p className="mt-4 text-xs leading-relaxed text-gray-500">
             {t('auth.checkInboxSpam')}
           </p>
+          {/* The one screen on the site with nothing to do on it: the account
+              exists, the email is in flight, and the only action is to go and
+              open it. That dead minute is the best moment there is to offer
+              the group — and unlike the floating button, someone reading this
+              has already committed. */}
+          <CommunityInline from="register" className="mt-7 border-t border-violet-100 pt-6" />
           <Link to="/login" className="btn-primary mt-7 w-full">{t('nav.login')}</Link>
         </div>
       </main>

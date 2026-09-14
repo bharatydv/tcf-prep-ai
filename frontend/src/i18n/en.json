@@ -376,6 +376,13 @@
     "soonReading": "Practise reading",
     "soonWriting": "Practise writing"
   },
+  "community": {
+    "join": "Join the group",
+    "close": "Close",
+    "blurb": "Practise with other TCF Canada candidates: daily consignes, questions answered, and corrections shared.",
+    "whatsapp": "WhatsApp",
+    "telegram": "Telegram"
+  },
   "consent": {
     "title": "Cookies on this site",
     "body": "We use Google Analytics to see which pages actually help people pass. Nothing is stored on your device unless you accept, and declining changes nothing about how the site works.",
