@@ -11,7 +11,7 @@ import { api } from '../lib/api';
 import {
   startRecording as startCapture, appendAudio, isRecordingSupported, listenForSpeech,
 } from '../lib/recorder';
-import { SPEAKING_TASKS } from '../lib/tcf';
+import { SPEAKING_TASKS, displayMark } from '../lib/tcf';
 import { useAuth } from '../context/AuthContext';
 import { BackLink } from '../components/shared';
 import { SpeakingGrid } from '../components/SpeakingGrid';
@@ -850,7 +850,7 @@ export default function SpeakingTasks() {
                       <p className="font-heading text-lg font-extrabold text-primary">
                         {freeTalkResult.tcf_level}
                         <span className="ml-1 text-[10px] font-semibold text-gray-400">
-                          {freeTalkResult.overall_score}/100
+                          {displayMark(freeTalkResult.overall_score, freeTalkResult.tcf_level) ?? '—'}/20
                         </span>
                       </p>
                     </div>
@@ -895,7 +895,7 @@ export default function SpeakingTasks() {
                       <p className="font-heading text-lg font-extrabold text-primary">
                         {interviewResult.tcf_level}
                         <span className="ml-1 text-[10px] font-semibold text-gray-400">
-                          {interviewResult.overall_score}/100
+                          {displayMark(interviewResult.overall_score, interviewResult.tcf_level) ?? '—'}/20
                         </span>
                       </p>
                     </div>

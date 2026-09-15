@@ -113,12 +113,15 @@ export const fmtClock = (s) =>
   `${String(Math.floor(Math.max(0, s) / 60)).padStart(2, '0')}:${String(Math.max(0, s) % 60).padStart(2, '0')}`;
 
 /* ---------------------------------------------------------------------------
- * Expression orale: one mark out of 20, and the NCLC/CLB level it converts to.
+ * One mark out of 20, and the NCLC/CLB level it converts to.
  *
- * The graders score each tâche 0-100 on the CEFR rubric in backend/server.py,
+ * The graders score every answer 0-100 on the CEFR rubric in backend/server.py,
  * but that is a working scale, not what a candidate is told: the real paper
- * reports Expression orale as a single mark out of 20, which IRCC then reads
- * as an NCLC (CLB) level. The bands below are the published ones — the same
+ * reports Expression orale and Expression écrite each as a single mark out of
+ * 20, which IRCC then reads as an NCLC (CLB) level. Nothing in this app shows
+ * the 0-100 figure any more — every score a user sees goes through the
+ * conversion below, so the number on the dashboard is the number the exam
+ * would print. The bands below are the published ones — the same
  * expression-orale column as NCLC_ROWS on the TCF Canada pages.
  *
  * The mark is anchored to the CEFR level the grader assigned, not derived from
@@ -142,11 +145,39 @@ export function markOutOf20(score, level) {
   const s = SCORE_BAND[level];
   const m = MARK_BAND[level];
   if (!s || !m) return null;
-  const n = Number(score);
+  // Number(null) and Number('') are both 0, which a clamp then lifts to the
+  // FLOOR of the level's band — so an attempt whose score never came back
+  // would have shown a confident 10/20 next to its B2. Absent is not zero.
+  const n = score === null || score === undefined || score === '' ? NaN : Number(score);
   if (!Number.isFinite(n)) return null;
   const span = s[1] - s[0];
   const within = Math.min(Math.max(n, s[0]), s[1]) - s[0];
   return Math.round(m[0] + (span > 0 ? within / span : 0) * (m[1] - m[0]));
+}
+
+/* The mark for any display, including the ones that have no CEFR level beside
+ * them to anchor against — an admin row, or an older attempt stored before the
+ * grader returned a level. Anchoring is always preferred, because it is the
+ * only version that cannot contradict the level shown next to it; the plain
+ * fifth is the fallback, not the rule.
+ *
+ * Returns null only when there is no usable number at all, so a caller can
+ * print an em dash rather than a confident "0/20". */
+export function displayMark(score, level) {
+  const anchored = markOutOf20(score, level);
+  if (anchored !== null) return anchored;
+  const n = score === null || score === undefined || score === '' ? NaN : Number(score);
+  if (!Number.isFinite(n)) return null;
+  return Math.round(Math.min(Math.max(n, 0), 100) / 5);
+}
+
+/* A count of right answers as a mark out of 20. A comprehension paper is
+ * scored out of however many questions it had, and 34/40 next to a 12/20 on
+ * the same chart compares nothing — this puts both on the reported scale. */
+export function markFromCorrect(score, total) {
+  if (!total) return null;
+  const n = score === null || score === undefined || score === '' ? NaN : Number(score);
+  return Number.isFinite(n) ? Math.round((n / total) * 20) : null;
 }
 
 /* The next band up the mark ladder, and how far away it is: {level, points}.

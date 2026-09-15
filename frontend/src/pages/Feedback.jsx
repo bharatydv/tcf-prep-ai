@@ -5,6 +5,7 @@ import { api, errMsg, CATEGORY_META } from '../lib/api';
 import { BackLink, ErrorHighlightedText } from '../components/shared';
 import { RecordingPlayer } from '../components/RecordingPlayer';
 import { useT } from '../i18n';
+import { displayMark } from '../lib/tcf';
 import { Seo } from '../lib/seo';
 
 /* Same two sources the dashboard counts as speaking. */
@@ -42,7 +43,13 @@ export default function Feedback() {
         <div className="flex items-center gap-4">
           <div className="text-center">
             <p className="text-xs uppercase tracking-wide text-gray-500">{t('fb.score')}</p>
-            <p className="font-heading text-4xl font-bold text-primary" data-testid="overall-score">{sub.overall_score}</p>
+            {/* The mark the exam would print, not the grader's working 0-100:
+                a candidate reads /20, and two scales on one page is how you
+                get someone reporting a 68 to an immigration officer. */}
+            <p className="font-heading text-4xl font-bold text-primary" data-testid="overall-score">
+              {displayMark(sub.overall_score, sub.tcf_level) ?? '—'}
+              <span className="text-xl text-gray-400">/20</span>
+            </p>
           </div>
           <div className="text-center">
             <p className="text-xs uppercase tracking-wide text-gray-500">{t('fb.level')}</p>

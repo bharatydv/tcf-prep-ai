@@ -44,7 +44,7 @@ export function Reveal({ children, delay = 0, className = '', as: Tag = 'div' })
 
 /* Animated progress ring. `max` is the scale the number is out of, so the same
    component draws a /20 tâche mark and a /699 section score. */
-export function ScoreRing({ value = 82, max = 100, size = 92, label = '/100', caption, to = '#22C55E' }) {
+export function ScoreRing({ value = 14, max = 20, size = 92, label = '/20', caption, to = '#22C55E' }) {
   const [ref, inView] = useInView(0.6);
   const gradId = `ringGrad-${useId().replace(/:/g, '')}`;
   const r = (size - 12) / 2;

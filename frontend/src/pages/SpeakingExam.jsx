@@ -12,7 +12,7 @@ import { BackLink } from '../components/shared';
 import ConversationModal from '../components/ConversationModal';
 import { SpeakingResult } from '../components/SpeakingResult';
 import { useSpeak } from '../lib/speak';
-import { speakingPaperMark } from '../lib/tcf';
+import { speakingPaperMark, displayMark } from '../lib/tcf';
 import { readSitting, writeSitting } from '../lib/speakingExam';
 
 /* Test Mode for Expression orale: one numbered sitting, the three tâches in the
@@ -212,7 +212,7 @@ export default function SpeakingExam() {
                     {result ? (
                       <div className="mt-3 flex flex-wrap items-center gap-3">
                         <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-primary shadow-sm">
-                          {result.tcf_level} · {result.overall_score}/100
+                          {result.tcf_level} · {displayMark(result.overall_score, result.tcf_level) ?? '—'}/20
                         </span>
                         <button onClick={() => setReviewing(reviewing === s.n ? null : s.n)}
                           data-testid={`review-task-${s.n}`}

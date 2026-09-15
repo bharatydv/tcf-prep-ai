@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Timer, WarningCircle, SignOut } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, errMsg, CATEGORY_META } from '../lib/api';
-import { WRITING_TASKS, WRITING_TOTAL_SECONDS } from '../lib/tcf';
+import { WRITING_TASKS, WRITING_TOTAL_SECONDS, displayMark } from '../lib/tcf';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
@@ -263,7 +263,7 @@ export default function ExamSimulator() {
       <main className="mx-auto max-w-5xl px-4 py-10">
         <h1 className="text-3xl font-bold">{t('sim.resultsTitle')}</h1>
         <div className="card mt-6 flex flex-wrap items-center justify-around gap-6 p-8 text-center">
-          <div><p className="text-sm text-gray-500">{t('sim.combined')}</p><p className="font-heading text-5xl font-bold text-primary">{attempt.combined_score}</p></div>
+          <div><p className="text-sm text-gray-500">{t('sim.combined')}</p><p className="font-heading text-5xl font-bold text-primary">{displayMark(attempt.combined_score, attempt.tcf_level) ?? '—'}</p></div>
           <div><p className="text-sm text-gray-500">{t('sim.cefr')}</p><p className="font-heading text-5xl font-bold">{attempt.tcf_level}</p></div>
           <div><p className="text-sm text-gray-500">{t('sim.timeUsed')}</p><p className="font-heading text-3xl font-bold">{t('sim.minutes', { n: Math.floor(attempt.time_used_seconds / 60) })}</p></div>
         </div>
@@ -274,7 +274,7 @@ export default function ExamSimulator() {
             <section key={i} className="card mt-6 p-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="font-heading text-xl font-semibold">{GUIDE[i].name}</h2>
-                <span className="pill bg-violet-50 text-primary">{t('sim.scorePill', { score: task.analysis.overall_score, level: task.analysis.tcf_level })}</span>
+                <span className="pill bg-violet-50 text-primary">{t('sim.scorePill', { score: displayMark(task.analysis.overall_score, task.analysis.tcf_level) ?? '—', level: task.analysis.tcf_level })}</span>
               </div>
               <p className="mt-1 text-sm italic text-gray-500">{task.prompt}</p>
               <div className="mt-4 rounded-xl bg-gray-50 p-5">
