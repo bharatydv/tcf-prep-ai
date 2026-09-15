@@ -10,7 +10,7 @@ import {
   startRecording as startCapture, appendAudio, isRecordingSupported, listenForSpeech,
 } from '../lib/recorder';
 import { SPEAKING_TASKS, fmtClock } from '../lib/tcf';
-import { saveTask } from '../lib/speakingExam';
+import { saveTask, sittingComplete } from '../lib/speakingExam';
 import { useAuth } from '../context/AuthContext';
 import { BackLink, CreditsBadge } from '../components/shared';
 import { SpeakingResult } from '../components/SpeakingResult';
@@ -270,10 +270,23 @@ export default function SpeakingRecord() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setResult(data);
-      if (examSet && tacheNum) saveTask(examSet, tacheNum, data);
+      const sitting = examSet && tacheNum ? saveTask(examSet, tacheNum, data) : null;
       await refreshUser();
       if (!data.transcript) toast.error(t('speak.noSpeech'));
       else toast.success(t('speak.doneToast', { level: data.tcf_level }));
+      /* The grade that completes a sitting ends the PAPER, not just the answer.
+         This page only ever shows the one tâche it recorded, so leaving the
+         candidate here after their third answer showed them a third of the
+         result they had just finished earning — the combined Expression orale
+         mark and the other two tâches are on the sitting page. `review` opens
+         this tâche's corrections there, so nothing that was on this screen is
+         lost by moving.
+         An answer the recogniser heard nothing in is the exception: it is
+         graded and stored like any other, but what the candidate wants next is
+         the re-record button on this page, not a result page. */
+      if (data.transcript && sittingComplete(sitting)) {
+        navigate(`${examBack}?set=${examSet}&review=${tacheNum}`);
+      }
     } catch (err) {
       const status = err?.response?.status;
       if (status === 402) { /* the paywall took it */ }

@@ -56,6 +56,14 @@ export default function SpeakingExam() {
   // sessionStorage rather than in state alone; coming back finishes the paper.
   useEffect(() => { setResults(readSitting(setNumber)); }, [setNumber]);
 
+  /* A sitting finished on the recorder's route comes back naming the tâche it
+     just graded. Landing on a completed paper with every correction collapsed
+     would hide the one the candidate was reading a second ago. */
+  useEffect(() => {
+    setReviewing(parseInt(params.get('review'), 10) || null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setNumber]);
+
   useEffect(() => {
     if (!setNumber) { setPaper(null); return; }
     api.get(`/api/speaking/exam-sets/${setNumber}`)
