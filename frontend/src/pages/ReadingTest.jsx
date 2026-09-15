@@ -7,8 +7,9 @@ import {
 import { toast } from 'sonner';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import { useT } from '../i18n';
+import { formatDateTime, useT } from '../i18n';
 import { BackLink, useConfirm } from '../components/shared';
+import AttemptHistory, { useAttempts } from '../components/AttemptHistory';
 
 /* The official Compréhension écrite paper runs 60 minutes. Test mode counts
    down from it and hands the paper in at zero; practice mode is untimed. */
@@ -43,9 +44,20 @@ export default function ReadingTest() {
   const [checking, setChecking] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [left, setLeft] = useState(TEST_SECONDS);
+  // The sitting being re-read, when the paper on screen is a past one rather
+  // than this one. Null while sitting the paper, including after handing it in.
+  const [pastAttempt, setPastAttempt] = useState(null);
+  const [openingId, setOpeningId] = useState(null);
   const submittedRef = useRef(false);
   // Wall-clock deadline, so backgrounding the tab cannot buy extra time.
   const deadlineRef = useRef(null);
+
+  /* Every sitting of THIS paper, so the page can say what was scored before
+     instead of presenting a paper already sat as though it were new. Test mode
+     only: practice marks a question at a time and records no attempt. */
+  const { attempts, reload: reloadAttempts } = useAttempts(
+    `/api/reading/attempts?test_number=${testNumber}`,
+    { enabled: isTest && Boolean(user) });
 
   useEffect(() => {
     let cancelled = false;
@@ -79,6 +91,7 @@ export default function ReadingTest() {
       setCorrections(map);
       setResult(data);
       setIndex(0);
+      reloadAttempts();   // the paper just handed in belongs in the history
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
       submittedRef.current = false;
@@ -86,7 +99,37 @@ export default function ReadingTest() {
     } finally {
       setSubmitting(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [answers, left, testNumber, t]);
+
+  /* Re-open a marked paper from the history.
+   *
+   * The same three pieces of state a hand-in produces, so the whole review —
+   * the score report, the navigator swatches, every explanation — is the one
+   * that already exists rather than a second read-only rendering of it.
+   *
+   * submittedRef is set with them: without it the countdown effect sees a
+   * paper with a deadline in the past and hands in the answers being read. */
+  const openAttempt = async (row) => {
+    setOpeningId(row.id);
+    try {
+      const { data } = await api.get(`/api/reading/attempts/${row.id}`);
+      const map = {};
+      (data.corrections || []).forEach((c) => { map[c.reading_question_id] = c; });
+      submittedRef.current = true;
+      setCorrections(map);
+      setAnswers(data.attempt?.answers || {});
+      setResult({ score: data.attempt?.score, total: data.attempt?.total,
+                  by_level: data.by_level });
+      setPastAttempt(row);
+      setIndex(0);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || t('readTest.loadFailed'));
+    } finally {
+      setOpeningId(null);
+    }
+  };
 
   // Countdown, test mode only. Hands the paper in by itself at zero, exactly
   // as the invigilator would — a learner who runs out of time still gets a
@@ -153,7 +196,7 @@ export default function ReadingTest() {
     // had answered anything. Every other timer in the app nulls its deadline on
     // leaving the phase; this one did not.
     deadlineRef.current = null;
-    setAnswers({}); setCorrections({}); setResult(null);
+    setAnswers({}); setCorrections({}); setResult(null); setPastAttempt(null);
     setIndex(0); setLeft(TEST_SECONDS);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -236,6 +279,12 @@ export default function ReadingTest() {
               <p className="mt-1 text-sm text-white/90">
                 {t('readTest.scorePct', { p: Math.round((result.score / result.total) * 100) })}
               </p>
+              {pastAttempt && (
+                <p className="mt-2 inline-block rounded-full bg-white/20 px-3 py-1 text-xs font-semibold"
+                  data-testid="reading-past-banner">
+                  {t('hist.reviewing', { when: formatDateTime(pastAttempt.created_at) })}
+                </p>
+              )}
             </div>
             <div className="bg-white px-6 py-5">
               <p className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-gray-500">
@@ -261,6 +310,20 @@ export default function ReadingTest() {
             </div>
           </div>
         )}
+
+        <AttemptHistory
+          className="mb-6"
+          testid="reading-history"
+          attempts={attempts.map((a) => ({
+            id: a.reading_attempt_id,
+            label: `${a.score}/${a.total}`,
+            score: a.score, total: a.total,
+            created_at: a.created_at,
+          }))}
+          opening={openingId}
+          busy={submitting}
+          onOpen={openAttempt}
+          onRetake={pastAttempt || result ? restart : null} />
 
         <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
           {/* ---------------- NAVIGATOR ---------------- */}

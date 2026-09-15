@@ -633,6 +633,22 @@ class Submission(Base):
     # roleplay, which is a dozen separate turn recordings and no single file.
     audio_path: Mapped[str] = mapped_column(Text, default="")
     audio_mime: Mapped[str] = mapped_column(String(40), default="")
+    # Which Test Mode sitting this answer belongs to, and which tâche of it.
+    #
+    # Expression orale Test Mode used to hold a sitting in sessionStorage
+    # alone, so a paper existed only in the tab it was taken in: a reload, a
+    # second device, or a grade that errored left the page reporting "0 of 3"
+    # over answers the learner had really given. The submission is the durable
+    # record of the answer, and these two columns are what make it findable as
+    # part of a paper rather than as a loose correction in the history list.
+    #
+    # NULL for everything that is not a Test Mode tâche — free speaking
+    # practice, every written submission, and every speaking answer graded
+    # before this column existed. A sitting made up of those cannot be
+    # reconstructed, and the history honestly begins at the first tagged one.
+    exam_set: Mapped[Optional[int]] = mapped_column(Integer, nullable=True,
+                                                    index=True)
+    task_type: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), index=True)
 
@@ -2787,7 +2803,9 @@ async def persist_submission(db: AsyncSession, user: User, text: str,
                              prompt_id: Optional[str], analysis: dict,
                              source: str = "practice",
                              consume: bool = True,
-                             theme_id: Optional[str] = None) -> dict:
+                             theme_id: Optional[str] = None,
+                             exam_set: Optional[int] = None,
+                             task_type: Optional[int] = None) -> dict:
     """Save a graded piece of work. `consume=False` for flows metered by their
     own allowance, so they do not also spend a monthly AI credit."""
     sub = Submission(
@@ -2805,6 +2823,8 @@ async def persist_submission(db: AsyncSession, user: User, text: str,
         caps_applied=analysis.get("caps_applied") or [],
         source=source,
         theme_id=(theme_id or "")[:64],
+        exam_set=exam_set,
+        task_type=task_type,
         created_at=now_utc(),
     )
     db.add(sub)
@@ -4328,6 +4348,10 @@ class ConverseGradeIn(BaseModel):
     # spend a normal AI credit; "free" draws on the small open-ended
     # conversation allowance instead.
     mode: str = Field(default="tache2", pattern="^(tache1|tache2|free)$")
+    # The Test Mode sitting this tâche belongs to, so the graded answer can be
+    # found again as part of a paper. Absent for free practice, which is not
+    # part of one.
+    exam_set: Optional[int] = Field(default=None, ge=1)
 
 
 class AnalyzeIn(BaseModel):
@@ -5049,6 +5073,13 @@ MIGRATIONS = [
     "ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMPTZ",
     "ALTER TABLE auth_tokens ADD COLUMN IF NOT EXISTS attempts INTEGER DEFAULT 0",
+    # Which Expression orale sitting a graded tâche belongs to. Nullable with
+    # no default: NULL is the truth about every answer graded before Test Mode
+    # recorded it, and nothing can honestly backfill it.
+    "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS exam_set INTEGER",
+    "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS task_type INTEGER",
+    "CREATE INDEX IF NOT EXISTS ix_submissions_exam_set "
+    "ON submissions (user_id, exam_set, created_at DESC)",
     # The free trial, split by skill. Deliberately added WITHOUT a default, so
     # that NULL means "not yet backfilled": the UPDATEs below then run once and
     # are a no-op on every later boot, which an unconditional UPDATE would not
@@ -6811,12 +6842,46 @@ async def exam_submit(body: ExamSubmitIn,
 
 
 @app.get("/api/exam/attempts")
-async def exam_attempts(user: User = Depends(get_current_user),
+async def exam_attempts(exam_type: Optional[str] = None,
+                        user: User = Depends(get_current_user),
                         db: AsyncSession = Depends(get_db)):
-    res = await db.execute(
-        select(MockExamAttempt).where(MockExamAttempt.user_id == user.user_id)
-        .order_by(MockExamAttempt.created_at.desc()).limit(50))
+    """Past mock exams, newest first; `exam_type` narrows them to one paper."""
+    q = select(MockExamAttempt).where(MockExamAttempt.user_id == user.user_id)
+    if exam_type:
+        q = q.where(MockExamAttempt.exam_type == exam_type)
+    res = await db.execute(q.order_by(MockExamAttempt.created_at.desc()).limit(50))
     return {"attempts": [_row_to_dict(a) for a in res.scalars().all()]}
+
+
+@app.get("/api/exam/attempts/{attempt_id}")
+async def exam_attempt(attempt_id: str,
+                       user: User = Depends(get_current_user),
+                       db: AsyncSession = Depends(get_db)):
+    """One past mock exam, re-marked from its stored answer sheet.
+
+    Rebuilt rather than stored, for the same reason as the reading paper: the
+    answer key belongs to the question bank, and a question retired or fixed
+    since should be re-read as it now stands.
+    """
+    res = await db.execute(
+        select(MockExamAttempt)
+        .where(MockExamAttempt.mock_attempt_id == attempt_id))
+    attempt = res.scalar_one_or_none()
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+    if attempt.user_id != user.user_id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+    res = await db.execute(
+        select(ExamQuestion).where(ExamQuestion.exam_type == attempt.exam_type,
+                                   ExamQuestion.is_active == True))  # noqa: E712
+    answers = attempt.answers or {}
+    corrections = {
+        q.question_id: {"correct_answer": q.correct_answer,
+                        "picked": answers.get(q.question_id),
+                        "is_correct": answers.get(q.question_id) == q.correct_answer}
+        for q in res.scalars().all()
+    }
+    return {"attempt": _row_to_dict(attempt), "corrections": corrections}
 
 
 # ----------------------------------------------------------------------------
@@ -6851,6 +6916,43 @@ async def speaking_exam_set(set_number: int):
                                 "name": s["name"]}
                        for n, s in SPEAKING_TASKS.items()}
     return spec
+
+
+@app.get("/api/speaking/exam-sets/{set_number}/attempts")
+async def speaking_exam_attempts(set_number: int,
+                                 user: User = Depends(get_current_user),
+                                 db: AsyncSession = Depends(get_db)):
+    """Every tâche of this set this candidate has ever had graded, newest first.
+
+    Test Mode used to hold a sitting in sessionStorage alone, which made a
+    paper a property of one browser tab: reloading, or coming back the next
+    day, showed "0 of 3 tâches completed" over three answers that had really
+    been given and graded. The submissions were there the whole time — nothing
+    linked them to the paper. Now they carry exam_set and task_type, and this
+    is that link read back.
+
+    A row per attempt rather than a row per tâche: a candidate who sat tâche 2
+    three times has three, and the page shows the latest as where the paper
+    now stands with the earlier ones behind it. The corrections themselves are
+    not repeated here — /api/submissions/{id} already serves one in full, and
+    a history list that carried every error array would be enormous to render
+    a handful of dates and marks.
+    """
+    rows = (await db.execute(
+        select(Submission.submission_id, Submission.task_type,
+               Submission.tcf_level, Submission.overall_score,
+               Submission.created_at,
+               func.coalesce(func.jsonb_array_length(Submission.errors), 0),
+               func.coalesce(Submission.audio_path, "") != "")
+        .where(Submission.user_id == user.user_id,
+               Submission.exam_set == set_number,
+               Submission.task_type.is_not(None))
+        .order_by(Submission.created_at.desc()).limit(60))).all()
+    return {"attempts": [
+        {"submission_id": sid, "task_type": task, "tcf_level": level,
+         "overall_score": score, "created_at": created,
+         "error_count": int(n or 0), "has_audio": bool(has_audio)}
+        for sid, task, level, score, created, n, has_audio in rows]}
 
 
 # ----------------------------------------------------------------------------
@@ -6888,6 +6990,22 @@ def _reading_question_public(q: ReadingQuestion) -> dict:
         "question_fr": q.question_fr,
         "options": [{"id": o["id"], "text": o["text"]} for o in q.options],
     }
+
+
+def _by_level(corrections: List[dict]) -> dict:
+    """Correct-out-of-total per CEFR level.
+
+    A candidate who is solid to B1 and collapses at B2 learns far more from
+    that shape than from a bare total, so it is reported beside every paper
+    mark — including on a sitting re-opened from the history, which must read
+    exactly as it read on the day.
+    """
+    out: dict = {}
+    for c in corrections:
+        stat = out.setdefault(c["level"], {"correct": 0, "total": 0})
+        stat["total"] += 1
+        stat["correct"] += 1 if c["is_correct"] else 0
+    return out
 
 
 def _reading_correction(q: ReadingQuestion, picked: Optional[str]) -> dict:
@@ -7067,13 +7185,7 @@ async def reading_submit(test_number: int, body: ReadingSubmitIn,
     corrections = [_reading_correction(q, body.answers.get(q.reading_question_id))
                    for q in questions]
     score = sum(1 for c in corrections if c["is_correct"])
-    # Per-level breakdown: a candidate who is solid to B1 and collapses at B2
-    # learns far more from that shape than from a bare total.
-    by_level = {}
-    for c in corrections:
-        stat = by_level.setdefault(c["level"], {"correct": 0, "total": 0})
-        stat["total"] += 1
-        stat["correct"] += 1 if c["is_correct"] else 0
+    by_level = _by_level(corrections)
 
     attempt = ReadingAttempt(
         reading_attempt_id=new_id("rda"), user_id=user.user_id,
@@ -7088,12 +7200,55 @@ async def reading_submit(test_number: int, body: ReadingSubmitIn,
 
 
 @app.get("/api/reading/attempts")
-async def reading_attempts(user: User = Depends(get_current_user),
+async def reading_attempts(test_number: Optional[int] = None,
+                           user: User = Depends(get_current_user),
                            db: AsyncSession = Depends(get_db)):
-    res = await db.execute(
-        select(ReadingAttempt).where(ReadingAttempt.user_id == user.user_id)
-        .order_by(ReadingAttempt.created_at.desc()).limit(50))
+    """Past sittings, newest first. `test_number` narrows them to one paper.
+
+    The dashboard wants the whole history across papers; a paper's own page
+    wants only its own, so that "you have sat this three times" is answered
+    without pulling fifty rows and filtering them in the browser.
+    """
+    q = select(ReadingAttempt).where(ReadingAttempt.user_id == user.user_id)
+    if test_number is not None:
+        q = q.where(ReadingAttempt.test_number == test_number)
+    res = await db.execute(q.order_by(ReadingAttempt.created_at.desc()).limit(50))
     return {"attempts": [_row_to_dict(a) for a in res.scalars().all()]}
+
+
+@app.get("/api/reading/attempts/{attempt_id}")
+async def reading_attempt(attempt_id: str,
+                          user: User = Depends(get_current_user),
+                          db: AsyncSession = Depends(get_db)):
+    """One past sitting, marked again exactly as it was marked at the time.
+
+    The answer sheet is stored; the explanations are not, and should not be —
+    they belong to the question bank, and a correction re-read a month later
+    should be the current one rather than a copy frozen at submission. So this
+    rebuilds the same payload /submit returned rather than storing it twice.
+
+    It costs no test allowance: the sitting was already paid for when it was
+    taken, and re-reading your own marked paper is not a second attempt.
+    """
+    res = await db.execute(
+        select(ReadingAttempt)
+        .where(ReadingAttempt.reading_attempt_id == attempt_id))
+    attempt = res.scalar_one_or_none()
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+    if attempt.user_id != user.user_id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+    res = await db.execute(
+        select(ReadingQuestion)
+        .where(ReadingQuestion.test_number == attempt.test_number,
+               ReadingQuestion.is_active == True)  # noqa: E712
+        .order_by(ReadingQuestion.position.asc()))
+    questions = res.scalars().all()
+    answers = attempt.answers or {}
+    corrections = [_reading_correction(q, answers.get(q.reading_question_id))
+                   for q in questions]
+    return {"attempt": _row_to_dict(attempt), "corrections": corrections,
+            "by_level": _by_level(corrections)}
 
 
 # ----------------------------------------------------------------------------
@@ -7265,11 +7420,7 @@ async def listening_submit(test_number: int, body: ListeningSubmitIn,
         _listening_correction(q, body.answers.get(q.listening_question_id))
         for q in questions]
     score = sum(1 for c in corrections if c["is_correct"])
-    by_level = {}
-    for c in corrections:
-        stat = by_level.setdefault(c["level"], {"correct": 0, "total": 0})
-        stat["total"] += 1
-        stat["correct"] += 1 if c["is_correct"] else 0
+    by_level = _by_level(corrections)
 
     attempt = ListeningAttempt(
         listening_attempt_id=new_id("lda"), user_id=user.user_id,
@@ -7284,12 +7435,42 @@ async def listening_submit(test_number: int, body: ListeningSubmitIn,
 
 
 @app.get("/api/listening/attempts")
-async def listening_attempts(user: User = Depends(get_current_user),
+async def listening_attempts(test_number: Optional[int] = None,
+                             user: User = Depends(get_current_user),
                              db: AsyncSession = Depends(get_db)):
-    res = await db.execute(
-        select(ListeningAttempt).where(ListeningAttempt.user_id == user.user_id)
-        .order_by(ListeningAttempt.created_at.desc()).limit(50))
+    """Past sittings, newest first; `test_number` narrows them to one paper."""
+    q = select(ListeningAttempt).where(ListeningAttempt.user_id == user.user_id)
+    if test_number is not None:
+        q = q.where(ListeningAttempt.test_number == test_number)
+    res = await db.execute(q.order_by(ListeningAttempt.created_at.desc()).limit(50))
     return {"attempts": [_row_to_dict(a) for a in res.scalars().all()]}
+
+
+@app.get("/api/listening/attempts/{attempt_id}")
+async def listening_attempt(attempt_id: str,
+                            user: User = Depends(get_current_user),
+                            db: AsyncSession = Depends(get_db)):
+    """One past sitting, re-marked from the stored answer sheet. See the
+    reading endpoint above for why the corrections are rebuilt, not stored."""
+    res = await db.execute(
+        select(ListeningAttempt)
+        .where(ListeningAttempt.listening_attempt_id == attempt_id))
+    attempt = res.scalar_one_or_none()
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+    if attempt.user_id != user.user_id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+    res = await db.execute(
+        select(ListeningQuestion)
+        .where(ListeningQuestion.test_number == attempt.test_number,
+               ListeningQuestion.is_active == True)  # noqa: E712
+        .order_by(ListeningQuestion.position.asc()))
+    questions = res.scalars().all()
+    answers = attempt.answers or {}
+    corrections = [_listening_correction(q, answers.get(q.listening_question_id))
+                   for q in questions]
+    return {"attempt": _row_to_dict(attempt), "corrections": corrections,
+            "by_level": _by_level(corrections)}
 
 
 # ----------------------------------------------------------------------------
@@ -7335,6 +7516,7 @@ SPEECH_AUDIO_MAX_WAIT_SECONDS = float(
 async def speaking_analyze(question: str = Form(...),
                            audio: UploadFile = File(...),
                            task_type: Optional[int] = Form(None),
+                           exam_set: Optional[int] = Form(None),
                            mime_type: Optional[str] = Form(None),
                            theme_id: Optional[str] = Form(None),
                            user: User = Depends(get_current_user),
@@ -7347,6 +7529,10 @@ async def speaking_analyze(question: str = Form(...),
         raise HTTPException(status_code=400, detail="Empty audio upload")
     if task_type not in (1, 2, 3):
         task_type = None
+    # A sitting is identified by its tâche as well as its number: a recording
+    # that does not say which tâche it answers cannot be placed in a paper.
+    if task_type is None or (exam_set is not None and exam_set < 1):
+        exam_set = None
     filename = audio.filename or "audio.webm"
     mime = resolve_audio_mime(filename, mime_type or audio.content_type)
 
@@ -7408,7 +7594,8 @@ async def speaking_analyze(question: str = Form(...),
     analysis["transcript"] = transcript
     sub = await persist_submission(
         db, user, transcript, None, analysis,
-        source="speaking", consume=False, theme_id=theme_id)
+        source="speaking", consume=False, theme_id=theme_id,
+        exam_set=exam_set, task_type=task_type)
     # Kept after the submission exists, because the file is named after it.
     # This is the one flow with a single recording behind a single grade; the
     # roleplay below is a dozen turn uploads and no one file to keep, so it
@@ -7509,7 +7696,10 @@ async def speaking_converse_grade(body: ConverseGradeIn,
     sub = await persist_submission(
         db, user, transcript or "(no speech detected)", None, analysis,
         source="conversation" if free_mode else "speaking",
-        consume=False)  # the credit, if any, was reserved above
+        consume=False,  # the credit, if any, was reserved above
+        # Free practice is not part of a paper, whatever the client sends.
+        exam_set=None if free_mode else body.exam_set,
+        task_type=None if free_mode else task_type)
     analysis["submission_id"] = sub.get("submission_id")
     analysis["streak"] = sub.get("streak")
     return public_analysis(analysis)

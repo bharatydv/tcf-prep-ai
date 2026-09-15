@@ -66,6 +66,21 @@ export function formatDate(value) {
   } catch { return String(value).slice(0, 10); }
 }
 
+/* Short date with the time on it, for lists of attempts.
+ *
+ * The long form above is for a single date on a page — a blog post, an
+ * invoice. A history list is neither: it is a column of dates that have to be
+ * told apart, and two sittings of the same paper on the same afternoon are
+ * common enough that the day alone would print the same string twice. */
+export function formatDateTime(value) {
+  if (!value) return '';
+  try {
+    return new Date(value).toLocaleString('en-US',
+      { year: 'numeric', month: 'short', day: 'numeric',
+        hour: 'numeric', minute: '2-digit' });
+  } catch { return String(value).slice(0, 16); }
+}
+
 /* Dotted lookup: 'write.analyse' -> dict.write.analyse */
 function lookup(dict, key) {
   return key.split('.').reduce((node, part) => (node == null ? undefined : node[part]), dict);

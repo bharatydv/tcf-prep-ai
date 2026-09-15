@@ -14,6 +14,7 @@ import { SpeakingResult } from '../components/SpeakingResult';
 import { useSpeak } from '../lib/speak';
 import { speakingPaperMark, displayMark } from '../lib/tcf';
 import { readSitting, writeSitting } from '../lib/speakingExam';
+import AttemptHistory, { useAttempts } from '../components/AttemptHistory';
 
 /* Test Mode for Expression orale: one numbered sitting, the three tâches in the
    order the real exam gives them. Tâches 1 and 2 are live roleplays and run in
@@ -41,6 +42,7 @@ export default function SpeakingExam() {
   const [live, setLive] = useState(null);           // 1 | 2 while a modal is open
   const [results, setResults] = useState({});       // taskType -> graded result
   const [reviewing, setReviewing] = useState(null); // the tâche whose corrections are open
+  const [openingId, setOpeningId] = useState(null);
   // One synthesiser for the page: opening tâche 3's corrections while tâche 1
   // is being read aloud must stop the first voice, not talk over it.
   const tts = useSpeak();
@@ -55,6 +57,47 @@ export default function SpeakingExam() {
   // Tâche 3 is graded on the recorder's own route, so the results survive in
   // sessionStorage rather than in state alone; coming back finishes the paper.
   useEffect(() => { setResults(readSitting(setNumber)); }, [setNumber]);
+
+  /* Every tâche of this set this candidate has ever had graded.
+   *
+   * sessionStorage alone made a paper a property of one browser tab: a reload,
+   * a second device, or a grade that errored left this page reporting "0 of 3"
+   * over answers that had really been given. The submissions were always
+   * there; nothing linked them to the set until they carried its number.
+   *
+   * Newest first, so the first row seen for a tâche is where that tâche now
+   * stands and the ones behind it are the earlier tries. */
+  const { attempts, reload: reloadAttempts } = useAttempts(
+    setNumber ? `/api/speaking/exam-sets/${setNumber}/attempts` : null,
+    { enabled: Boolean(user && setNumber) });
+
+  /* The sitting as the server knows it, filled in for any tâche the tab does
+     not already hold. What is in sessionStorage wins: it is this sitting, in
+     this tab, and it is what the candidate has just been looking at. */
+  useEffect(() => {
+    if (!attempts.length) return;
+    const latest = {};
+    // attempts are newest first, so the first of each tâche is its latest.
+    attempts.forEach((a) => {
+      if (a.task_type && !latest[a.task_type]) latest[a.task_type] = a;
+    });
+    setResults((held) => {
+      const next = { ...held };
+      let added = false;
+      Object.entries(latest).forEach(([n, a]) => {
+        if (next[n]) return;
+        // A stub, not a grade: enough for the page to know the tâche was
+        // answered and what it scored. The corrections themselves are fetched
+        // only when the candidate opens them, which is the one place they are
+        // large and the one place they are wanted.
+        next[n] = { tcf_level: a.tcf_level, overall_score: a.overall_score,
+                    errors: [], submission_id: a.submission_id,
+                    from_history: true };
+        added = true;
+      });
+      return added ? next : held;
+    });
+  }, [attempts]);
 
   /* A sitting finished on the recorder's route comes back naming the tâche it
      just graded. Landing on a completed paper with every correction collapsed
@@ -96,6 +139,29 @@ export default function SpeakingExam() {
     setResults(next);
     writeSitting(setNumber, next);
     setLive(null);
+    reloadAttempts();   // the tâche just graded belongs in the history
+  };
+
+  /* Open a graded tâche from the history — including one from a sitting taken
+     days ago, or in another tab. The stub the list carries has no corrections
+     on it, so the full submission is fetched the first time it is opened and
+     then kept with the rest of the sitting. */
+  const openAttempt = async (row) => {
+    if (results[row.task]?.errors?.length || results[row.task]?.loaded) {
+      setReviewing(row.task);
+      return;
+    }
+    setOpeningId(row.id);
+    try {
+      const { data } = await api.get(`/api/submissions/${row.id}`);
+      const full = { ...(data.submission || {}), loaded: true };
+      setResults((held) => ({ ...held, [row.task]: full }));
+      setReviewing(row.task);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setOpeningId(null);
+    }
   };
 
   /* ---------------- chooser ---------------- */
@@ -222,13 +288,21 @@ export default function SpeakingExam() {
                         <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-primary shadow-sm">
                           {result.tcf_level} · {displayMark(result.overall_score, result.tcf_level) ?? '—'}/20
                         </span>
-                        <button onClick={() => setReviewing(reviewing === s.n ? null : s.n)}
+                        <button onClick={() => {
+                          if (reviewing === s.n) return setReviewing(null);
+                          if (result.from_history && !result.loaded) {
+                            return openAttempt({ id: result.submission_id, task: s.n });
+                          }
+                          return setReviewing(s.n);
+                        }}
                           data-testid={`review-task-${s.n}`}
                           className="text-xs font-semibold text-primary underline">
                           <MagnifyingGlass size={12} weight="bold" className="mr-1 inline" />
-                          {reviewing === s.n ? t('sexam.hideErrors') : t('sexam.checkErrors', {
-                            n: (result.errors || []).length,
-                          })}
+                          {reviewing === s.n
+                            ? t('sexam.hideErrors')
+                            : result.from_history && !result.loaded
+                              ? t('hist.review')
+                              : t('sexam.checkErrors', { n: (result.errors || []).length })}
                         </button>
                         <button onClick={() => startTask(s.n)} className="text-xs font-semibold text-primary underline">
                           <ArrowClockwise size={12} weight="bold" className="mr-1 inline" />{t('sexam.again')}
@@ -256,6 +330,22 @@ export default function SpeakingExam() {
             );
           })}
         </div>
+
+        <AttemptHistory
+          className="mt-5"
+          testid="sexam-history"
+          attempts={attempts.map((a) => ({
+            id: a.submission_id,
+            task: a.task_type,
+            label: `${t('hist.tache', { n: a.task_type })} · ${a.tcf_level} · ${
+              displayMark(a.overall_score, a.tcf_level) ?? '—'}/20`,
+            note: a.error_count
+              ? t('hist.errors', { n: a.error_count })
+              : t('hist.noErrors'),
+            created_at: a.created_at,
+          }))}
+          opening={openingId}
+          onOpen={openAttempt} />
 
         {finished && (
           <div className="mt-5 overflow-hidden rounded-3xl border border-green-200 shadow-soft" data-testid="exam-summary">
@@ -289,11 +379,13 @@ export default function SpeakingExam() {
 
       {live === 1 && (
         <ConversationModal mode="tache1" tacheTitle={paper.timings['1'].name}
+          examSet={setNumber}
           consigne={paper.task1.brief}
           onCancel={() => setLive(null)} onGraded={onGraded(1)} />
       )}
       {live === 2 && (
         <ConversationModal mode="tache2" tacheTitle={paper.timings['2'].name}
+          examSet={setNumber}
           consigne={paper.task2.consigne}
           onCancel={() => setLive(null)} onGraded={onGraded(2)} />
       )}

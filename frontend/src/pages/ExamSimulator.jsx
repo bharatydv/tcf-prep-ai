@@ -5,8 +5,9 @@ import { toast } from 'sonner';
 import { api, errMsg, CATEGORY_META } from '../lib/api';
 import { WRITING_TASKS, WRITING_TOTAL_SECONDS, displayMark } from '../lib/tcf';
 import { useAuth } from '../context/AuthContext';
-import { useT } from '../i18n';
+import { formatDateTime, useT } from '../i18n';
 import { Seo } from '../lib/seo';
+import AttemptHistory, { useAttempts } from '../components/AttemptHistory';
 import { AccentToolbar, BackLink, ErrorHighlightedText, WordCountBar, useConfirm } from '../components/shared';
 
 const GUIDE = {
@@ -19,7 +20,7 @@ const TOTAL = WRITING_TOTAL_SECONDS;
 const DRAFT_KEY = 'prepfrancais.simulator.draft';
 
 export default function ExamSimulator() {
-  const { refreshUser } = useAuth();
+  const { refreshUser, user } = useAuth();
   const t = useT();
   const [confirm, confirmDialog] = useConfirm();
   const navigate = useNavigate();
@@ -31,6 +32,10 @@ export default function ExamSimulator() {
   const [texts, setTexts] = useState({ 1: '', 2: '', 3: '' });
   const [seconds, setSeconds] = useState(TOTAL);
   const [attempt, setAttempt] = useState(null);
+  // The sitting being re-read, when `attempt` is a past one rather than the
+  // paper just handed in.
+  const [pastAttempt, setPastAttempt] = useState(null);
+  const [openingId, setOpeningId] = useState(null);
   const taRef = useRef(null);
   const warned = useRef({ 10: false, 2: false, expired: false });
   const restoredRef = useRef(false);
@@ -107,6 +112,27 @@ export default function ExamSimulator() {
     }));
   }, [phase, texts, current, setNumber]);
 
+  /* Every simulator sitting this candidate has handed in. Not per set: an
+     attempt records the three tâches it graded, not which paper they came
+     from, so the honest list is all of them newest first. */
+  const { attempts, reload: reloadAttempts } = useAttempts(
+    '/api/simulator/attempts', { enabled: Boolean(user) });
+
+  const openAttempt = async (row) => {
+    setOpeningId(row.id);
+    try {
+      const { data } = await api.get(`/api/simulator/attempts/${row.id}`);
+      setAttempt(data);
+      setPastAttempt(row);
+      setPhase('results');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setOpeningId(null);
+    }
+  };
+
   const submit = useCallback(async (timeUsed) => {
     // The paper is what gets graded; without it there is nothing to submit.
     // Reachable from the expiry path, which fires from a timer that does not
@@ -121,13 +147,18 @@ export default function ExamSimulator() {
         time_used_seconds: timeUsed,
       });
       setAttempt(data.attempt);
+      setPastAttempt(null);
       setPhase('results');
+      reloadAttempts();   // the paper just handed in belongs in the history
       localStorage.removeItem(DRAFT_KEY);
       await refreshUser();
     } catch (e) {
       toast.error(errMsg(e));
       setPhase('exam');
     }
+    // reloadAttempts is stable for a given list and would re-create submit on
+    // every history refresh, which the expiry timer holds a reference to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks, texts, refreshUser]);
 
   useEffect(() => { secondsRef.current = seconds; }, [seconds]);
@@ -189,79 +220,20 @@ export default function ExamSimulator() {
     navigate('/practice');
   };
 
-  /* Choose the sitting first — before the loading guard below, because the
-     tâches are only fetched once a set has been picked. */
-  if (!setNumber) {
-    return (
-      <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
-        <Seo titleKey="seo.sim.title" path="/practice/simulator" noindex />
-        <div className="mb-3 text-center">
-          <h1 className="font-heading text-3xl font-extrabold text-gray-900">{t('sim.setsTitle')}</h1>
-          <p className="mx-auto mt-2 max-w-xl text-sm text-gray-600">{t('sim.setsSub')}</p>
-        </div>
-        <div className="mb-8 flex justify-center">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-4 py-1.5 text-xs font-bold text-primary">
-            <Timer size={14} weight="fill" /> {t('sim.setsBadge')}
-          </span>
-        </div>
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {sets.map((x) => (
-            <button key={x.set_number} onClick={() => setSetNumber(x.set_number)}
-              data-testid={`sim-set-${x.set_number}`}
-              className="group flex flex-col overflow-hidden rounded-3xl border border-violet-100 bg-white text-left shadow-soft transition hover:-translate-y-1 hover:shadow-xl hover:shadow-violet-200/50">
-              <div className="h-1.5 w-full bg-gradient-to-r from-primary to-fuchsia-600" />
-              <div className="flex flex-1 flex-col p-6">
-                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-100 font-heading text-lg font-extrabold text-primary">
-                  {x.set_number}
-                </span>
-                <h3 className="mt-4 font-heading text-base font-bold text-gray-900">
-                  {t('sim.setN', { n: x.set_number })}
-                </h3>
-                <p className="mt-1 flex-1 text-xs leading-relaxed text-gray-500">{x.task3_preview}…</p>
-              </div>
-            </button>
-          ))}
-        </div>
-      </main>
-    );
-  }
-
-  if (!tasks) return <main className="flex min-h-[60vh] items-center justify-center"><div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" /></main>;
-
-  if (phase === 'intro') {
-    return (
-      <main className="mx-auto max-w-3xl px-4 py-12">
-        <BackLink />
-        <h1 className="text-3xl font-bold">{t('sim.title')}</h1>
-        <div className="card mt-6 space-y-4 p-8">
-          <p className="text-gray-700">{t('sim.conditions')}</p>
-          <ul className="space-y-2 text-sm text-gray-600">
-            <li>⏱️ <strong>{t('sim.rule1Bold')}</strong> {t('sim.rule1')}</li>
-            <li>📝 {t('sim.rule2')}</li>
-            <li>🚫 {t('sim.rule3')}</li>
-            <li>💳 {t('sim.rule4')}</li>
-          </ul>
-          <button className="btn-primary w-full" onClick={() => setPhase('exam')} data-testid="start-simulator-button">
-            {t('sim.start')}
-          </button>
-        </div>
-      </main>
-    );
-  }
-
-  if (phase === 'submitting') {
-    return (
-      <main className="flex min-h-[60vh] flex-col items-center justify-center gap-4">
-        <div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" />
-        <p className="text-gray-600">{t('sim.grading')}</p>
-      </main>
-    );
-  }
-
+  /* A finished paper, before either guard below.
+   *
+   * It reads nothing but `attempt`, and it has to render for a sitting opened
+   * from the history — where no set has been chosen and no tâches have been
+   * fetched, so both guards below would have swallowed it. */
   if (phase === 'results' && attempt) {
     return (
       <main className="mx-auto max-w-5xl px-4 py-10">
         <h1 className="text-3xl font-bold">{t('sim.resultsTitle')}</h1>
+        {pastAttempt && (
+          <p className="mt-1 text-sm font-semibold text-primary" data-testid="sim-past-banner">
+            {t('hist.reviewing', { when: formatDateTime(pastAttempt.created_at) })}
+          </p>
+        )}
         <div className="card mt-6 flex flex-wrap items-center justify-around gap-6 p-8 text-center">
           <div><p className="text-sm text-gray-500">{t('sim.combined')}</p><p className="font-heading text-5xl font-bold text-primary">{displayMark(attempt.combined_score, attempt.tcf_level) ?? '—'}</p></div>
           <div><p className="text-sm text-gray-500">{t('sim.cefr')}</p><p className="font-heading text-5xl font-bold">{attempt.tcf_level}</p></div>
@@ -321,7 +293,93 @@ export default function ExamSimulator() {
           <Link to="/review" className="btn-primary">{t('sim.reviewErrors')}</Link>
           <Link to="/dashboard" className="btn-outline">{t('common.dashboard')}</Link>
           <Link to="/practice" className="btn-outline">{t('sim.backToPractice')}</Link>
+          {pastAttempt && (
+            <button type="button" data-testid="sim-exit-review"
+              onClick={() => { setAttempt(null); setPastAttempt(null); setPhase('intro'); }}
+              className="btn-outline">{t('hist.exitReview')}</button>
+          )}
         </div>
+      </main>
+    );
+  }
+
+
+  /* Choose the sitting first — before the loading guard below, because the
+     tâches are only fetched once a set has been picked. */
+  if (!setNumber) {
+    return (
+      <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
+        <Seo titleKey="seo.sim.title" path="/practice/simulator" noindex />
+        <div className="mb-3 text-center">
+          <h1 className="font-heading text-3xl font-extrabold text-gray-900">{t('sim.setsTitle')}</h1>
+          <p className="mx-auto mt-2 max-w-xl text-sm text-gray-600">{t('sim.setsSub')}</p>
+        </div>
+        <div className="mb-8 flex justify-center">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-4 py-1.5 text-xs font-bold text-primary">
+            <Timer size={14} weight="fill" /> {t('sim.setsBadge')}
+          </span>
+        </div>
+        <AttemptHistory
+          className="mb-8"
+          testid="sim-history"
+          attempts={attempts.map((a) => ({
+            id: a.attempt_id,
+            label: `${a.tcf_level} · ${displayMark(a.combined_score, a.tcf_level) ?? '—'}/20`,
+            created_at: a.created_at,
+          }))}
+          opening={openingId}
+          onOpen={openAttempt} />
+
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {sets.map((x) => (
+            <button key={x.set_number} onClick={() => setSetNumber(x.set_number)}
+              data-testid={`sim-set-${x.set_number}`}
+              className="group flex flex-col overflow-hidden rounded-3xl border border-violet-100 bg-white text-left shadow-soft transition hover:-translate-y-1 hover:shadow-xl hover:shadow-violet-200/50">
+              <div className="h-1.5 w-full bg-gradient-to-r from-primary to-fuchsia-600" />
+              <div className="flex flex-1 flex-col p-6">
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-100 font-heading text-lg font-extrabold text-primary">
+                  {x.set_number}
+                </span>
+                <h3 className="mt-4 font-heading text-base font-bold text-gray-900">
+                  {t('sim.setN', { n: x.set_number })}
+                </h3>
+                <p className="mt-1 flex-1 text-xs leading-relaxed text-gray-500">{x.task3_preview}…</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      </main>
+    );
+  }
+
+  if (!tasks) return <main className="flex min-h-[60vh] items-center justify-center"><div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" /></main>;
+
+  if (phase === 'intro') {
+    return (
+      <main className="mx-auto max-w-3xl px-4 py-12">
+        <BackLink />
+        <h1 className="text-3xl font-bold">{t('sim.title')}</h1>
+        <div className="card mt-6 space-y-4 p-8">
+          <p className="text-gray-700">{t('sim.conditions')}</p>
+          <ul className="space-y-2 text-sm text-gray-600">
+            <li>⏱️ <strong>{t('sim.rule1Bold')}</strong> {t('sim.rule1')}</li>
+            <li>📝 {t('sim.rule2')}</li>
+            <li>🚫 {t('sim.rule3')}</li>
+            <li>💳 {t('sim.rule4')}</li>
+          </ul>
+          <button className="btn-primary w-full" onClick={() => setPhase('exam')} data-testid="start-simulator-button">
+            {t('sim.start')}
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  if (phase === 'submitting') {
+    return (
+      <main className="flex min-h-[60vh] flex-col items-center justify-center gap-4">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" />
+        <p className="text-gray-600">{t('sim.grading')}</p>
       </main>
     );
   }

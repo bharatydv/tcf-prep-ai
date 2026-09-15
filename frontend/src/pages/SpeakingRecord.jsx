@@ -263,6 +263,9 @@ export default function SpeakingRecord() {
         mimeType: audioMeta?.mimeType || audioBlob.type,
       });
       if (tacheNum) form.append('task_type', String(tacheNum));
+      // Which sitting this answer belongs to, so the graded tâche can be found
+      // again as part of the paper rather than as a loose correction.
+      if (examSet && tacheNum) form.append('exam_set', String(examSet));
       // Same reason as the writing flow: the theme is not recoverable
       // from anything else on the submission.
       if (themeId) form.append('theme_id', themeId);
