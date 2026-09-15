@@ -1525,7 +1525,17 @@ def trial_state(user: User) -> dict:
         "speaking_tache2": {
             "used": t2, "limit": FREE_SPEAKING_TACHE2_LIMIT,
             "left": None if premium else max(0, FREE_SPEAKING_TACHE2_LIMIT - t2)},
-        "premium_until": user.premium_until,
+        # An ISO string, not a datetime.
+        #
+        # This dict is not only rendered into a 200; it is also the `trial`
+        # block of the 402 every metered endpoint raises, and an HTTPException
+        # detail is serialised with plain json.dumps rather than through
+        # FastAPI's encoder. A datetime there is not serialisable, so the
+        # paywall turned into a 500 — for lapsed subscribers only, the one
+        # group with a non-NULL premium_until, which is why it stayed hidden.
+        # The wire format is unchanged: the encoder wrote this same string.
+        "premium_until": (user.premium_until.isoformat()
+                          if user.premium_until else None),
     }
 
 
