@@ -64,11 +64,27 @@ function Wordmark() {
   );
 }
 
+/* Contact and the four policies, read as one row above the copyright rather
+   than as a sixth column.
+ *
+ * A payment aggregator's site check looks for the refund and delivery policies
+ * from the footer of any page, not only from the one page that happens to link
+ * them — so all of them stay site-wide. Only their shape changes: six stacked
+ * links under the newsletter form made that column twice the height of the
+ * other four, and the footer as tall as the empty space beside them. */
+const COMPANY_LINKS = [
+  ['/contact', 'land.footContact'],
+  ['/privacy', 'land.footPrivacy'],
+  ['/terms', 'land.footTerms'],
+  ['/refund', 'land.footRefund'],
+  ['/shipping', 'land.footShipping'],
+];
+
 function Column({ title, links }) {
   return (
     <div>
       <p className="font-heading text-sm font-bold text-white">{title}</p>
-      <ul className="mt-4 space-y-2.5 text-xs">
+      <ul className="mt-3 space-y-1.5 text-xs">
         {links.map(([to, label]) => (
           <li key={to}>
             <Link to={to} className="inline-block py-1.5 transition hover:text-white">{label}</Link>
@@ -102,7 +118,7 @@ export default function Footer() {
 
   return (
     <footer className="bg-ink text-violet-200/70" style={{ background: '#120822' }}>
-      <div className="mx-auto grid max-w-7xl gap-10 px-4 py-14 sm:grid-cols-2 sm:px-6 lg:grid-cols-[1.4fr_1fr_1fr_1fr_1.2fr]">
+      <div className="mx-auto grid max-w-7xl gap-x-8 gap-y-8 px-4 py-10 sm:grid-cols-2 sm:px-6 lg:grid-cols-[1.4fr_1fr_1fr_1fr_1.2fr]">
         <div className="sm:col-span-2 lg:col-span-1">
           <Wordmark />
           <p className="mt-3 text-sm font-semibold text-violet-100">{t('land.footerTag')}</p>
@@ -153,34 +169,29 @@ export default function Footer() {
               <PaperPlaneTilt size={15} weight="fill" />
             </button>
           </form>
-
-          <p className="mt-6 font-heading text-sm font-bold text-white">{t('land.footCompany')}</p>
-          <ul className="mt-3 space-y-2 text-xs">
-            <li><Link to="/contact" className="inline-block py-1.5 transition hover:text-white">{t('land.footContact')}</Link></li>
-            <li><Link to="/privacy" className="inline-block py-1.5 transition hover:text-white">{t('land.footPrivacy')}</Link></li>
-            <li><Link to="/terms" className="inline-block py-1.5 transition hover:text-white">{t('land.footTerms')}</Link></li>
-            {/* A payment aggregator's site check looks for the refund and
-                delivery policies from the footer of any page, not only from
-                the one page that happens to link them. */}
-            <li><Link to="/refund" className="inline-block py-1.5 transition hover:text-white">{t('land.footRefund')}</Link></li>
-            <li><Link to="/shipping" className="inline-block py-1.5 transition hover:text-white">{t('land.footShipping')}</Link></li>
-            {/* Withdrawing consent is the half a one-time banner usually
-                leaves out, and a choice that cannot be changed is not really
-                a choice. Reopens the banner rather than being a page of its
-                own — there is one setting behind it. */}
-            <li><button type="button" onClick={reopenConsent}
-              className="inline-block py-1.5 text-left transition hover:text-white">
-              {t('consent.manage')}</button></li>
-          </ul>
         </div>
       </div>
-      <div className="border-t border-white/10 py-5 text-center text-[11px] text-violet-300/75">
-        {t('land.copyright', { year: new Date().getFullYear() })}
-        {BUSINESS_LEGAL_NAME && (
-          <span className="mt-1 block">
-            {t('land.operator', { name: BUSINESS_NAME, legal: BUSINESS_LEGAL_NAME })}
-          </span>
-        )}
+      <div className="border-t border-white/10 px-4 py-4 text-[11px] text-violet-300/75 sm:px-6">
+        <nav aria-label={t('land.footCompany')}
+          className="mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-x-5">
+          {COMPANY_LINKS.map(([to, key]) => (
+            <Link key={to} to={to} className="py-1.5 transition hover:text-white">{t(key)}</Link>
+          ))}
+          {/* Withdrawing consent is the half a one-time banner usually leaves
+              out, and a choice that cannot be changed is not really a choice.
+              Reopens the banner rather than being a page of its own — there is
+              one setting behind it. */}
+          <button type="button" onClick={reopenConsent}
+            className="py-1.5 transition hover:text-white">{t('consent.manage')}</button>
+        </nav>
+        <p className="mt-1.5 text-center">
+          {t('land.copyright', { year: new Date().getFullYear() })}
+          {BUSINESS_LEGAL_NAME && (
+            <span className="block sm:ml-1.5 sm:inline">
+              {t('land.operator', { name: BUSINESS_NAME, legal: BUSINESS_LEGAL_NAME })}
+            </span>
+          )}
+        </p>
       </div>
     </footer>
   );
