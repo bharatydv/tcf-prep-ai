@@ -1,4 +1,4 @@
-/* The floating "join the group" button.
+/* The floating "join the community" button.
  *
  * Pinned to the bottom-right of every page rather than dropped into one
  * section, because a community link only works if it is in reach at the moment
