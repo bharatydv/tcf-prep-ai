@@ -52,6 +52,22 @@ const chunkDeadline = (chunk) => 2000 + chunk.length * 140;
    the next word and short enough not to feel like a dead line. */
 const SILENCE_MS = 2000;
 
+/* Tâche 1 is not a roleplay, and treating it as one cost the candidate the
+   thing being measured. The agent was asked to open the scene, so the two
+   minutes started while a request was in flight and then ran on through ten to
+   fifteen seconds of generated preamble — a sixth of the answer, spent
+   listening. The real tâche 1 is one instruction and then two minutes that
+   belong entirely to the candidate, so that is what this is: a fixed line, no
+   request behind it, and no interruption afterwards. */
+const TACHE1_OPENING = "Bonjour. Présentez-vous, s’il vous plaît.";
+
+/* Chrome drops or clips the opening of an utterance queued in the same tick as
+   cancel() — the engine is still tearing the previous one down and swallows
+   whatever arrives during it. That is the examiner's first words going missing
+   on every reply, since every reply cancels the last. Queue after it has
+   settled, and only pay the delay when there was something to cancel. */
+const CANCEL_SETTLE = 300;
+
 // Voices differ wildly in quality and the first French one in the list is
 // usually the flat local fallback, and a French locale alone does not pick the
 // good one. That scoring now lives in lib/speak.js, because the speaking result
@@ -99,6 +115,8 @@ export default function ConversationModal({
   // Free practice has no exam framing: no preparation, a longer window, and it
   // is metered by its own monthly allowance rather than an AI credit.
   const isFree = mode === 'free';
+  // Tâche 1: the examiner asks once, then listens for the whole window.
+  const isMonologue = mode === 'tache1';
   const { prep: PREP_SECONDS, speak: TOTAL_SECONDS } = TIMINGS[mode] || TIMINGS.tache2;
   // With segments the header still announces the whole session; the clock the
   // candidate watches belongs to the tâche actually running.
@@ -117,6 +135,11 @@ export default function ConversationModal({
   const [error, setError] = useState('');
   const [checking, setChecking] = useState(false);
   const [recording, setRecording] = useState(false);
+  /* The candidate's clock does not run while the examiner is still giving the
+     instruction. Nobody is being assessed on how long the question takes to
+     ask, and before this the answer window opened on the request that produced
+     it. */
+  const [clockHeld, setClockHeld] = useState(false);
 
   const turnsRef = useRef([]);
   const mutedRef = useRef(false);
@@ -207,7 +230,13 @@ export default function ConversationModal({
     const synth = window.speechSynthesis;
     if (mutedRef.current || !synth || !text) return resolve();
     const seq = (speakSeqRef.current += 1);
-    try { synth.cancel(); } catch (e) {}
+    let settle = 0;
+    try {
+      if (synth.speaking || synth.pending) { synth.cancel(); settle = CANCEL_SETTLE; }
+      // cancel() can leave the engine parked; a queue that is paused plays
+      // nothing and the watchdog below then skips the chunk entirely.
+      synth.resume();
+    } catch (e) {}
     if (!voiceRef.current) voiceRef.current = pickFrenchVoice();
     const chunks = splitForSpeech(text);
 
@@ -246,7 +275,7 @@ export default function ConversationModal({
       return undefined;
     };
 
-    sayNext();
+    setTimeout(sayNext, settle);
   }), []);
 
   /* ---------------- speech in ---------------- */
@@ -368,8 +397,17 @@ export default function ConversationModal({
   const sendTurn = useCallback((text) => {
     const next = [...turnsRef.current, { role: 'candidate', text }];
     setTurns(next);
+    /* Tâche 1 has no second speaker. A two-second breath is a breath, not an
+       invitation — answering into it broke the candidate's presentation in
+       half and spent their window on a reply nobody asked for. The words are
+       kept for the grader and the microphone simply stays open. */
+    if (isMonologue) {
+      setStatus('idle');
+      if (!doneRef.current) listenRef.current?.();
+      return;
+    }
     exchange(next);
-  }, [exchange]);
+  }, [exchange, isMonologue]);
   useEffect(() => { sendTurnRef.current = sendTurn; }, [sendTurn]);
 
   /* ---------------- push-to-talk fallback ---------------- */
@@ -434,10 +472,26 @@ export default function ConversationModal({
     else goLiveRef.current?.();
   };
 
-  const goLive = useCallback(() => {
+  const goLive = useCallback(async () => {
     setPhase('live');
-    exchange([]);            // the agent opens the scene in character
-  }, [exchange]);
+    // Held across the opening in every mode: the instruction is the examiner's
+    // time, and the window the candidate is measured in starts after it.
+    setClockHeld(true);
+    try {
+      if (isMonologue) {
+        // No request behind it, so the candidate hears the instruction as soon
+        // as they press start rather than after a round trip.
+        setTurns([{ role: 'agent', text: TACHE1_OPENING }]);
+        setStatus('speaking');
+        await speak(TACHE1_OPENING);
+      } else {
+        await exchange([]);  // the agent opens the scene in character
+      }
+    } finally {
+      setClockHeld(false);
+    }
+    if (isMonologue && !doneRef.current) listenRef.current?.();
+  }, [exchange, isMonologue, speak]);
   useEffect(() => { goLiveRef.current = goLive; }, [goLive]);
 
   const finish = useCallback(async () => {
@@ -519,7 +573,10 @@ export default function ConversationModal({
   }, [segs, segIdx, exchange]);
 
   useEffect(() => {
-    if (phase !== 'live') { liveEndsRef.current = null; return undefined; }
+    // `clockHeld` clears when the opening has actually been spoken, and the
+    // deadline is computed from that moment — so the candidate gets the whole
+    // window however long the instruction took to deliver.
+    if (phase !== 'live' || clockHeld) { liveEndsRef.current = null; return undefined; }
     if (liveEndsRef.current == null) liveEndsRef.current = Date.now() + left * 1000;
 
     const read = () => {
@@ -543,7 +600,7 @@ export default function ConversationModal({
       document.removeEventListener('visibilitychange', onVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, finish, nextSegment, segIdx]);
+  }, [phase, clockHeld, finish, nextSegment, segIdx]);
 
   const spokenTurns = turns.filter((t) => t.role === 'candidate').length;
   const statusLabel = {

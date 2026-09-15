@@ -1819,7 +1819,7 @@ SPEAKING_TASKS = {
         "name": "Tâche 1 — Entretien dirigé"},
     2: {"prep_seconds": 120, "speak_seconds": 210, "min_words": 60,
         "name": "Tâche 2 — Exercice en interaction"},
-    3: {"prep_seconds": 120, "speak_seconds": 150, "min_words": 90,
+    3: {"prep_seconds": 0,   "speak_seconds": 150, "min_words": 90,
         "name": "Tâche 3 — Expression d'un point de vue"},
 }
 
@@ -2471,6 +2471,16 @@ def _validate_analysis(data: dict) -> dict:
 JSON_RETRY_NUDGE = ("\n\nIMPORTANT: your previous reply could not be parsed. "
                     "Return ONLY the JSON object - start with { and end with }, "
                     "no markdown fence, no preamble, no commentary.")
+# The other way a reply becomes unreadable: it is well-formed as far as it got
+# and then stops, because the answer did not fit in GRADER_MAX_TOKENS. The
+# speaking grid asks for three criterion comments plus a corrected and an
+# enhanced version, which is where this shows up. Asking for the same grade
+# written shorter fits where a verbatim re-ask would truncate again.
+JSON_TRUNCATED_NUDGE = ("\n\nIMPORTANT: your previous reply was cut off before "
+                        "the JSON ended. Return ONLY the JSON object, complete "
+                        "and closed - start with { and end with } - and keep "
+                        "every comment and rewritten passage short enough that "
+                        "the object finishes.")
 
 
 async def _graded_json(provider: str, system_prompt: str, prompt: str,
@@ -2488,10 +2498,9 @@ async def _graded_json(provider: str, system_prompt: str, prompt: str,
     _PROVIDER_LAST_ERROR and in the log either way.
     """
     last_exc = None
+    nudge = ""
     for attempt in range(2):
-        raw = await _grade_with_provider(
-            provider, system_prompt,
-            prompt if attempt == 0 else prompt + JSON_RETRY_NUDGE)
+        raw = await _grade_with_provider(provider, system_prompt, prompt + nudge)
         # No reply at all is a key, quota or network problem, and _grade_with_
         # provider has already recorded which. Re-asking cannot help.
         if raw is None:
@@ -2502,6 +2511,10 @@ async def _graded_json(provider: str, system_prompt: str, prompt: str,
             # Log what actually came back. Without this the provider looks dead
             # when in fact it replied and only the shape was wrong.
             last_exc = exc
+            # A reply that stopped mid-JSON did not make a formatting slip, it
+            # ran out of budget: re-asking it the same way truncates it again.
+            nudge = (JSON_TRUNCATED_NUDGE if "mid-JSON" in str(exc)
+                     else JSON_RETRY_NUDGE)
             log.warning("Could not parse grading JSON (%s, attempt %s/2): %s "
                         "| reply[:400]=%r", provider, attempt + 1, exc,
                         _scrub_secrets(raw)[:400])
@@ -3043,30 +3056,30 @@ async def grade_interaction(consigne: str, history: list, db=None,
     provider = (await get_provider("speaking_grader_provider")) if db is not None else SPEAKING_GRADER_PROVIDER
     grader = (INTERVIEW_GRADER_SYSTEM if task_type == 1
               else INTERACTION_GRADER_SYSTEM)
-    raw = await _grade_with_provider(provider, grader,
-                                     _render_dialogue(history, consigne))
-    if raw is None:
-        return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
-                "relevance_comment": "", "suggestions": []}
-    try:
-        result = _validate_speaking(_extract_json(raw))
-        _, _, model = _grader_backend(provider)
-        result["ai_provider"] = provider
-        result["ai_model"] = model
-        # Grade only what the candidate said, under their own tâche's caps.
-        spoken = " ".join(str(t.get("text", "")) for t in said)
+    # Grade only what the candidate said, under their own tâche's caps. The
+    # caps run inside the parse step, so a retry that produces a readable
+    # reply gets them applied too.
+    spoken = " ".join(str(t.get("text", "")) for t in said)
+
+    def build(data: dict) -> dict:
+        result = _validate_speaking(data)
         if task_type != 2:
             # "What more could you have asked?" is a tâche 2 idea: there is
             # nothing to ask in a self-presentation or in free practice.
             result["missed_questions"] = []
         return apply_speaking_caps(result, spoken, task_type)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("Could not parse interaction JSON (%s): %s", provider, exc)
-        _PROVIDER_LAST_ERROR[provider] = (
-            f"Replied, but the response could not be parsed: {exc}")
-        return {**dict(FALLBACK_ANALYSIS), "ai_error": "bad_reply",
-                "answers_question": False,
-                "relevance_comment": "", "suggestions": []}
+
+    result, reason = await _graded_json(provider, grader,
+                                        _render_dialogue(history, consigne),
+                                        build)
+    if result is None:
+        return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
+                "relevance_comment": "", "suggestions": [],
+                **({"ai_error": "bad_reply"} if reason == "bad_reply" else {})}
+    _, _, model = _grader_backend(provider)
+    result["ai_provider"] = provider
+    result["ai_model"] = model
+    return result
 
 
 # Extension -> MIME, used only when the client did not send the real type.
@@ -3590,25 +3603,21 @@ async def analyze_speaking_with_ai(transcript: str, question: str, db=None,
                    f"{spec['speak_seconds'] % 60:02d} s.\n\n")
     prompt = f"{header}TRANSCRIPT of the candidate's spoken answer:\n{transcript}"
     provider = (await get_provider("speaking_grader_provider")) if db is not None else SPEAKING_GRADER_PROVIDER
-    raw = await _grade_with_provider(provider, SPEAKING_GRADER_SYSTEM, prompt)
-    if raw is None:
+
+    def build(data: dict) -> dict:
+        return apply_speaking_caps(_validate_speaking(data), transcript,
+                                   task_type)
+
+    result, reason = await _graded_json(provider, SPEAKING_GRADER_SYSTEM,
+                                        prompt, build)
+    if result is None:
         return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
-                "relevance_comment": "", "suggestions": []}
-    try:
-        data = _extract_json(raw)
-        result = _validate_speaking(data)
-        _, _, model = _grader_backend(provider)
-        result["ai_provider"] = provider
-        result["ai_model"] = model
-        return apply_speaking_caps(result, transcript, task_type)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("Could not parse speaking JSON (%s): %s | reply[:400]=%r",
-                    provider, exc, _scrub_secrets(raw)[:400])
-        _PROVIDER_LAST_ERROR[provider] = (
-            f"Replied, but the response could not be parsed: {exc}")
-        return {**dict(FALLBACK_ANALYSIS), "ai_error": "bad_reply",
-                "answers_question": False,
-                "relevance_comment": "", "suggestions": []}
+                "relevance_comment": "", "suggestions": [],
+                **({"ai_error": "bad_reply"} if reason == "bad_reply" else {})}
+    _, _, model = _grader_backend(provider)
+    result["ai_provider"] = provider
+    result["ai_model"] = model
+    return result
 
 
 # ----------------------------------------------------------------------------

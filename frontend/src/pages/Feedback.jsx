@@ -4,7 +4,10 @@ import { toast } from 'sonner';
 import { api, errMsg, CATEGORY_META } from '../lib/api';
 import { BackLink, ErrorHighlightedText } from '../components/shared';
 import { RecordingPlayer } from '../components/RecordingPlayer';
+import { SpeakButton } from '../components/SpeakButton';
+import { useSpeak } from '../lib/speak';
 import { useT } from '../i18n';
+import { displayMark } from '../lib/tcf';
 import { Seo } from '../lib/seo';
 
 /* Same two sources the dashboard counts as speaking. */
@@ -15,6 +18,9 @@ export default function Feedback() {
   const t = useT();
   const [sub, setSub] = useState(null);
   const [error, setError] = useState('');
+  /* Above the early returns below, because a hook that only runs once the
+     submission has loaded is not a hook. */
+  const tts = useSpeak();
 
   useEffect(() => {
     api.get(`/api/submissions/${submissionId}`)
@@ -42,7 +48,13 @@ export default function Feedback() {
         <div className="flex items-center gap-4">
           <div className="text-center">
             <p className="text-xs uppercase tracking-wide text-gray-500">{t('fb.score')}</p>
-            <p className="font-heading text-4xl font-bold text-primary" data-testid="overall-score">{sub.overall_score}</p>
+            {/* The mark the exam would print, not the grader's working 0-100:
+                a candidate reads /20, and two scales on one page is how you
+                get someone reporting a 68 to an immigration officer. */}
+            <p className="font-heading text-4xl font-bold text-primary" data-testid="overall-score">
+              {displayMark(sub.overall_score, sub.tcf_level) ?? '—'}
+              <span className="text-xl text-gray-400">/20</span>
+            </p>
           </div>
           <div className="text-center">
             <p className="text-xs uppercase tracking-wide text-gray-500">{t('fb.level')}</p>
@@ -102,9 +114,19 @@ export default function Feedback() {
             {errs.map((e, i) => (
               <li key={i} className="px-4 py-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t('fb.colError')}</p>
-                <p className="mt-0.5 text-sm text-red-600">{e.error}</p>
+                {/* Both sides are playable. What was said and what should have
+                    been said only become a lesson when they can be heard one
+                    after the other — the same reason the speaking result plays
+                    both, and the same button doing it. */}
+                <p className="mt-0.5 flex items-start gap-2 text-sm text-red-600">
+                  <span className="min-w-0">{e.error}</span>
+                  <SpeakButton text={e.error} id={`m-${cat}-err-${i}`} {...tts} />
+                </p>
                 <p className="mt-2.5 text-xs font-semibold uppercase tracking-wide text-gray-400">{t('fb.colCorrection')}</p>
-                <p className="mt-0.5 text-sm font-medium text-green-700">{e.correction}</p>
+                <p className="mt-0.5 flex items-start gap-2 text-sm font-medium text-green-700">
+                  <span className="min-w-0">{e.correction}</span>
+                  <SpeakButton text={e.correction} id={`m-${cat}-fix-${i}`} {...tts} />
+                </p>
                 <p className="mt-2.5 text-xs font-semibold uppercase tracking-wide text-gray-400">{t('fb.colExplanation')}</p>
                 <p className="mt-0.5 text-sm leading-relaxed text-gray-600">{e.explanation}</p>
               </li>
@@ -119,8 +141,18 @@ export default function Feedback() {
               <tbody>
                 {errs.map((e, i) => (
                   <tr key={i} className="border-t border-gray-100 align-top">
-                    <td className="px-6 py-3 text-red-600">{e.error}</td>
-                    <td className="px-6 py-3 font-medium text-green-700">{e.correction}</td>
+                    <td className="px-6 py-3 text-red-600">
+                      <span className="flex items-start gap-2">
+                        <span className="min-w-0">{e.error}</span>
+                        <SpeakButton text={e.error} id={`d-${cat}-err-${i}`} {...tts} />
+                      </span>
+                    </td>
+                    <td className="px-6 py-3 font-medium text-green-700">
+                      <span className="flex items-start gap-2">
+                        <span className="min-w-0">{e.correction}</span>
+                        <SpeakButton text={e.correction} id={`d-${cat}-fix-${i}`} {...tts} />
+                      </span>
+                    </td>
                     <td className="px-6 py-3 text-gray-600">{e.explanation}</td>
                   </tr>
                 ))}

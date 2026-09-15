@@ -32,7 +32,18 @@ export function writeSitting(setNumber, results) {
   }
 }
 
-/* One graded tâche into an existing sitting, without disturbing the others. */
+/* One graded tâche into an existing sitting, without disturbing the others.
+ * Returns the sitting as it now stands, so the caller can tell whether that
+ * grade was the one that finished the paper. */
 export function saveTask(setNumber, taskType, result) {
-  writeSitting(setNumber, { ...readSitting(setNumber), [taskType]: result });
+  const sitting = { ...readSitting(setNumber), [taskType]: result };
+  writeSitting(setNumber, sitting);
+  return sitting;
 }
+
+/* The three tâches are the paper. Anything short of all three is a sitting in
+ * progress, however good the answers in it are. */
+export const TASKS = [1, 2, 3];
+
+export const sittingComplete = (sitting) =>
+  TASKS.every((n) => sitting && sitting[n]);

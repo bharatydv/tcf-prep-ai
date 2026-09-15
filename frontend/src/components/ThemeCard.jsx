@@ -13,6 +13,7 @@
 import { BookOpen, CaretRight, Lock, ArrowCounterClockwise } from '@phosphor-icons/react';
 import { Link } from 'react-router-dom';
 import { useT } from '../i18n';
+import { displayMark } from '../lib/tcf';
 
 export function ThemeCard({ theme, ns, locked, attempt, onOpen }) {
   const t = useT();
@@ -62,7 +63,10 @@ export function ThemeCard({ theme, ns, locked, attempt, onOpen }) {
         </div>
         <p className="mt-1 text-right text-[10px] text-gray-400">
           {locked ? t('themes.upgradeToUnlock')
-            : done ? t(`${ns}.lastWas`, { level: done.tcf_level || '—', score: done.score ?? '—' })
+            : done ? t(`${ns}.lastWas`, {
+              level: done.tcf_level || '—',
+              score: displayMark(done.score, done.tcf_level) ?? '—',
+            })
               : t('themes.completed', { n: 0 })}
         </p>
       </div>

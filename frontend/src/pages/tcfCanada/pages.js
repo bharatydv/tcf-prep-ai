@@ -162,7 +162,7 @@ export const PAGES = [
   {
     slug: 'tcf-canada-speaking', k: 'speak', icon: Microphone, tone: 'fuchsia',
     cta: ['/speaking', '/speaking/test'],
-    facts: [['12 min', 'f1'], ['3', 'f2'], ['4 min', 'f3'], ['4 - 20', 'f4']],
+    facts: [['10 min', 'f1'], ['3', 'f2'], ['2 min', 'f3'], ['4 - 20', 'f4']],
     visual: 'taskList', taskKind: 'speaking', family: 'speak', tips: 4, faqs: 4,
     related: ['tcf-canada-speaking-task-1', 'tcf-canada-speaking-task-2',
       'tcf-canada-speaking-task-3', 'tcf-canada', 'tcf-canada-exam-simulator',
@@ -215,7 +215,7 @@ export const PAGES = [
   {
     slug: 'tcf-canada-speaking-task-3', k: 'speak3', icon: Scales, tone: 'fuchsia',
     cta: ['/speaking/tasks', '/speaking/themes'],
-    facts: [['2 min 30', 'f1'], ['2 min', 'f2'], ['3 / 3', 'f3'], ['1', 'f4']],
+    facts: [['2 min 30', 'f1'], ['0 s', 'f2'], ['3 / 3', 'f3'], ['1', 'f4']],
     visual: 'speakSpec', task: 3, family: 'speak', tips: 4, faqs: 4,
     related: ['tcf-canada-speaking', 'tcf-canada-speaking-task-1',
       'tcf-canada-speaking-task-2', 'tcf-canada-exam-simulator', 'tcf-canada',

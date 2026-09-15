@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { api, errMsg, catColor } from '../lib/api';
 import { useConfirm } from '../components/shared';
 import { useT } from '../i18n';
+import { displayMark } from '../lib/tcf';
 import { Seo } from '../lib/seo';
 
 /* id drives the switch below; label is a translation key. */
@@ -499,10 +500,10 @@ function AttemptRow({ kind, row, onOpen }) {
           <span className="font-semibold text-gray-900">{row.score}/{row.total}</span>
         )}
         {row.overall_score != null && row.total == null && (
-          <span className="text-gray-500">{row.overall_score}/100</span>
+          <span className="text-gray-500">{displayMark(row.overall_score, row.tcf_level) ?? '—'}/20</span>
         )}
         {row.combined_score != null && (
-          <span className="text-gray-500">{Math.round(row.combined_score)}/100</span>
+          <span className="text-gray-500">{displayMark(row.combined_score, row.tcf_level) ?? '—'}/20</span>
         )}
         {row.word_count ? <span className="text-xs text-gray-400">{row.word_count} w</span> : null}
         {Array.isArray(row.errors) && row.errors.length > 0 && (
@@ -627,7 +628,7 @@ function Submissions() {
               <td className="px-5 py-3 font-mono text-xs">{s.user_id}</td>
               <td className="px-5 py-3">{s.source || 'practice'}</td>
               <td className="px-5 py-3 font-semibold">{s.tcf_level}</td>
-              <td className="px-5 py-3">{s.overall_score}</td>
+              <td className="px-5 py-3">{displayMark(s.overall_score, s.tcf_level) ?? '—'}</td>
               <td className="px-5 py-3">{s.errors?.length ?? 0}</td>
               <td className="whitespace-nowrap px-5 py-3">
                 {s.has_audio ? (

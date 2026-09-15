@@ -12,6 +12,7 @@ import { api, errMsg, CATEGORY_META } from '../lib/api';
 import { RecordingPlayer } from '../components/RecordingPlayer';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
+import { displayMark, markFromCorrect } from '../lib/tcf';
 
 /* The four papers, each with a hue of its own so the current selection is
    readable at a glance rather than only from which pill is filled. The hues
@@ -100,16 +101,18 @@ export default function Dashboard() {
 
   useEffect(load, [load]);
 
-  /* Three sources, one shape. Submissions carry a score already out of 100;
-     a comprehension paper carries `score` out of `total`, so it is converted
-     rather than plotted on an axis it does not share — 34/40 and 68/100 are
-     the same performance and belong at the same height. */
+  /* Three sources, one shape, one scale: the mark out of 20 the exam reports.
+     A graded submission carries the grader's working 0-100, and a comprehension
+     paper carries `score` out of `total`, so neither is plotted as it arrives —
+     34/40 and 68/100 are the same performance and belong at the same height,
+     and that height is 14. */
   const attempts = useMemo(() => {
     const fromSubs = (subs || []).map((s) => ({
       id: s.submission_id,
       at: s.created_at,
       skill: SPEAKING_SOURCES.has(s.source || '') ? 'speaking' : 'writing',
-      score: typeof s.overall_score === 'number' ? s.overall_score : null,
+      score: typeof s.overall_score === 'number'
+        ? displayMark(s.overall_score, s.tcf_level) : null,
       label: s.tcf_level || '—',
       errors: s.error_count ?? 0,
       href: `/feedback/${s.submission_id}`,
@@ -122,7 +125,7 @@ export default function Dashboard() {
       at: r.created_at,
       skill: kind,
       hasAudio: false,
-      score: r.total ? Math.round((r.score / r.total) * 100) : null,
+      score: markFromCorrect(r.score, r.total),
       // A comprehension paper records no CEFR level, so it names the paper it
       // was — "Test 7" is true, and an invented level would not be.
       label: t('dash.testN', { n: r.test_number }),
@@ -300,7 +303,7 @@ export default function Dashboard() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#EFEDF3" vertical={false} />
                   <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#9CA3AF' }}
                     axisLine={false} tickLine={false} />
-                  <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#9CA3AF' }}
+                  <YAxis domain={[0, 20]} tick={{ fontSize: 11, fill: '#9CA3AF' }}
                     axisLine={false} tickLine={false} width={44} />
                   <Tooltip
                     contentStyle={{ borderRadius: 10, border: '1px solid #E7E2F0', fontSize: 12 }} />

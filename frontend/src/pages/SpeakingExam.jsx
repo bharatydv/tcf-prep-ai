@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ClockCountdown, CheckCircle, CaretRight, Microphone, Handshake,
-  Scales, ArrowClockwise, Lock,
+  Scales, ArrowClockwise, Lock, MagnifyingGlass,
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, errMsg } from '../lib/api';
@@ -10,13 +10,20 @@ import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { BackLink } from '../components/shared';
 import ConversationModal from '../components/ConversationModal';
-import { speakingPaperMark } from '../lib/tcf';
+import { SpeakingResult } from '../components/SpeakingResult';
+import { useSpeak } from '../lib/speak';
+import { speakingPaperMark, displayMark } from '../lib/tcf';
 import { readSitting, writeSitting } from '../lib/speakingExam';
 
 /* Test Mode for Expression orale: one numbered sitting, the three tâches in the
    order the real exam gives them. Tâches 1 and 2 are live roleplays and run in
-   this page; tâche 3 is a prepared monologue, so it hands off to the recorder
-   that already implements its 2 min preparation and 2 min 30 of speech. */
+   this page; tâche 3 is a monologue, so it hands off to the recorder that owns
+   the speech-started clock.
+
+   A tâche that has been answered keeps its full grade here, so the corrections
+   can be read back without taking it again — and taking it again is the button
+   next to them. Both only ever appear on a tâche already answered: there is
+   nothing to review, and nothing to retake, before that. */
 
 const TASK_ICON = { 1: Microphone, 2: Handshake, 3: Scales };
 
@@ -33,6 +40,10 @@ export default function SpeakingExam() {
   const [loading, setLoading] = useState(true);
   const [live, setLive] = useState(null);           // 1 | 2 while a modal is open
   const [results, setResults] = useState({});       // taskType -> graded result
+  const [reviewing, setReviewing] = useState(null); // the tâche whose corrections are open
+  // One synthesiser for the page: opening tâche 3's corrections while tâche 1
+  // is being read aloud must stop the first voice, not talk over it.
+  const tts = useSpeak();
 
   useEffect(() => {
     api.get('/api/speaking/exam-sets')
@@ -44,6 +55,14 @@ export default function SpeakingExam() {
   // Tâche 3 is graded on the recorder's own route, so the results survive in
   // sessionStorage rather than in state alone; coming back finishes the paper.
   useEffect(() => { setResults(readSitting(setNumber)); }, [setNumber]);
+
+  /* A sitting finished on the recorder's route comes back naming the tâche it
+     just graded. Landing on a completed paper with every correction collapsed
+     would hide the one the candidate was reading a second ago. */
+  useEffect(() => {
+    setReviewing(parseInt(params.get('review'), 10) || null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setNumber]);
 
   useEffect(() => {
     if (!setNumber) { setPaper(null); return; }
@@ -201,8 +220,16 @@ export default function SpeakingExam() {
                     {result ? (
                       <div className="mt-3 flex flex-wrap items-center gap-3">
                         <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-primary shadow-sm">
-                          {result.tcf_level} · {result.overall_score}/100
+                          {result.tcf_level} · {displayMark(result.overall_score, result.tcf_level) ?? '—'}/20
                         </span>
+                        <button onClick={() => setReviewing(reviewing === s.n ? null : s.n)}
+                          data-testid={`review-task-${s.n}`}
+                          className="text-xs font-semibold text-primary underline">
+                          <MagnifyingGlass size={12} weight="bold" className="mr-1 inline" />
+                          {reviewing === s.n ? t('sexam.hideErrors') : t('sexam.checkErrors', {
+                            n: (result.errors || []).length,
+                          })}
+                        </button>
                         <button onClick={() => startTask(s.n)} className="text-xs font-semibold text-primary underline">
                           <ArrowClockwise size={12} weight="bold" className="mr-1 inline" />{t('sexam.again')}
                         </button>
@@ -220,6 +247,11 @@ export default function SpeakingExam() {
                     )}
                   </div>
                 </div>
+                {reviewing === s.n && result && (
+                  <div className="mt-4" data-testid={`review-panel-${s.n}`}>
+                    <SpeakingResult result={result} tts={tts} idPrefix={`t${s.n}-`} />
+                  </div>
+                )}
               </div>
             );
           })}
