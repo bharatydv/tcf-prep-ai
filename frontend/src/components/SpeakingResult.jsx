@@ -126,11 +126,14 @@ export function SpeakingResult({ result, tts, idPrefix = '' }) {
               <div key={i} className="rounded-2xl border border-violet-50 bg-violet-50/40 p-4">
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="text-red-500 line-through">{e.error}</span>
+                  {/* Both sides are playable, not just the right one. A
+                      speaker who cannot hear the difference between what they
+                      said and what they should have said cannot fix it, and
+                      the correction alone leaves them comparing a sound to a
+                      spelling. */}
+                  <SpeakButton text={e.error} id={`${idPrefix}said-${i}`} {...tts} />
                   <span className="text-gray-400">→</span>
                   <span className="font-semibold text-green-600">{e.correction}</span>
-                  {/* Reading that « Elle peut accepter » is right does not
-                      tell you how it sounds, which is the whole subject
-                      of a speaking test. */}
                   <SpeakButton text={e.correction} id={`${idPrefix}fix-${i}`} {...tts} />
                   <span className="ml-auto flex items-center gap-1.5">
                     {SEVERITY_TONE[e.severity] && (
