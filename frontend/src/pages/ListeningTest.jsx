@@ -7,8 +7,9 @@ import {
 import { toast } from 'sonner';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import { useT } from '../i18n';
+import { formatDateTime, useT } from '../i18n';
 import { BackLink, useConfirm } from '../components/shared';
+import AttemptHistory, { useAttempts } from '../components/AttemptHistory';
 
 /* The official Compréhension orale paper runs 35 minutes for 39 questions —
    about half the reading allowance for the same number of items, because the
@@ -55,6 +56,10 @@ export default function ListeningTest() {
   const [playing, setPlaying] = useState(false);
   const [heard, setHeard] = useState(0);               // seconds into the clip
   const [clipLength, setClipLength] = useState(0);
+  // The sitting being re-read, when the paper on screen is a past one rather
+  // than this one. Null while sitting the paper, including after handing it in.
+  const [pastAttempt, setPastAttempt] = useState(null);
+  const [openingId, setOpeningId] = useState(null);
   const audioRef = useRef(null);
   const submittedRef = useRef(false);
   // Wall-clock deadline, so backgrounding the tab cannot buy extra time.
@@ -78,6 +83,12 @@ export default function ListeningTest() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testNumber, isTest]);
 
+  /* Every sitting of THIS paper. Test mode only: practice marks a question at
+     a time and records no attempt. */
+  const { attempts, reload: reloadAttempts } = useAttempts(
+    `/api/listening/attempts?test_number=${testNumber}`,
+    { enabled: isTest && Boolean(user) });
+
   const submit = useCallback(async () => {
     if (submittedRef.current) return;
     submittedRef.current = true;
@@ -92,6 +103,7 @@ export default function ListeningTest() {
       setCorrections(map);
       setResult(data);
       setIndex(0);
+      reloadAttempts();   // the paper just handed in belongs in the history
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
       submittedRef.current = false;
@@ -99,6 +111,7 @@ export default function ListeningTest() {
     } finally {
       setSubmitting(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [answers, left, testNumber, t]);
 
   // Countdown, test mode only — the same wall-clock deadline the reading paper
@@ -197,13 +210,38 @@ export default function ListeningTest() {
     submit();
   };
 
+  /* Re-open a marked paper from the history: the same state a hand-in
+     produces, so the score report, the swatches and every explanation are the
+     ones that already exist. submittedRef goes with them, or the countdown
+     effect sees a passed deadline and hands in the answers being read. */
+  const openAttempt = async (row) => {
+    setOpeningId(row.id);
+    try {
+      const { data } = await api.get(`/api/listening/attempts/${row.id}`);
+      const map = {};
+      (data.corrections || []).forEach((c) => { map[c.listening_question_id] = c; });
+      submittedRef.current = true;
+      setCorrections(map);
+      setAnswers(data.attempt?.answers || {});
+      setResult({ score: data.attempt?.score, total: data.attempt?.total,
+                  by_level: data.by_level });
+      setPastAttempt(row);
+      setIndex(0);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || t('listenTest.loadFailed'));
+    } finally {
+      setOpeningId(null);
+    }
+  };
+
   const restart = () => {
     submittedRef.current = false;
     // The deadline has to be cleared with the rest: clearing `result` re-runs
     // the timer effect, which would otherwise keep the deadline that has
     // already passed, read zero seconds left and file an empty paper.
     deadlineRef.current = null;
-    setAnswers({}); setCorrections({}); setResult(null);
+    setAnswers({}); setCorrections({}); setResult(null); setPastAttempt(null);
     setPlays({});
     setIndex(0); setLeft(TEST_SECONDS);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -282,6 +320,12 @@ export default function ListeningTest() {
               <p className="mt-1 text-sm text-white/90">
                 {t('listenTest.scorePct', { p: Math.round((result.score / result.total) * 100) })}
               </p>
+              {pastAttempt && (
+                <p className="mt-2 inline-block rounded-full bg-white/20 px-3 py-1 text-xs font-semibold"
+                  data-testid="listening-past-banner">
+                  {t('hist.reviewing', { when: formatDateTime(pastAttempt.created_at) })}
+                </p>
+              )}
             </div>
             <div className="bg-white px-6 py-5">
               <p className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-gray-500">
@@ -307,6 +351,20 @@ export default function ListeningTest() {
             </div>
           </div>
         )}
+
+        <AttemptHistory
+          className="mb-6"
+          testid="listening-history"
+          attempts={attempts.map((a) => ({
+            id: a.listening_attempt_id,
+            label: `${a.score}/${a.total}`,
+            score: a.score, total: a.total,
+            created_at: a.created_at,
+          }))}
+          opening={openingId}
+          busy={submitting}
+          onOpen={openAttempt}
+          onRetake={pastAttempt || result ? restart : null} />
 
         <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
           {/* ---------------- NAVIGATOR ---------------- */}

@@ -33,7 +33,7 @@ import jwt
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response, HTTPException, Depends, Query, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 
@@ -633,6 +633,22 @@ class Submission(Base):
     # roleplay, which is a dozen separate turn recordings and no single file.
     audio_path: Mapped[str] = mapped_column(Text, default="")
     audio_mime: Mapped[str] = mapped_column(String(40), default="")
+    # Which Test Mode sitting this answer belongs to, and which tâche of it.
+    #
+    # Expression orale Test Mode used to hold a sitting in sessionStorage
+    # alone, so a paper existed only in the tab it was taken in: a reload, a
+    # second device, or a grade that errored left the page reporting "0 of 3"
+    # over answers the learner had really given. The submission is the durable
+    # record of the answer, and these two columns are what make it findable as
+    # part of a paper rather than as a loose correction in the history list.
+    #
+    # NULL for everything that is not a Test Mode tâche — free speaking
+    # practice, every written submission, and every speaking answer graded
+    # before this column existed. A sitting made up of those cannot be
+    # reconstructed, and the history honestly begins at the first tagged one.
+    exam_set: Mapped[Optional[int]] = mapped_column(Integer, nullable=True,
+                                                    index=True)
+    task_type: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), index=True)
 
@@ -1525,7 +1541,17 @@ def trial_state(user: User) -> dict:
         "speaking_tache2": {
             "used": t2, "limit": FREE_SPEAKING_TACHE2_LIMIT,
             "left": None if premium else max(0, FREE_SPEAKING_TACHE2_LIMIT - t2)},
-        "premium_until": user.premium_until,
+        # An ISO string, not a datetime.
+        #
+        # This dict is not only rendered into a 200; it is also the `trial`
+        # block of the 402 every metered endpoint raises, and an HTTPException
+        # detail is serialised with plain json.dumps rather than through
+        # FastAPI's encoder. A datetime there is not serialisable, so the
+        # paywall turned into a 500 — for lapsed subscribers only, the one
+        # group with a non-NULL premium_until, which is why it stayed hidden.
+        # The wire format is unchanged: the encoder wrote this same string.
+        "premium_until": (user.premium_until.isoformat()
+                          if user.premium_until else None),
     }
 
 
@@ -2777,7 +2803,9 @@ async def persist_submission(db: AsyncSession, user: User, text: str,
                              prompt_id: Optional[str], analysis: dict,
                              source: str = "practice",
                              consume: bool = True,
-                             theme_id: Optional[str] = None) -> dict:
+                             theme_id: Optional[str] = None,
+                             exam_set: Optional[int] = None,
+                             task_type: Optional[int] = None) -> dict:
     """Save a graded piece of work. `consume=False` for flows metered by their
     own allowance, so they do not also spend a monthly AI credit."""
     sub = Submission(
@@ -2795,6 +2823,8 @@ async def persist_submission(db: AsyncSession, user: User, text: str,
         caps_applied=analysis.get("caps_applied") or [],
         source=source,
         theme_id=(theme_id or "")[:64],
+        exam_set=exam_set,
+        task_type=task_type,
         created_at=now_utc(),
     )
     db.add(sub)
@@ -3804,6 +3834,15 @@ CASHFREE_WEBHOOK_SECRET = (os.environ.get("CASHFREE_WEBHOOK_SECRET", "")
 # retried Cashfree notification for a payment taken last week still lands.
 PAYMENT_PROVIDER = os.environ.get("PAYMENT_PROVIDER", "razorpay").strip().lower()
 
+# PayU Hosted Checkout. PayU does not expose a JSON order API for this flow:
+# the browser POSTs these fields to PayU, which POSTs the result back to our
+# success/failure URLs. The salt signs both directions and never reaches the
+# browser.
+PAYU_KEY = os.environ.get("PAYU_KEY", "")
+PAYU_SALT = os.environ.get("PAYU_SALT", "")
+PAYU_BASE_URL = os.environ.get(
+    "PAYU_BASE_URL", "https://secure.payu.in/_payment")
+
 # Razorpay has one host for both test and live; which one you are on is decided
 # by the key, not the URL - a key beginning rzp_test_ cannot touch live money.
 RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
@@ -3868,7 +3907,7 @@ TAX_LABEL = os.environ.get("TAX_LABEL", "Tax")
 # strings PAYMENT_PROVIDER accepts, and falling back to the stored value so a
 # row written by some future provider still prints something truthful rather
 # than blank.
-_GATEWAY_NAMES = {"razorpay": "Razorpay", "cashfree": "Cashfree"}
+_GATEWAY_NAMES = {"razorpay": "Razorpay", "cashfree": "Cashfree", "payu": "PayU"}
 
 
 def gateway_display_name(provider: Optional[str] = None) -> str:
@@ -3968,6 +4007,63 @@ def cashfree_configured() -> bool:
     return bool(CASHFREE_APP_ID and CASHFREE_SECRET_KEY)
 
 
+def payu_configured() -> bool:
+    return bool(PAYU_KEY and PAYU_SALT)
+
+
+def _payu_text(value: Any) -> str:
+    return "" if value is None else str(value)
+
+
+def payu_request_hash(fields: dict) -> str:
+    """SHA-512 hash for PayU's hosted-checkout form."""
+    values = [
+        PAYU_KEY, fields.get("txnid", ""), fields.get("amount", ""),
+        fields.get("productinfo", ""), fields.get("firstname", ""),
+        fields.get("email", ""), fields.get("udf1", ""), fields.get("udf2", ""),
+        fields.get("udf3", ""), fields.get("udf4", ""), fields.get("udf5", ""),
+        "", "", "", "", PAYU_SALT,
+    ]
+    return hashlib.sha512("|".join(_payu_text(v) for v in values).encode()).hexdigest()
+
+
+def verify_payu_response(fields: dict) -> bool:
+    """Verify PayU's reverse response hash before trusting its status."""
+    if not (PAYU_KEY and PAYU_SALT and fields.get("hash")
+            and hmac.compare_digest(_payu_text(fields.get("key")), PAYU_KEY)):
+        return False
+    values = [
+        fields.get("additionalCharges", fields.get("additional_charges", "")),
+        PAYU_SALT, fields.get("status", ""), "", "", "", "", "", "", "",
+        "", "", fields.get("email", ""), fields.get("firstname", ""),
+        fields.get("productinfo", ""), fields.get("amount", ""),
+        fields.get("txnid", ""), fields.get("key", ""),
+    ]
+    expected = hashlib.sha512(
+        "|".join(_payu_text(v) for v in values).encode()).hexdigest()
+    return hmac.compare_digest(expected, _payu_text(fields.get("hash")))
+
+
+def _parse_payu_response(fields: dict) -> dict:
+    """Flatten a verified PayU callback to the billing event contract."""
+    txnid = _payu_text(fields.get("txnid"))
+    status = _payu_text(fields.get("status"))
+    mihpayid = _payu_text(fields.get("mihpayid"))
+    success = status.lower() == "success"
+    return {
+        "event_type": "payu.payment.success" if success else "payu.payment." +
+        (status.lower() or "unknown"),
+        "status": status,
+        "our_id": txnid,
+        "gateway_order_id": txnid,
+        "marker": mihpayid or txnid,
+        "amount": (float(money(fields["amount"]))
+                   if fields.get("amount") not in (None, "") else None),
+        "event_key": (f"payu:paid:{txnid}" if success and txnid else
+                      f"payu:{status}:{mihpayid or txnid}"),
+    }
+
+
 def billing_configured() -> bool:
     """Can the selected gateway actually take a payment?
 
@@ -3978,6 +4074,8 @@ def billing_configured() -> bool:
     """
     if PAYMENT_PROVIDER == "razorpay":
         return razorpay_configured()
+    if PAYMENT_PROVIDER == "payu":
+        return payu_configured()
     return cashfree_configured()
 
 
@@ -4318,6 +4416,10 @@ class ConverseGradeIn(BaseModel):
     # spend a normal AI credit; "free" draws on the small open-ended
     # conversation allowance instead.
     mode: str = Field(default="tache2", pattern="^(tache1|tache2|free)$")
+    # The Test Mode sitting this tâche belongs to, so the graded answer can be
+    # found again as part of a paper. Absent for free practice, which is not
+    # part of one.
+    exam_set: Optional[int] = Field(default=None, ge=1)
 
 
 class AnalyzeIn(BaseModel):
@@ -5039,6 +5141,13 @@ MIGRATIONS = [
     "ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMPTZ",
     "ALTER TABLE auth_tokens ADD COLUMN IF NOT EXISTS attempts INTEGER DEFAULT 0",
+    # Which Expression orale sitting a graded tâche belongs to. Nullable with
+    # no default: NULL is the truth about every answer graded before Test Mode
+    # recorded it, and nothing can honestly backfill it.
+    "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS exam_set INTEGER",
+    "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS task_type INTEGER",
+    "CREATE INDEX IF NOT EXISTS ix_submissions_exam_set "
+    "ON submissions (user_id, exam_set, created_at DESC)",
     # The free trial, split by skill. Deliberately added WITHOUT a default, so
     # that NULL means "not yet backfilled": the UPDATEs below then run once and
     # are a no-op on every later boot, which an unconditional UPDATE would not
@@ -6801,12 +6910,46 @@ async def exam_submit(body: ExamSubmitIn,
 
 
 @app.get("/api/exam/attempts")
-async def exam_attempts(user: User = Depends(get_current_user),
+async def exam_attempts(exam_type: Optional[str] = None,
+                        user: User = Depends(get_current_user),
                         db: AsyncSession = Depends(get_db)):
-    res = await db.execute(
-        select(MockExamAttempt).where(MockExamAttempt.user_id == user.user_id)
-        .order_by(MockExamAttempt.created_at.desc()).limit(50))
+    """Past mock exams, newest first; `exam_type` narrows them to one paper."""
+    q = select(MockExamAttempt).where(MockExamAttempt.user_id == user.user_id)
+    if exam_type:
+        q = q.where(MockExamAttempt.exam_type == exam_type)
+    res = await db.execute(q.order_by(MockExamAttempt.created_at.desc()).limit(50))
     return {"attempts": [_row_to_dict(a) for a in res.scalars().all()]}
+
+
+@app.get("/api/exam/attempts/{attempt_id}")
+async def exam_attempt(attempt_id: str,
+                       user: User = Depends(get_current_user),
+                       db: AsyncSession = Depends(get_db)):
+    """One past mock exam, re-marked from its stored answer sheet.
+
+    Rebuilt rather than stored, for the same reason as the reading paper: the
+    answer key belongs to the question bank, and a question retired or fixed
+    since should be re-read as it now stands.
+    """
+    res = await db.execute(
+        select(MockExamAttempt)
+        .where(MockExamAttempt.mock_attempt_id == attempt_id))
+    attempt = res.scalar_one_or_none()
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+    if attempt.user_id != user.user_id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+    res = await db.execute(
+        select(ExamQuestion).where(ExamQuestion.exam_type == attempt.exam_type,
+                                   ExamQuestion.is_active == True))  # noqa: E712
+    answers = attempt.answers or {}
+    corrections = {
+        q.question_id: {"correct_answer": q.correct_answer,
+                        "picked": answers.get(q.question_id),
+                        "is_correct": answers.get(q.question_id) == q.correct_answer}
+        for q in res.scalars().all()
+    }
+    return {"attempt": _row_to_dict(attempt), "corrections": corrections}
 
 
 # ----------------------------------------------------------------------------
@@ -6841,6 +6984,43 @@ async def speaking_exam_set(set_number: int):
                                 "name": s["name"]}
                        for n, s in SPEAKING_TASKS.items()}
     return spec
+
+
+@app.get("/api/speaking/exam-sets/{set_number}/attempts")
+async def speaking_exam_attempts(set_number: int,
+                                 user: User = Depends(get_current_user),
+                                 db: AsyncSession = Depends(get_db)):
+    """Every tâche of this set this candidate has ever had graded, newest first.
+
+    Test Mode used to hold a sitting in sessionStorage alone, which made a
+    paper a property of one browser tab: reloading, or coming back the next
+    day, showed "0 of 3 tâches completed" over three answers that had really
+    been given and graded. The submissions were there the whole time — nothing
+    linked them to the paper. Now they carry exam_set and task_type, and this
+    is that link read back.
+
+    A row per attempt rather than a row per tâche: a candidate who sat tâche 2
+    three times has three, and the page shows the latest as where the paper
+    now stands with the earlier ones behind it. The corrections themselves are
+    not repeated here — /api/submissions/{id} already serves one in full, and
+    a history list that carried every error array would be enormous to render
+    a handful of dates and marks.
+    """
+    rows = (await db.execute(
+        select(Submission.submission_id, Submission.task_type,
+               Submission.tcf_level, Submission.overall_score,
+               Submission.created_at,
+               func.coalesce(func.jsonb_array_length(Submission.errors), 0),
+               func.coalesce(Submission.audio_path, "") != "")
+        .where(Submission.user_id == user.user_id,
+               Submission.exam_set == set_number,
+               Submission.task_type.is_not(None))
+        .order_by(Submission.created_at.desc()).limit(60))).all()
+    return {"attempts": [
+        {"submission_id": sid, "task_type": task, "tcf_level": level,
+         "overall_score": score, "created_at": created,
+         "error_count": int(n or 0), "has_audio": bool(has_audio)}
+        for sid, task, level, score, created, n, has_audio in rows]}
 
 
 # ----------------------------------------------------------------------------
@@ -6878,6 +7058,22 @@ def _reading_question_public(q: ReadingQuestion) -> dict:
         "question_fr": q.question_fr,
         "options": [{"id": o["id"], "text": o["text"]} for o in q.options],
     }
+
+
+def _by_level(corrections: List[dict]) -> dict:
+    """Correct-out-of-total per CEFR level.
+
+    A candidate who is solid to B1 and collapses at B2 learns far more from
+    that shape than from a bare total, so it is reported beside every paper
+    mark — including on a sitting re-opened from the history, which must read
+    exactly as it read on the day.
+    """
+    out: dict = {}
+    for c in corrections:
+        stat = out.setdefault(c["level"], {"correct": 0, "total": 0})
+        stat["total"] += 1
+        stat["correct"] += 1 if c["is_correct"] else 0
+    return out
 
 
 def _reading_correction(q: ReadingQuestion, picked: Optional[str]) -> dict:
@@ -7057,13 +7253,7 @@ async def reading_submit(test_number: int, body: ReadingSubmitIn,
     corrections = [_reading_correction(q, body.answers.get(q.reading_question_id))
                    for q in questions]
     score = sum(1 for c in corrections if c["is_correct"])
-    # Per-level breakdown: a candidate who is solid to B1 and collapses at B2
-    # learns far more from that shape than from a bare total.
-    by_level = {}
-    for c in corrections:
-        stat = by_level.setdefault(c["level"], {"correct": 0, "total": 0})
-        stat["total"] += 1
-        stat["correct"] += 1 if c["is_correct"] else 0
+    by_level = _by_level(corrections)
 
     attempt = ReadingAttempt(
         reading_attempt_id=new_id("rda"), user_id=user.user_id,
@@ -7078,12 +7268,55 @@ async def reading_submit(test_number: int, body: ReadingSubmitIn,
 
 
 @app.get("/api/reading/attempts")
-async def reading_attempts(user: User = Depends(get_current_user),
+async def reading_attempts(test_number: Optional[int] = None,
+                           user: User = Depends(get_current_user),
                            db: AsyncSession = Depends(get_db)):
-    res = await db.execute(
-        select(ReadingAttempt).where(ReadingAttempt.user_id == user.user_id)
-        .order_by(ReadingAttempt.created_at.desc()).limit(50))
+    """Past sittings, newest first. `test_number` narrows them to one paper.
+
+    The dashboard wants the whole history across papers; a paper's own page
+    wants only its own, so that "you have sat this three times" is answered
+    without pulling fifty rows and filtering them in the browser.
+    """
+    q = select(ReadingAttempt).where(ReadingAttempt.user_id == user.user_id)
+    if test_number is not None:
+        q = q.where(ReadingAttempt.test_number == test_number)
+    res = await db.execute(q.order_by(ReadingAttempt.created_at.desc()).limit(50))
     return {"attempts": [_row_to_dict(a) for a in res.scalars().all()]}
+
+
+@app.get("/api/reading/attempts/{attempt_id}")
+async def reading_attempt(attempt_id: str,
+                          user: User = Depends(get_current_user),
+                          db: AsyncSession = Depends(get_db)):
+    """One past sitting, marked again exactly as it was marked at the time.
+
+    The answer sheet is stored; the explanations are not, and should not be —
+    they belong to the question bank, and a correction re-read a month later
+    should be the current one rather than a copy frozen at submission. So this
+    rebuilds the same payload /submit returned rather than storing it twice.
+
+    It costs no test allowance: the sitting was already paid for when it was
+    taken, and re-reading your own marked paper is not a second attempt.
+    """
+    res = await db.execute(
+        select(ReadingAttempt)
+        .where(ReadingAttempt.reading_attempt_id == attempt_id))
+    attempt = res.scalar_one_or_none()
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+    if attempt.user_id != user.user_id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+    res = await db.execute(
+        select(ReadingQuestion)
+        .where(ReadingQuestion.test_number == attempt.test_number,
+               ReadingQuestion.is_active == True)  # noqa: E712
+        .order_by(ReadingQuestion.position.asc()))
+    questions = res.scalars().all()
+    answers = attempt.answers or {}
+    corrections = [_reading_correction(q, answers.get(q.reading_question_id))
+                   for q in questions]
+    return {"attempt": _row_to_dict(attempt), "corrections": corrections,
+            "by_level": _by_level(corrections)}
 
 
 # ----------------------------------------------------------------------------
@@ -7255,11 +7488,7 @@ async def listening_submit(test_number: int, body: ListeningSubmitIn,
         _listening_correction(q, body.answers.get(q.listening_question_id))
         for q in questions]
     score = sum(1 for c in corrections if c["is_correct"])
-    by_level = {}
-    for c in corrections:
-        stat = by_level.setdefault(c["level"], {"correct": 0, "total": 0})
-        stat["total"] += 1
-        stat["correct"] += 1 if c["is_correct"] else 0
+    by_level = _by_level(corrections)
 
     attempt = ListeningAttempt(
         listening_attempt_id=new_id("lda"), user_id=user.user_id,
@@ -7274,12 +7503,42 @@ async def listening_submit(test_number: int, body: ListeningSubmitIn,
 
 
 @app.get("/api/listening/attempts")
-async def listening_attempts(user: User = Depends(get_current_user),
+async def listening_attempts(test_number: Optional[int] = None,
+                             user: User = Depends(get_current_user),
                              db: AsyncSession = Depends(get_db)):
-    res = await db.execute(
-        select(ListeningAttempt).where(ListeningAttempt.user_id == user.user_id)
-        .order_by(ListeningAttempt.created_at.desc()).limit(50))
+    """Past sittings, newest first; `test_number` narrows them to one paper."""
+    q = select(ListeningAttempt).where(ListeningAttempt.user_id == user.user_id)
+    if test_number is not None:
+        q = q.where(ListeningAttempt.test_number == test_number)
+    res = await db.execute(q.order_by(ListeningAttempt.created_at.desc()).limit(50))
     return {"attempts": [_row_to_dict(a) for a in res.scalars().all()]}
+
+
+@app.get("/api/listening/attempts/{attempt_id}")
+async def listening_attempt(attempt_id: str,
+                            user: User = Depends(get_current_user),
+                            db: AsyncSession = Depends(get_db)):
+    """One past sitting, re-marked from the stored answer sheet. See the
+    reading endpoint above for why the corrections are rebuilt, not stored."""
+    res = await db.execute(
+        select(ListeningAttempt)
+        .where(ListeningAttempt.listening_attempt_id == attempt_id))
+    attempt = res.scalar_one_or_none()
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+    if attempt.user_id != user.user_id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+    res = await db.execute(
+        select(ListeningQuestion)
+        .where(ListeningQuestion.test_number == attempt.test_number,
+               ListeningQuestion.is_active == True)  # noqa: E712
+        .order_by(ListeningQuestion.position.asc()))
+    questions = res.scalars().all()
+    answers = attempt.answers or {}
+    corrections = [_listening_correction(q, answers.get(q.listening_question_id))
+                   for q in questions]
+    return {"attempt": _row_to_dict(attempt), "corrections": corrections,
+            "by_level": _by_level(corrections)}
 
 
 # ----------------------------------------------------------------------------
@@ -7325,6 +7584,7 @@ SPEECH_AUDIO_MAX_WAIT_SECONDS = float(
 async def speaking_analyze(question: str = Form(...),
                            audio: UploadFile = File(...),
                            task_type: Optional[int] = Form(None),
+                           exam_set: Optional[int] = Form(None),
                            mime_type: Optional[str] = Form(None),
                            theme_id: Optional[str] = Form(None),
                            user: User = Depends(get_current_user),
@@ -7337,6 +7597,10 @@ async def speaking_analyze(question: str = Form(...),
         raise HTTPException(status_code=400, detail="Empty audio upload")
     if task_type not in (1, 2, 3):
         task_type = None
+    # A sitting is identified by its tâche as well as its number: a recording
+    # that does not say which tâche it answers cannot be placed in a paper.
+    if task_type is None or (exam_set is not None and exam_set < 1):
+        exam_set = None
     filename = audio.filename or "audio.webm"
     mime = resolve_audio_mime(filename, mime_type or audio.content_type)
 
@@ -7398,7 +7662,8 @@ async def speaking_analyze(question: str = Form(...),
     analysis["transcript"] = transcript
     sub = await persist_submission(
         db, user, transcript, None, analysis,
-        source="speaking", consume=False, theme_id=theme_id)
+        source="speaking", consume=False, theme_id=theme_id,
+        exam_set=exam_set, task_type=task_type)
     # Kept after the submission exists, because the file is named after it.
     # This is the one flow with a single recording behind a single grade; the
     # roleplay below is a dozen turn uploads and no one file to keep, so it
@@ -7499,7 +7764,10 @@ async def speaking_converse_grade(body: ConverseGradeIn,
     sub = await persist_submission(
         db, user, transcript or "(no speech detected)", None, analysis,
         source="conversation" if free_mode else "speaking",
-        consume=False)  # the credit, if any, was reserved above
+        consume=False,  # the credit, if any, was reserved above
+        # Free practice is not part of a paper, whatever the client sends.
+        exam_set=None if free_mode else body.exam_set,
+        task_type=None if free_mode else task_type)
     analysis["submission_id"] = sub.get("submission_id")
     analysis["streak"] = sub.get("streak")
     return public_analysis(analysis)
@@ -7772,6 +8040,25 @@ async def _razorpay_open_order(sub_id: str, plan_key: str, charged: float,
     }
 
 
+def _payu_form(sub_id: str, plan_key: str, charged: float, user: User) -> dict:
+    """Build the fields for PayU's hosted checkout form POST."""
+    name = (user.name or "Learner").strip().split()
+    fields = {
+        "key": PAYU_KEY,
+        "txnid": sub_id,
+        "amount": f"{money(charged):.2f}",
+        "productinfo": (BILLING_PLANS.get(plan_key) or {}).get("name", plan_key),
+        "firstname": name[0] if name else "Learner",
+        "email": user.email,
+        "phone": user.phone or "",
+        "surl": f"{ALLOWED_ORIGINS[0]}/api/billing/webhook",
+        "furl": f"{ALLOWED_ORIGINS[0]}/api/billing/webhook",
+        "udf1": sub_id,
+    }
+    fields["hash"] = payu_request_hash(fields)
+    return fields
+
+
 @app.post("/api/billing/subscribe")
 async def billing_subscribe(body: SubscribeIn,
                             user: User = Depends(get_current_user),
@@ -7820,6 +8107,13 @@ async def billing_subscribe(body: SubscribeIn,
     try:
         if PAYMENT_PROVIDER == "razorpay":
             opened = await _razorpay_open_order(sub_id, plan_key, charged, user)
+        elif PAYMENT_PROVIDER == "payu":
+            opened = {
+                "gateway_order_id": sub_id,
+                "session_id": None,
+                "checkout": {"action": PAYU_BASE_URL,
+                              "fields": _payu_form(sub_id, plan_key, charged, user)},
+            }
         else:
             opened = await _cashfree_open_order(sub_id, charged, user)
     except Exception:  # noqa: BLE001
@@ -8472,27 +8766,50 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     gateways retry until they get one, and retrying an event we understood
     perfectly well the first time is how one payment becomes two months.
     """
+    is_payu = request.headers.get("content-type", "").split(";", 1)[0].lower() \
+        in {"application/x-www-form-urlencoded", "multipart/form-data"}
+
+    def finish(payload):
+        if is_payu:
+            return RedirectResponse(url=f"{ALLOWED_ORIGINS[0]}/billing/return",
+                                    status_code=303)
+        return payload
+
     raw = await request.body()
     rzp_sig = request.headers.get("x-razorpay-signature", "")
     cf_sig = request.headers.get("x-webhook-signature", "")
     is_razorpay = bool(rzp_sig)
-    if is_razorpay:
+    if is_payu:
+        form = dict(await request.form())
+        ok = verify_payu_response(form)
+    elif is_razorpay:
         ok = verify_razorpay_signature(raw, rzp_sig)
     else:
         ok = verify_cashfree_signature(
             raw, cf_sig, request.headers.get("x-webhook-timestamp", ""))
     if not ok:
         log.warning("Rejected a %s webhook with an invalid signature",
-                    "Razorpay" if is_razorpay else "Cashfree")
+                    "PayU" if is_payu else "Razorpay" if is_razorpay else "Cashfree")
         raise HTTPException(status_code=401, detail="Invalid signature")
 
-    try:
-        event = json.loads(raw or b"{}")
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Malformed body")
+    if is_payu:
+        event = form
+    else:
+        try:
+            event = json.loads(raw or b"{}")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Malformed body")
 
     paid_amount = None
-    if is_razorpay:
+    if is_payu:
+        parsed = _parse_payu_response(event)
+        event_type = parsed["event_type"]
+        status = parsed["status"]
+        marker = parsed["marker"]
+        paid_amount = parsed["amount"]
+        event_key = parsed["event_key"][:200]
+        sub_id = parsed["our_id"]
+    elif is_razorpay:
         parsed = _parse_razorpay_event(event, request.headers)
         event_type = parsed["event_type"]
         status = parsed["status"]
@@ -8525,11 +8842,11 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         # Unique violation: this is a retry of an event already applied.
         await db.rollback()
         log.info("Ignored duplicate webhook %s", event_key)
-        return {"ok": True, "duplicate": True}
+        return finish({"ok": True, "duplicate": True})
 
     if not sub_id:
         log.info("Webhook %s carried no subscription id", event_type)
-        return {"ok": True, "ignored": "no subscription_id"}
+        return finish({"ok": True, "ignored": "no subscription_id"})
 
     res = await db.execute(select(Subscription)
                            .where(Subscription.subscription_id == str(sub_id)))
@@ -8546,13 +8863,13 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     if not row:
         log.warning("Webhook %s named payment %s, which matches no row by "
                     "subscription_id or gateway id", event_type, sub_id)
-        return {"ok": True, "ignored": "unknown subscription"}
+        return finish({"ok": True, "ignored": "unknown subscription"})
 
     res = await db.execute(select(User).where(User.user_id == row.user_id))
     user = res.scalar_one_or_none()
     if not user:
         log.warning("Subscription %s has no user %s", sub_id, row.user_id)
-        return {"ok": True, "ignored": "unknown user"}
+        return finish({"ok": True, "ignored": "unknown user"})
 
     plan = BILLING_PLANS.get(row.plan_id) or BILLING_PLANS["month"]
     row.updated_at = now_utc()
@@ -8570,7 +8887,7 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         if row.status == "active" and row.current_period_end is not None:
             log.info("Ignored a repeat success event (%s) on %s, which was "
                      "already granted", event_type, row.subscription_id)
-            return {"ok": True, "duplicate": True}
+            return finish({"ok": True, "duplicate": True})
         # The charge landed: add one cycle. The period comes from our own
         # catalogue and never from the webhook - and specifically from the
         # PLAN, not from the amount, so the processing fee riding along with
@@ -8595,7 +8912,7 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         await record_event(db, "payment_success", user_id=user.user_id,
                            plan=row.plan_id, amount=row.amount,
                            currency=row.currency, first_cycle=(not was_active))
-        return {"ok": True, "granted": True}
+        return finish({"ok": True, "granted": True})
 
     # Checked BEFORE cancellation: a refund event often carries a cancelled
     # status too, and matching that first would have quietly turned every
@@ -8609,7 +8926,7 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         row.status = "refunded"
         row.cancelled_at = row.cancelled_at or now_utc()
         await db.commit()
-        return {"ok": True, "reversed": True}
+        return finish({"ok": True, "reversed": True})
 
     if _is_cancellation(event_type, status):
         # Deliberately not touching premium_until: the learner paid for this
@@ -8617,12 +8934,12 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         row.status = "cancelled"
         row.cancelled_at = now_utc()
         await db.commit()
-        return {"ok": True, "cancelled": True}
+        return finish({"ok": True, "cancelled": True})
 
     if status:
         row.status = status.lower()[:32]
     await db.commit()
-    return {"ok": True}
+    return finish({"ok": True})
 
 
 # Allowed providers per task (for validation + to drive the Admin UI dropdowns)

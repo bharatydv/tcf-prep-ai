@@ -155,6 +155,23 @@ export function useCheckout() {
     }
   }, [t]);
 
+  const payWithPayU = useCallback((checkout) => {
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = checkout.action;
+    form.style.display = 'none';
+    Object.entries(checkout.fields || {}).forEach(([name, value]) => {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = value == null ? '' : String(value);
+      form.appendChild(input);
+    });
+    document.body.appendChild(form);
+    form.submit();
+    return true;
+  }, []);
+
   const startCheckout = useCallback(async (planId) => {
     const { data } = await api.post('/api/billing/subscribe', { plan_id: planId });
     if (data?.provider === 'razorpay') {
@@ -166,12 +183,19 @@ export function useCheckout() {
       }
       return payWithRazorpay(data.checkout, data.subscription_id);
     }
+    if (data?.provider === 'payu') {
+      if (!data?.checkout?.action || !data?.checkout?.fields?.hash) {
+        toast.error(t('billing.noLink'));
+        return false;
+      }
+      return payWithPayU(data.checkout);
+    }
     if (!data?.session_id) {
       toast.error(t('billing.noLink'));
       return false;
     }
     return payWithCashfree(data.session_id);
-  }, [payWithCashfree, payWithRazorpay, t]);
+  }, [payWithCashfree, payWithPayU, payWithRazorpay, t]);
 
   /* The one entry point. Safe to call from any surface: it handles the
      signed-out case, the missing-phone case and the busy case itself, so a

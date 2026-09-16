@@ -4,9 +4,10 @@ import { BookOpen, Headphones } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, errMsg } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import { useT } from '../i18n';
+import { formatDateTime, useT } from '../i18n';
 import { Seo } from '../lib/seo';
 import { ComingSoon } from '../components/shared';
+import AttemptHistory, { useAttempts } from '../components/AttemptHistory';
 
 // Mock exams are not open yet. Module scope, so the fetch effect below does
 // not take it as a dependency. Flip to false to restore the page.
@@ -26,12 +27,21 @@ export default function MockExam() {
   // Grading happens on the server; `result` holds what it returned.
   const [result, setResult] = useState(null);
   const [grading, setGrading] = useState(false);
+  // The sitting being re-read, when the paper on screen is a past one.
+  const [pastAttempt, setPastAttempt] = useState(null);
+  const [openingId, setOpeningId] = useState(null);
   const meta = TYPES[examType];
   const done = result !== null;
 
+  /* Past sittings of this paper. Gated on NOT_READY with everything else: a
+     disabled page should not be fetching a history it cannot show. */
+  const { attempts, reload: reloadAttempts } = useAttempts(
+    `/api/exam/attempts?exam_type=${examType}`,
+    { enabled: !NOT_READY && Boolean(user) });
+
   useEffect(() => {
     if (NOT_READY) return;
-    setQuestions(null); setAnswers({}); setResult(null);
+    setQuestions(null); setAnswers({}); setResult(null); setPastAttempt(null);
     api.get(`/api/exam/questions/${examType}`).then(({ data }) => setQuestions(data.questions)).catch(() => setQuestions([]));
   }, [examType]);
 
@@ -43,6 +53,7 @@ export default function MockExam() {
         exam_type: examType, answers, time_used_seconds: 0,
       });
       setResult(data);
+      reloadAttempts();   // the paper just handed in belongs in the history
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
       toast.error(errMsg(e, t('mock.gradeFailed')));
@@ -50,6 +61,26 @@ export default function MockExam() {
       setGrading(false);
     }
   };
+
+  /* Re-open a marked paper: the answer sheet back in `answers` and the key
+     back in `result`, which is all the marking below reads. */
+  const openAttempt = async (row) => {
+    setOpeningId(row.id);
+    try {
+      const { data } = await api.get(`/api/exam/attempts/${row.id}`);
+      setAnswers(data.attempt?.answers || {});
+      setResult({ score: data.attempt?.score, total: data.attempt?.total,
+                  corrections: data.corrections || {} });
+      setPastAttempt(row);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) {
+      toast.error(errMsg(e, t('mock.gradeFailed')));
+    } finally {
+      setOpeningId(null);
+    }
+  };
+
+  const restart = () => { setAnswers({}); setResult(null); setPastAttempt(null); };
 
   /* The map variable used to be named `t`, shadowing the translator. */
   const typeTabs = Object.entries(TYPES).map(([key, type]) => ({ key, ...type }));
@@ -101,8 +132,27 @@ export default function MockExam() {
         <div className="card mt-6 border-l-4 border-l-primary p-6" data-testid="exam-score">
           <p className="font-heading text-2xl font-bold">{t('mock.score', { score: result.score, total: result.total })}</p>
           <p className="text-sm text-gray-600">{t('mock.answersInGreen')}</p>
+          {pastAttempt && (
+            <p className="mt-2 text-xs font-semibold text-primary" data-testid="mock-past-banner">
+              {t('hist.reviewing', { when: formatDateTime(pastAttempt.created_at) })}
+            </p>
+          )}
         </div>
       )}
+
+      <AttemptHistory
+        className="mt-6"
+        testid="mock-history"
+        attempts={attempts.map((a) => ({
+          id: a.mock_attempt_id,
+          label: `${a.score}/${a.total}`,
+          score: a.score, total: a.total,
+          created_at: a.created_at,
+        }))}
+        opening={openingId}
+        busy={grading}
+        onOpen={openAttempt}
+        onRetake={done ? restart : null} />
 
       <div className="mt-6 space-y-6">
         {questions.map((q, i) => (
@@ -135,7 +185,7 @@ export default function MockExam() {
           {grading ? t('mock.grading') : t('mock.grade', { done: Object.keys(answers).length, total: questions.length })}
         </button>
       )}
-      {done && <button className="btn-outline mt-4 w-full" onClick={() => { setAnswers({}); setResult(null); }}>{t('mock.restart')}</button>}
+      {done && <button className="btn-outline mt-4 w-full" onClick={restart}>{t('mock.restart')}</button>}
     </main>
   );
 }

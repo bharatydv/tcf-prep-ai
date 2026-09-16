@@ -647,6 +647,18 @@
     "words2": "120–150 words",
     "words3": "120–180 words"
   },
+  "hist": {
+    "title": "Your past attempts ({{n}})",
+    "review": "Review",
+    "opening": "Opening…",
+    "retake": "Retake",
+    "more": "Show {{n}} older",
+    "reviewing": "Reviewing your attempt from {{when}}",
+    "exitReview": "Back to this paper",
+    "tache": "Tâche {{n}}",
+    "errors": "{{n}} errors",
+    "noErrors": "no errors"
+  },
   "inv": {
     "date": "Date",
     "download": "Download PDF",

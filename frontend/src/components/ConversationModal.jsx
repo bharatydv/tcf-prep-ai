@@ -104,6 +104,10 @@ const HAS_LIVE_STT = Boolean(SpeechRec);
 
 export default function ConversationModal({
   consigne, tacheTitle, onCancel, onGraded, mode = 'tache2', segments = null,
+  /* The Test Mode sitting this roleplay is a tâche of, when it is one. Sent
+     with the grade so the answer is findable as part of that paper instead of
+     living only in the tab it was spoken in. Absent for free practice. */
+  examSet = null,
 }) {
   const t = useT();
   /* A session given `segments` runs them in order, each with its own clock and
@@ -501,6 +505,7 @@ export default function ConversationModal({
     try {
       const { data } = await api.post('/api/speaking/converse/grade', {
         consigne, history: turnsRef.current, mode,
+        ...(examSet ? { exam_set: examSet } : {}),
       });
       onGraded(data);
     } catch (err) {
