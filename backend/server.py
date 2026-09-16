@@ -33,7 +33,7 @@ import jwt
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response, HTTPException, Depends, Query, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 
@@ -3834,6 +3834,15 @@ CASHFREE_WEBHOOK_SECRET = (os.environ.get("CASHFREE_WEBHOOK_SECRET", "")
 # retried Cashfree notification for a payment taken last week still lands.
 PAYMENT_PROVIDER = os.environ.get("PAYMENT_PROVIDER", "razorpay").strip().lower()
 
+# PayU Hosted Checkout. PayU does not expose a JSON order API for this flow:
+# the browser POSTs these fields to PayU, which POSTs the result back to our
+# success/failure URLs. The salt signs both directions and never reaches the
+# browser.
+PAYU_KEY = os.environ.get("PAYU_KEY", "")
+PAYU_SALT = os.environ.get("PAYU_SALT", "")
+PAYU_BASE_URL = os.environ.get(
+    "PAYU_BASE_URL", "https://secure.payu.in/_payment")
+
 # Razorpay has one host for both test and live; which one you are on is decided
 # by the key, not the URL - a key beginning rzp_test_ cannot touch live money.
 RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
@@ -3898,7 +3907,7 @@ TAX_LABEL = os.environ.get("TAX_LABEL", "Tax")
 # strings PAYMENT_PROVIDER accepts, and falling back to the stored value so a
 # row written by some future provider still prints something truthful rather
 # than blank.
-_GATEWAY_NAMES = {"razorpay": "Razorpay", "cashfree": "Cashfree"}
+_GATEWAY_NAMES = {"razorpay": "Razorpay", "cashfree": "Cashfree", "payu": "PayU"}
 
 
 def gateway_display_name(provider: Optional[str] = None) -> str:
@@ -3998,6 +4007,63 @@ def cashfree_configured() -> bool:
     return bool(CASHFREE_APP_ID and CASHFREE_SECRET_KEY)
 
 
+def payu_configured() -> bool:
+    return bool(PAYU_KEY and PAYU_SALT)
+
+
+def _payu_text(value: Any) -> str:
+    return "" if value is None else str(value)
+
+
+def payu_request_hash(fields: dict) -> str:
+    """SHA-512 hash for PayU's hosted-checkout form."""
+    values = [
+        PAYU_KEY, fields.get("txnid", ""), fields.get("amount", ""),
+        fields.get("productinfo", ""), fields.get("firstname", ""),
+        fields.get("email", ""), fields.get("udf1", ""), fields.get("udf2", ""),
+        fields.get("udf3", ""), fields.get("udf4", ""), fields.get("udf5", ""),
+        "", "", "", "", PAYU_SALT,
+    ]
+    return hashlib.sha512("|".join(_payu_text(v) for v in values).encode()).hexdigest()
+
+
+def verify_payu_response(fields: dict) -> bool:
+    """Verify PayU's reverse response hash before trusting its status."""
+    if not (PAYU_KEY and PAYU_SALT and fields.get("hash")
+            and hmac.compare_digest(_payu_text(fields.get("key")), PAYU_KEY)):
+        return False
+    values = [
+        fields.get("additionalCharges", fields.get("additional_charges", "")),
+        PAYU_SALT, fields.get("status", ""), "", "", "", "", "", "", "",
+        "", "", fields.get("email", ""), fields.get("firstname", ""),
+        fields.get("productinfo", ""), fields.get("amount", ""),
+        fields.get("txnid", ""), fields.get("key", ""),
+    ]
+    expected = hashlib.sha512(
+        "|".join(_payu_text(v) for v in values).encode()).hexdigest()
+    return hmac.compare_digest(expected, _payu_text(fields.get("hash")))
+
+
+def _parse_payu_response(fields: dict) -> dict:
+    """Flatten a verified PayU callback to the billing event contract."""
+    txnid = _payu_text(fields.get("txnid"))
+    status = _payu_text(fields.get("status"))
+    mihpayid = _payu_text(fields.get("mihpayid"))
+    success = status.lower() == "success"
+    return {
+        "event_type": "payu.payment.success" if success else "payu.payment." +
+        (status.lower() or "unknown"),
+        "status": status,
+        "our_id": txnid,
+        "gateway_order_id": txnid,
+        "marker": mihpayid or txnid,
+        "amount": (float(money(fields["amount"]))
+                   if fields.get("amount") not in (None, "") else None),
+        "event_key": (f"payu:paid:{txnid}" if success and txnid else
+                      f"payu:{status}:{mihpayid or txnid}"),
+    }
+
+
 def billing_configured() -> bool:
     """Can the selected gateway actually take a payment?
 
@@ -4008,6 +4074,8 @@ def billing_configured() -> bool:
     """
     if PAYMENT_PROVIDER == "razorpay":
         return razorpay_configured()
+    if PAYMENT_PROVIDER == "payu":
+        return payu_configured()
     return cashfree_configured()
 
 
@@ -7972,6 +8040,25 @@ async def _razorpay_open_order(sub_id: str, plan_key: str, charged: float,
     }
 
 
+def _payu_form(sub_id: str, plan_key: str, charged: float, user: User) -> dict:
+    """Build the fields for PayU's hosted checkout form POST."""
+    name = (user.name or "Learner").strip().split()
+    fields = {
+        "key": PAYU_KEY,
+        "txnid": sub_id,
+        "amount": f"{money(charged):.2f}",
+        "productinfo": (BILLING_PLANS.get(plan_key) or {}).get("name", plan_key),
+        "firstname": name[0] if name else "Learner",
+        "email": user.email,
+        "phone": user.phone or "",
+        "surl": f"{ALLOWED_ORIGINS[0]}/api/billing/webhook",
+        "furl": f"{ALLOWED_ORIGINS[0]}/api/billing/webhook",
+        "udf1": sub_id,
+    }
+    fields["hash"] = payu_request_hash(fields)
+    return fields
+
+
 @app.post("/api/billing/subscribe")
 async def billing_subscribe(body: SubscribeIn,
                             user: User = Depends(get_current_user),
@@ -8020,6 +8107,13 @@ async def billing_subscribe(body: SubscribeIn,
     try:
         if PAYMENT_PROVIDER == "razorpay":
             opened = await _razorpay_open_order(sub_id, plan_key, charged, user)
+        elif PAYMENT_PROVIDER == "payu":
+            opened = {
+                "gateway_order_id": sub_id,
+                "session_id": None,
+                "checkout": {"action": PAYU_BASE_URL,
+                              "fields": _payu_form(sub_id, plan_key, charged, user)},
+            }
         else:
             opened = await _cashfree_open_order(sub_id, charged, user)
     except Exception:  # noqa: BLE001
@@ -8672,27 +8766,50 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     gateways retry until they get one, and retrying an event we understood
     perfectly well the first time is how one payment becomes two months.
     """
+    is_payu = request.headers.get("content-type", "").split(";", 1)[0].lower() \
+        in {"application/x-www-form-urlencoded", "multipart/form-data"}
+
+    def finish(payload):
+        if is_payu:
+            return RedirectResponse(url=f"{ALLOWED_ORIGINS[0]}/billing/return",
+                                    status_code=303)
+        return payload
+
     raw = await request.body()
     rzp_sig = request.headers.get("x-razorpay-signature", "")
     cf_sig = request.headers.get("x-webhook-signature", "")
     is_razorpay = bool(rzp_sig)
-    if is_razorpay:
+    if is_payu:
+        form = dict(await request.form())
+        ok = verify_payu_response(form)
+    elif is_razorpay:
         ok = verify_razorpay_signature(raw, rzp_sig)
     else:
         ok = verify_cashfree_signature(
             raw, cf_sig, request.headers.get("x-webhook-timestamp", ""))
     if not ok:
         log.warning("Rejected a %s webhook with an invalid signature",
-                    "Razorpay" if is_razorpay else "Cashfree")
+                    "PayU" if is_payu else "Razorpay" if is_razorpay else "Cashfree")
         raise HTTPException(status_code=401, detail="Invalid signature")
 
-    try:
-        event = json.loads(raw or b"{}")
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Malformed body")
+    if is_payu:
+        event = form
+    else:
+        try:
+            event = json.loads(raw or b"{}")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Malformed body")
 
     paid_amount = None
-    if is_razorpay:
+    if is_payu:
+        parsed = _parse_payu_response(event)
+        event_type = parsed["event_type"]
+        status = parsed["status"]
+        marker = parsed["marker"]
+        paid_amount = parsed["amount"]
+        event_key = parsed["event_key"][:200]
+        sub_id = parsed["our_id"]
+    elif is_razorpay:
         parsed = _parse_razorpay_event(event, request.headers)
         event_type = parsed["event_type"]
         status = parsed["status"]
@@ -8725,11 +8842,11 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         # Unique violation: this is a retry of an event already applied.
         await db.rollback()
         log.info("Ignored duplicate webhook %s", event_key)
-        return {"ok": True, "duplicate": True}
+        return finish({"ok": True, "duplicate": True})
 
     if not sub_id:
         log.info("Webhook %s carried no subscription id", event_type)
-        return {"ok": True, "ignored": "no subscription_id"}
+        return finish({"ok": True, "ignored": "no subscription_id"})
 
     res = await db.execute(select(Subscription)
                            .where(Subscription.subscription_id == str(sub_id)))
@@ -8746,13 +8863,13 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     if not row:
         log.warning("Webhook %s named payment %s, which matches no row by "
                     "subscription_id or gateway id", event_type, sub_id)
-        return {"ok": True, "ignored": "unknown subscription"}
+        return finish({"ok": True, "ignored": "unknown subscription"})
 
     res = await db.execute(select(User).where(User.user_id == row.user_id))
     user = res.scalar_one_or_none()
     if not user:
         log.warning("Subscription %s has no user %s", sub_id, row.user_id)
-        return {"ok": True, "ignored": "unknown user"}
+        return finish({"ok": True, "ignored": "unknown user"})
 
     plan = BILLING_PLANS.get(row.plan_id) or BILLING_PLANS["month"]
     row.updated_at = now_utc()
@@ -8770,7 +8887,7 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         if row.status == "active" and row.current_period_end is not None:
             log.info("Ignored a repeat success event (%s) on %s, which was "
                      "already granted", event_type, row.subscription_id)
-            return {"ok": True, "duplicate": True}
+            return finish({"ok": True, "duplicate": True})
         # The charge landed: add one cycle. The period comes from our own
         # catalogue and never from the webhook - and specifically from the
         # PLAN, not from the amount, so the processing fee riding along with
@@ -8795,7 +8912,7 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         await record_event(db, "payment_success", user_id=user.user_id,
                            plan=row.plan_id, amount=row.amount,
                            currency=row.currency, first_cycle=(not was_active))
-        return {"ok": True, "granted": True}
+        return finish({"ok": True, "granted": True})
 
     # Checked BEFORE cancellation: a refund event often carries a cancelled
     # status too, and matching that first would have quietly turned every
@@ -8809,7 +8926,7 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         row.status = "refunded"
         row.cancelled_at = row.cancelled_at or now_utc()
         await db.commit()
-        return {"ok": True, "reversed": True}
+        return finish({"ok": True, "reversed": True})
 
     if _is_cancellation(event_type, status):
         # Deliberately not touching premium_until: the learner paid for this
@@ -8817,12 +8934,12 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         row.status = "cancelled"
         row.cancelled_at = now_utc()
         await db.commit()
-        return {"ok": True, "cancelled": True}
+        return finish({"ok": True, "cancelled": True})
 
     if status:
         row.status = status.lower()[:32]
     await db.commit()
-    return {"ok": True}
+    return finish({"ok": True})
 
 
 # Allowed providers per task (for validation + to drive the Admin UI dropdowns)
