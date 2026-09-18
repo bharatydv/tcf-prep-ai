@@ -145,8 +145,15 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
           ONLY thing that does: the strike-through, the column headings and the
           order of the two columns all say it as well, so the table still works
           for a reader who cannot separate red from green. */}
+      {/* Wider than the page it sits in, once there is room for it.
+          The sitting is laid out at max-w-3xl because that is a comfortable
+          measure for reading a tâche brief, and four columns of table inside
+          it are four cramped columns. From xl up this breaks out by 8rem a
+          side — the page is centred, so that space is empty margin and taking
+          it costs nothing. Below xl it stays in the column and the last
+          column folds away instead. */}
       {Array.isArray(result.errors) && result.errors.length > 0 && (
-        <div className="overflow-hidden rounded-3xl border border-violet-100 bg-white shadow-soft">
+        <div className="overflow-hidden rounded-3xl border border-violet-100 bg-white shadow-soft xl:-mx-32 xl:w-[calc(100%+16rem)]">
           <p className="px-6 pb-3 pt-6 font-heading text-sm font-bold text-gray-900">
             {t('speak.corrections')}
           </p>
@@ -158,17 +165,28 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
               width row underneath takes the pressure off all three of the
               others — and it reads better there anyway, directly beneath the
               pair it explains rather than in a column beside it. */}
+          {/* One table, two shapes.
+              From md up "Why" is a fourth column, which is what it wants to be
+              — the four facts of a correction read across a row. Below md
+              there is not room for four columns of French without each one
+              becoming a word wide, so the same text drops to a full-width row
+              underneath. Same markup, one breakpoint, no second table to keep
+              in step with this one. */}
           <table className="w-full table-fixed text-sm">
             <thead className="bg-gray-50 text-left text-[10.5px] uppercase tracking-wide text-gray-500">
               <tr>
-                <th className="w-[38%] px-4 py-2.5 font-bold sm:px-6">{t('speak.colSaid')}</th>
-                <th className="w-[38%] px-3 py-2.5 font-bold">{t('speak.colFix')}</th>
-                <th className="px-3 py-2.5 font-bold sm:px-4">{t('speak.colType')}</th>
+                <th className="w-[30%] px-4 py-2.5 font-bold sm:px-6 md:w-[24%]">{t('speak.colSaid')}</th>
+                <th className="w-[30%] px-3 py-2.5 font-bold md:w-[24%]">{t('speak.colFix')}</th>
+                <th className="w-[40%] px-3 py-2.5 font-bold sm:px-4 md:w-[16%]">{t('speak.colType')}</th>
+                <th className="hidden px-3 py-2.5 font-bold sm:px-6 md:table-cell">{t('speak.colWhy')}</th>
               </tr>
             </thead>
             <tbody>
               {result.errors.map((e, i) => (
                 <Fragment key={i}>
+                  {/* The rule sits on the row rather than between the
+                      pairs, so a correction and its explanation read as one
+                      block whichever shape the table is in. */}
                   <tr className="border-t border-violet-100 align-top">
                     <td className="break-words bg-rose-50/50 px-4 pb-2 pt-3 sm:px-6">
                       <span className="flex flex-wrap items-center gap-1.5">
@@ -201,9 +219,12 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
                         </span>
                       </span>
                     </td>
+                    <td className="hidden px-3 pb-2 pt-3 text-xs leading-relaxed text-gray-500 sm:px-6 md:table-cell">
+                      {e.explanation}
+                    </td>
                   </tr>
                   {e.explanation && (
-                    <tr>
+                    <tr className="md:hidden">
                       <td colSpan={3}
                         className="px-4 pb-3 text-xs leading-relaxed text-gray-500 sm:px-6">
                         {e.explanation}
