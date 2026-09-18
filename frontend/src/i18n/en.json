@@ -1481,6 +1481,7 @@
     "diffCorrected": "Corrected",
     "diffNoCorrections": "Nothing to correct here.",
     "diffSaid": "What you said",
+    "colWhy": "Why",
     "corrections": "Corrections",
     "disclaimer": "The AI grades the content and language of your transcribed answer. It does not score pronunciation or accent. This is a practice tool — estimated levels are for guidance only.",
     "doneToast": "Analysis complete — level {{level}}",
