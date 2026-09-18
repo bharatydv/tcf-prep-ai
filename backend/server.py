@@ -6312,12 +6312,20 @@ async def admin_delete_recording(submission_id: str,
 # ----------------------------------------------------------------------------
 @app.get("/api/simulator/sets")
 async def simulator_sets():
-    """The numbered writing sittings, for the chooser."""
-    return {"sets": [
-        {"set_number": n,
-         "task2": exam_sets.WRITING_EXAM_SETS[n - 1][1],
-         "task3_preview": exam_sets.WRITING_EXAM_SETS[n - 1][2]["doc_1"][:160]}
-        for n in range(1, len(exam_sets.WRITING_EXAM_SETS) + 1)]}
+    """The numbered writing sittings, for the chooser. Numbers only.
+
+    This carried task3_preview — the first 160 characters of tâche 3's first
+    document — which the chooser printed on every card, so all twenty papers
+    could be read before sitting one and a candidate picked the subject they
+    already had opinions about. It also sent task2 in full, the whole tâche 2
+    prompt, which nothing has ever rendered.
+
+    Sixty minutes to write three texts is only a measurement if the subjects
+    arrive with the clock. They are served by /api/simulator/start when the
+    paper is opened.
+    """
+    return {"sets": [{"set_number": n}
+                     for n in range(1, len(exam_sets.WRITING_EXAM_SETS) + 1)]}
 
 
 @app.get("/api/simulator/start")
