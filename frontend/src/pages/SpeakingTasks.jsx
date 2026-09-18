@@ -598,12 +598,23 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
 
           <SpeakingGrid result={result} />
 
-          <div className="rounded-2xl border border-violet-100 bg-white p-4">
-            <p className="text-xs font-bold text-gray-900">{t('st.transcript')}</p>
-            <p className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-gray-700">
-              {result.transcript || t('st.noSpeechDetected')}
-            </p>
-          </div>
+          {/* Same rule as the exam: tâches 1 and 2 are heard, not read.
+              This page renders its own result card rather than SpeakingResult,
+              so the condition has to be repeated here. */}
+          {tacheNum !== 1 && tacheNum !== 2 && (
+            <div className="rounded-2xl border border-violet-100 bg-white p-4">
+              <p className="text-xs font-bold text-gray-900">{t('st.transcript')}</p>
+              <p className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-gray-700">
+                {result.transcript || t('st.noSpeechDetected')}
+              </p>
+            </div>
+          )}
+          {(tacheNum === 1 || tacheNum === 2) && (
+            <div className="rounded-2xl border border-violet-100 bg-violet-50/40 p-4"
+              data-testid="transcript-withheld">
+              <p className="text-xs leading-relaxed text-gray-600">{t('speak.transcriptHidden')}</p>
+            </div>
+          )}
 
           {Array.isArray(result.errors) && result.errors.length > 0 && (
             <div className="rounded-2xl border border-violet-100 bg-white p-4">

@@ -215,7 +215,7 @@ export const PAGES = [
   {
     slug: 'tcf-canada-speaking-task-3', k: 'speak3', icon: Scales, tone: 'fuchsia',
     cta: ['/speaking/tasks', '/speaking/themes'],
-    facts: [['2 min 30', 'f1'], ['0 s', 'f2'], ['3 / 3', 'f3'], ['1', 'f4']],
+    facts: [['4 min 30', 'f1'], ['0 s', 'f2'], ['3 / 3', 'f3'], ['1', 'f4']],
     visual: 'speakSpec', task: 3, family: 'speak', tips: 4, faqs: 4,
     related: ['tcf-canada-speaking', 'tcf-canada-speaking-task-1',
       'tcf-canada-speaking-task-2', 'tcf-canada-exam-simulator', 'tcf-canada',

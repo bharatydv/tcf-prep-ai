@@ -289,7 +289,7 @@
     "about1": "Almost every candidate writes better in practice than in the exam, and the reason is rarely the French. It is that practice has an undo, a spellchecker, a pause to look something up, and no consequence for spending fifty of the sixty minutes on the first tâche.",
     "about2": "The simulator removes all four. You get the tâches in exam order, one shared 60-minute countdown for the written paper and an automatic hand-in at zero. The spoken sitting runs the same way: the preparation clock starts, then the recording starts, and neither waits for you.",
     "b1": "Written: three tâches, one 60-minute countdown, automatic hand-in.",
-    "b2": "Spoken: two minutes with no preparation, then 2 + 3:30, then 2:30 with none either.",
+    "b2": "Spoken: two minutes with no preparation, then 2 + 3:30, then 4:30 with none either.",
     "b3": "Corrected afterwards exactly like a practice attempt — level, score band, every error explained.",
     "tipsTitle": "Getting the most from a simulated sitting",
     "tipsSub": "Four things to decide before you press start, so the sitting tests what you want it to test.",
@@ -355,7 +355,7 @@
   },
   "speak": {
     "title": "TCF Canada speaking: the three tâches",
-    "desc": "The TCF Canada expression orale explained: entretien dirigé (2 min), exercice en interaction (2 min prep + 3 min 30) and expression d'un point de vue (2 min 30), with recorded practice and an AI evaluation of each.",
+    "desc": "The TCF Canada expression orale explained: entretien dirigé (2 min), exercice en interaction (2 min prep + 3 min 30) and expression d'un point de vue (4 min 30), with recorded practice and an AI evaluation of each.",
     "crumb": "TCF Canada speaking",
     "card": "Twelve minutes, three tâches, one examiner — and how to rehearse each of them.",
     "eyebrow": "Expression orale",
