@@ -13,6 +13,7 @@
  * screen — without it, tâche 1's "corrected" button and tâche 3's are the same
  * button as far as the synthesiser is concerned.
  */
+import { Fragment } from 'react';
 import { CheckCircle, XCircle, Sparkle } from '@phosphor-icons/react';
 import { SpeakButton } from './SpeakButton';
 import { SpeakingGrid } from './SpeakingGrid';
@@ -149,22 +150,27 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
           <p className="px-6 pb-3 pt-6 font-heading text-sm font-bold text-gray-900">
             {t('speak.corrections')}
           </p>
-          {/* Scrolls sideways rather than wrapping four columns into a mess on
-              a phone, which is the same thing the dashboard history does. */}
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[44rem] text-sm">
-              <thead className="bg-gray-50 text-left text-[10.5px] uppercase tracking-wide text-gray-500">
-                <tr>
-                  <th className="px-4 py-2.5 font-bold sm:px-6">{t('speak.colSaid')}</th>
-                  <th className="px-4 py-2.5 font-bold">{t('speak.colFix')}</th>
-                  <th className="px-4 py-2.5 font-bold">{t('speak.colType')}</th>
-                  <th className="px-4 py-2.5 font-bold sm:px-6">{t('speak.colWhy')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {result.errors.map((e, i) => (
-                  <tr key={i} className="border-t border-violet-50 align-top">
-                    <td className="bg-rose-50/40 px-4 py-3 sm:px-6">
+          {/* Three columns, and the explanation on a row of its own.
+              As four columns this needed 44rem before the text stopped
+              collapsing, which put a sideways scrollbar under every result and
+              pushed the page wider than the window. "Why" is the only column
+              holding a sentence rather than a phrase, so moving it to a full
+              width row underneath takes the pressure off all three of the
+              others — and it reads better there anyway, directly beneath the
+              pair it explains rather than in a column beside it. */}
+          <table className="w-full table-fixed text-sm">
+            <thead className="bg-gray-50 text-left text-[10.5px] uppercase tracking-wide text-gray-500">
+              <tr>
+                <th className="w-[38%] px-4 py-2.5 font-bold sm:px-6">{t('speak.colSaid')}</th>
+                <th className="w-[38%] px-3 py-2.5 font-bold">{t('speak.colFix')}</th>
+                <th className="px-3 py-2.5 font-bold sm:px-4">{t('speak.colType')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.errors.map((e, i) => (
+                <Fragment key={i}>
+                  <tr className="border-t border-violet-100 align-top">
+                    <td className="break-words bg-rose-50/50 px-4 pb-2 pt-3 sm:px-6">
                       <span className="flex flex-wrap items-center gap-1.5">
                         <span className="text-red-600 line-through">{e.error}</span>
                         {/* Both sides are playable, not just the right one. A
@@ -175,14 +181,16 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
                         <SpeakButton text={e.error} id={`${idPrefix}said-${i}`} {...tts} />
                       </span>
                     </td>
-                    <td className="bg-green-50/40 px-4 py-3">
+                    <td className="break-words bg-green-50/50 px-3 pb-2 pt-3">
                       <span className="flex flex-wrap items-center gap-1.5">
                         <span className="font-semibold text-green-700">{e.correction}</span>
                         <SpeakButton text={e.correction} id={`${idPrefix}fix-${i}`} {...tts} />
                       </span>
                     </td>
-                    <td className="px-4 py-3">
-                      <span className="flex flex-wrap items-center gap-1.5">
+                    {/* Stacked, not in a row: two pills side by side is the
+                        pair that forces this column wide. */}
+                    <td className="px-3 pb-2 pt-3 sm:px-4">
+                      <span className="flex flex-col items-start gap-1">
                         {SEVERITY_TONE[e.severity] && (
                           <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${SEVERITY_TONE[e.severity]}`}>
                             {t(`speak.severity.${e.severity}`)}
@@ -193,14 +201,19 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
                         </span>
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-xs leading-relaxed text-gray-500 sm:px-6">
-                      {e.explanation}
-                    </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                  {e.explanation && (
+                    <tr>
+                      <td colSpan={3}
+                        className="px-4 pb-3 text-xs leading-relaxed text-gray-500 sm:px-6">
+                        {e.explanation}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
