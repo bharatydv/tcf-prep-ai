@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ClockCountdown, CheckCircle, CaretRight, Microphone, Handshake,
@@ -14,7 +14,7 @@ import { SpeakingResult } from '../components/SpeakingResult';
 import { useSpeak } from '../lib/speak';
 import { trackPracticeStart, trackPracticeComplete } from '../lib/analytics';
 import { speakingPaperMark, displayMark } from '../lib/tcf';
-import { readSitting, writeSitting } from '../lib/speakingExam';
+import { readSitting, writeSitting, TASKS } from '../lib/speakingExam';
 import AttemptHistory, { useAttempts } from '../components/AttemptHistory';
 
 /* Test Mode for Expression orale: one numbered sitting, the three tâches in the
@@ -42,7 +42,13 @@ export default function SpeakingExam() {
   const [loading, setLoading] = useState(true);
   const [live, setLive] = useState(null);           // 1 | 2 while a modal is open
   const [results, setResults] = useState({});       // taskType -> graded result
-  const [reviewing, setReviewing] = useState(null); // the tâche whose corrections are open
+  /* Which tâches have their corrections open. A Set, not a single number,
+     because a finished paper opens all three at once — the candidate came for
+     the whole Expression orale result, not for one tâche at a time. */
+  const [reviewing, setReviewing] = useState(() => new Set());
+  // Whether this paper has already been revealed, so the effect below fires
+  // once per sitting rather than on every render that touches `results`.
+  const revealedRef = useRef(false);
   const [openingId, setOpeningId] = useState(null);
   // One synthesiser for the page: opening tâche 3's corrections while tâche 1
   // is being read aloud must stop the first voice, not talk over it.
@@ -104,7 +110,9 @@ export default function SpeakingExam() {
      just graded. Landing on a completed paper with every correction collapsed
      would hide the one the candidate was reading a second ago. */
   useEffect(() => {
-    setReviewing(parseInt(params.get('review'), 10) || null);
+    const asked = parseInt(params.get('review'), 10) || null;
+    setReviewing(asked ? new Set([asked]) : new Set());
+    revealedRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setNumber]);
 
@@ -149,6 +157,14 @@ export default function SpeakingExam() {
     setLive(n);
   };
 
+  const toggleReview = (n) => setReviewing((open) => {
+    const next = new Set(open);
+    if (next.has(n)) next.delete(n); else next.add(n);
+    return next;
+  });
+
+  const openReview = (n) => setReviewing((open) => new Set(open).add(n));
+
   const onGraded = (taskType) => (data) => {
     /* The modal only calls this with a grade in hand, so it is the completion
        for tâches 1 and 2 — tâche 3 completes on /speaking/record, which counts
@@ -166,7 +182,75 @@ export default function SpeakingExam() {
     writeSitting(setNumber, next);
     setLive(null);
     reloadAttempts();   // the tâche just graded belongs in the history
+
+    /* Straight on to the next unanswered tâche.
+     *
+     * The paper runs 1 → 2 → 3 without stopping, so the candidate is not sent
+     * back to a list to press another button between every task. The first
+     * tâche with no result is the one to open, rather than taskType + 1: a
+     * retaken tâche 1 on a paper where 2 is already done should go to 3.
+     *
+     * Nothing is ambushed. Tâches 1 and 2 open the modal on its brief screen,
+     * which the candidate reads and starts themselves, and tâche 3 opens the
+     * recorder with its own preparation step. A finished paper advances
+     * nowhere, so retaking a tâche on one just re-marks it. */
+    const pending = TASKS.find((n) => !next[n]);
+    if (pending) return startTask(pending);
+    /* That was the last tâche. The paper is finished and it now lives on the
+       dashboard, which is where the candidate is sent — the full three-tâche
+       result is one click from the row that appears there. */
+    navigate('/dashboard?marking=speaking');
   };
+
+  /* A finished paper opens everything, once.
+   *
+   * This is the moment the sitting exists for, and the candidate should not
+   * have to click three times to see the result they just spent twelve
+   * minutes earning. Tâches restored from history are left closed: their
+   * corrections have not been fetched yet, so opening them would show an
+   * empty panel instead of a result — the review button loads them on demand,
+   * exactly as it did before. */
+  useEffect(() => {
+    if (revealedRef.current) return;
+    const marked = TASKS.filter((n) => results[n]);
+    if (marked.length < TASKS.length) return;
+    // Set before the fetches below, or each one updating `results` would run
+    // this effect again and ask for the same submissions a second time.
+    revealedRef.current = true;
+
+    const stubs = marked.filter(
+      (n) => results[n].from_history && !results[n].loaded);
+    if (!stubs.length) {
+      setReviewing((open) => new Set([...open, ...marked]));
+      return;
+    }
+
+    /* Arriving at a finished paper — from the dashboard, from a link, from
+       yesterday. The tâches restored from history carry a level and a mark
+       but no corrections, so opening them as they stand would show three
+       empty panels. Fetch the three submissions and open the lot: this is a
+       completed result being read, which is exactly the moment the
+       corrections are wanted, and three requests is the whole cost. */
+    let cancelled = false;
+    Promise.all(stubs.map((n) => api
+      .get(`/api/submissions/${results[n].submission_id}`)
+      .then(({ data }) => [n, { ...(data.submission || {}), loaded: true }])
+      .catch(() => null)))
+      .then((loaded) => {
+        if (cancelled) return;
+        const got = loaded.filter(Boolean);
+        if (got.length) {
+          setResults((held) => {
+            const nextResults = { ...held };
+            got.forEach(([n, full]) => { nextResults[n] = full; });
+            return nextResults;
+          });
+        }
+        setReviewing((open) => new Set([...open, ...marked]));
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [results]);
 
   /* Open a graded tâche from the history — including one from a sitting taken
      days ago, or in another tab. The stub the list carries has no corrections
@@ -182,7 +266,7 @@ export default function SpeakingExam() {
       const { data } = await api.get(`/api/submissions/${row.id}`);
       const full = { ...(data.submission || {}), loaded: true };
       setResults((held) => ({ ...held, [row.task]: full }));
-      setReviewing(row.task);
+      openReview(row.task);
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -198,7 +282,6 @@ export default function SpeakingExam() {
           <BackLink to="/speaking" className="!mb-6" testid="back-to-speaking" />
           <div className="mb-3 text-center">
             <h1 className="font-heading text-3xl font-extrabold text-gray-900">{t('sexam.title')}</h1>
-            <p className="mx-auto mt-2 max-w-xl text-sm text-gray-600">{t('sexam.sub')}</p>
           </div>
           <div className="mb-8 flex flex-wrap justify-center gap-2">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-pink-100 px-4 py-1.5 text-xs font-bold text-pink-700">
@@ -227,13 +310,15 @@ export default function SpeakingExam() {
                       </span>
                       <CaretRight size={18} className="text-gray-300 transition group-hover:translate-x-0.5" />
                     </div>
-                    <h3 className="mt-4 font-heading text-base font-bold text-gray-900">
+                    <h3 className="mt-4 flex-1 font-heading text-base font-bold text-gray-900">
                       {t('sexam.setN', { n: s.set_number })}
                     </h3>
-                    <p className="mt-1 flex-1 text-xs leading-relaxed text-gray-500">{s.task3_question}</p>
-                    <div className="mt-4 flex flex-wrap gap-1.5">
-                      <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-semibold text-gray-600">{s.task2_theme}</span>
-                    </div>
+                    {/* Nothing about the paper itself — not the subject,
+                        not the domain it is drawn from. A theme is a strong
+                        hint: "Environnement" is most of the preparation for a
+                        question about it, and a candidate who can read the
+                        themes will sit the paper they already have opinions
+                        about rather than the one they were given. */}
                   </div>
                 </button>
               ))}
@@ -283,6 +368,11 @@ export default function SpeakingExam() {
             <p className="text-xs font-bold uppercase tracking-wide text-white/80">{t('sexam.testMode')}</p>
             <p className="mt-1 font-heading text-2xl font-extrabold">{t('sexam.setN', { n: paper.set_number })}</p>
             <p className="mt-1 text-sm text-white/90">{t('sexam.progress', { done, total: 3 })}</p>
+            {!finished && (
+              <p className="mt-1 text-xs text-white/70" data-testid="marks-held">
+                {t('sexam.heldBack')}
+              </p>
+            )}
           </div>
         </div>
 
@@ -301,30 +391,66 @@ export default function SpeakingExam() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="font-heading text-sm font-bold text-gray-900">{s.label}</p>
-                      {s.theme && (
+                      {/* Sealed with the subject, and revealed with it. */}
+                      {result && s.theme && (
                         <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-primary">{s.theme}</span>
                       )}
                       <span className="ml-auto text-[11px] text-gray-400">{s.meta}</span>
                     </div>
-                    <p className="mt-1.5 text-sm leading-relaxed text-gray-800">{s.brief}</p>
-                    {s.hints && <p className="mt-1 text-xs italic text-gray-500">({s.hints})</p>}
-
+                    {/* The subject is sealed until the tâche is sat.
+                         Three questions on screen from the moment the paper
+                         opens is not the exam: a candidate reads tâche 3
+                         while answering tâche 1, prepares it in their head,
+                         and arrives at it having had ten minutes nobody in a
+                         real room gets. It is shown by the modal and the
+                         recorder, which is where it belongs, and it comes
+                         back here once the tâche has been answered so the
+                         corrections can be read against it. */}
                     {result ? (
+                      <p className="mt-1.5 text-sm leading-relaxed text-gray-800">{s.brief}</p>
+                    ) : (
+                      <p className="mt-1.5 flex items-center gap-1.5 text-sm italic text-gray-400"
+                        data-testid={`sealed-task-${s.n}`}>
+                        <Lock size={13} weight="fill" /> {t('sexam.sealed')}
+                      </p>
+                    )}
+                    {result && s.hints && (
+                      <p className="mt-1 text-xs italic text-gray-500">({s.hints})</p>
+                    )}
+
+                    {result && !finished ? (
+                      /* Answered, and that is all it says.
+                         A real sitting does not tell you how tâche 1 went
+                         before you sit tâche 2, and a band on screen between
+                         tâches is the single loudest thing that could be
+                         there — it changes how the next answer is given. The
+                         marks are all here the moment the paper is complete. */
+                      <div className="mt-3 flex flex-wrap items-center gap-3"
+                        data-testid={`answered-task-${s.n}`}>
+                        <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-green-700 shadow-sm">
+                          <CheckCircle size={12} weight="fill" className="mr-1 inline" />
+                          {t('sexam.answered')}
+                        </span>
+                        <button onClick={() => startTask(s.n)} className="text-xs font-semibold text-primary underline">
+                          <ArrowClockwise size={12} weight="bold" className="mr-1 inline" />{t('sexam.again')}
+                        </button>
+                      </div>
+                    ) : result ? (
                       <div className="mt-3 flex flex-wrap items-center gap-3">
                         <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-primary shadow-sm">
                           {result.tcf_level} · {displayMark(result.overall_score, result.tcf_level) ?? '—'}/20
                         </span>
                         <button onClick={() => {
-                          if (reviewing === s.n) return setReviewing(null);
+                          if (reviewing.has(s.n)) return toggleReview(s.n);
                           if (result.from_history && !result.loaded) {
                             return openAttempt({ id: result.submission_id, task: s.n });
                           }
-                          return setReviewing(s.n);
+                          return toggleReview(s.n);
                         }}
                           data-testid={`review-task-${s.n}`}
                           className="text-xs font-semibold text-primary underline">
                           <MagnifyingGlass size={12} weight="bold" className="mr-1 inline" />
-                          {reviewing === s.n
+                          {reviewing.has(s.n)
                             ? t('sexam.hideErrors')
                             : result.from_history && !result.loaded
                               ? t('hist.review')
@@ -347,9 +473,9 @@ export default function SpeakingExam() {
                     )}
                   </div>
                 </div>
-                {reviewing === s.n && result && (
+                {reviewing.has(s.n) && result && (
                   <div className="mt-4" data-testid={`review-panel-${s.n}`}>
-                    <SpeakingResult result={result} tts={tts} idPrefix={`t${s.n}-`} />
+                    <SpeakingResult result={result} tts={tts} idPrefix={`t${s.n}-`} taskType={s.n} />
                   </div>
                 )}
               </div>

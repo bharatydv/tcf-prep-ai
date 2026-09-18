@@ -4,6 +4,7 @@ import {
 } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
+import { PRACTICE_MODE_VISIBLE } from '../lib/modes';
 import { Seo } from '../lib/seo';
 import { PageIntro } from '../components/PageIntro';
 import { FREE_TRIAL_TOTAL } from '../lib/tcf';
@@ -62,34 +63,45 @@ export default function ReadingHome() {
       />
 
       <section className="mx-auto max-w-5xl px-4 pt-10 sm:px-6">
-        <div className="mb-6 text-center">
-          <h2 className="font-heading text-2xl font-extrabold text-gray-900">{t('read.chooseTitle')}</h2>
-          <p className="mx-auto mt-2 max-w-lg text-sm text-gray-600">{t('read.chooseSub')}</p>
-        </div>
-
-        <div className="grid gap-5 sm:grid-cols-2">
-          {/* PRACTICE */}
-          <div className="flex flex-col rounded-3xl border border-violet-100 bg-white p-6 shadow-soft transition hover:shadow-xl hover:shadow-violet-200/50">
-            <div className="flex items-center gap-3">
-              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-primary">
-                <BookOpen size={24} weight="fill" />
-              </span>
-              <div>
-                <h3 className="font-heading text-lg font-extrabold text-gray-900">{t('mode.practiceTitle')}</h3>
-                <p className="text-xs font-semibold text-primary">{t('mode.practiceTag')}</p>
-              </div>
-            </div>
-            <p className="mt-4 text-sm leading-relaxed text-gray-600">{t('read.practiceBody')}</p>
-            <ul className="mt-4 space-y-2 text-sm text-gray-600">
-              <li className="flex items-center gap-2"><CheckCircle size={16} weight="fill" className="shrink-0 text-primary" /> {t('read.practiceBullet')}</li>
-              <li className="flex items-center gap-2"><CheckCircle size={16} weight="fill" className="shrink-0 text-primary" /> {t('mode.instantFeedback')}</li>
-              <li className="flex items-center gap-2"><CheckCircle size={16} weight="fill" className="shrink-0 text-primary" /> {t('mode.noTimer')}</li>
-            </ul>
-            <button onClick={startPractice}
-              className="btn-primary mt-6 w-full justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600">
-              <BookOpen size={18} weight="fill" /> {t('mode.startPractice')}
-            </button>
+        {/* There is nothing to choose between while practice mode is
+            hidden, so the page does not ask. */}
+        {PRACTICE_MODE_VISIBLE && (
+          <div className="mb-6 text-center">
+            <h2 className="font-heading text-2xl font-extrabold text-gray-900">{t('read.chooseTitle')}</h2>
+            <p className="mx-auto mt-2 max-w-lg text-sm text-gray-600">{t('read.chooseSub')}</p>
           </div>
+        )}
+
+        <div className={PRACTICE_MODE_VISIBLE
+          ? 'grid gap-5 sm:grid-cols-2'
+          : 'mx-auto max-w-lg'}>
+          {/* PRACTICE — hidden, not removed. The route, the picker and
+              every attempt already taken in it are untouched; see
+              lib/modes.js. */}
+          {PRACTICE_MODE_VISIBLE && (
+            <div className="flex flex-col rounded-3xl border border-violet-100 bg-white p-6 shadow-soft transition hover:shadow-xl hover:shadow-violet-200/50">
+              <div className="flex items-center gap-3">
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-primary">
+                  <BookOpen size={24} weight="fill" />
+                </span>
+                <div>
+                  <h3 className="font-heading text-lg font-extrabold text-gray-900">{t('mode.practiceTitle')}</h3>
+                  <p className="text-xs font-semibold text-primary">{t('mode.practiceTag')}</p>
+                </div>
+              </div>
+              <p className="mt-4 text-sm leading-relaxed text-gray-600">{t('read.practiceBody')}</p>
+              <ul className="mt-4 space-y-2 text-sm text-gray-600">
+                <li className="flex items-center gap-2"><CheckCircle size={16} weight="fill" className="shrink-0 text-primary" /> {t('read.practiceBullet')}</li>
+                <li className="flex items-center gap-2"><CheckCircle size={16} weight="fill" className="shrink-0 text-primary" /> {t('mode.instantFeedback')}</li>
+                <li className="flex items-center gap-2"><CheckCircle size={16} weight="fill" className="shrink-0 text-primary" /> {t('mode.noTimer')}</li>
+              </ul>
+              <button onClick={startPractice}
+                className="btn-primary mt-6 w-full justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600">
+                <BookOpen size={18} weight="fill" /> {t('mode.startPractice')}
+              </button>
+            </div>
+
+          )}
 
           {/* TEST */}
           <div className="flex flex-col rounded-3xl border border-pink-100 bg-white p-6 shadow-soft transition hover:shadow-xl hover:shadow-pink-200/50">

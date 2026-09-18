@@ -10,7 +10,7 @@ import {
   startRecording as startCapture, appendAudio, isRecordingSupported, listenForSpeech,
 } from '../lib/recorder';
 import { SPEAKING_TASKS, fmtClock } from '../lib/tcf';
-import { saveTask, sittingComplete } from '../lib/speakingExam';
+import { saveTask, sittingComplete, readSitting, TASKS } from '../lib/speakingExam';
 import { useAuth } from '../context/AuthContext';
 import { BackLink, CreditsBadge } from '../components/shared';
 import { SpeakingResult } from '../components/SpeakingResult';
@@ -23,12 +23,12 @@ import { trackPracticeStart, trackPracticeComplete } from '../lib/analytics';
 const TACHE_INFO = {
   1: { title: 'Tâche 1 : Entretien Dirigé', range: '2 min' },
   2: { title: 'Tâche 2 : Exercice en Interaction', range: '2 min de préparation + 3 min 30' },
-  3: { title: "Tâche 3 : Expression d'un Point de Vue", range: '2 min 30' },
+  3: { title: "Tâche 3 : Expression d'un Point de Vue", range: '4 min 30' },
 };
 
 /* How long the clock will wait for a candidate who never speaks. Past this it
    starts anyway: a recorder left running on an open microphone grows without
-   limit, and an answer that has not begun by now is not going to fill 2:30. */
+   limit, and an answer that has not begun by now is not going to fill 4:30. */
 const SPEECH_WAIT_LIMIT = 120;
 
 export default function SpeakingRecord() {
@@ -88,6 +88,9 @@ export default function SpeakingRecord() {
   const startedAtRef = useRef(0);
   // One practice_start per sitting at this page, from whichever mode began it.
   const startedRef = useRef(false);
+  // Set when this page has already sent the candidate to the dashboard, so
+  // the request finishing afterwards does not try to render into it.
+  const leavingRef = useRef(false);
   const fileInputRef = useRef(null);
   // Teardown for the speech detector, and the guard that starts the clock
   // anyway if it never hears anything.
@@ -287,6 +290,17 @@ export default function SpeakingRecord() {
     if (!audioBlob) return toast.error(mode === 'upload' ? t('speak.chooseFileFirst') : t('speak.recordFirst'));
     setAnalyzing(true);
     setResult(null);
+    /* Whether this answer is the one that finishes the paper — decided BEFORE
+       the request, because the point is not to wait for it.
+
+       Marking a spoken answer is the longest wait in the product: a
+       transcription, a grader, and a second model listening to the audio. A
+       candidate who has just finished twelve minutes of speaking should not
+       spend another thirty seconds watching a spinner, so they are sent to
+       the dashboard and the paper turns up there when it is ready. */
+    const others = examSet && tacheNum ? readSitting(examSet) : {};
+    const finishesPaper = Boolean(examSet && tacheNum)
+      && TASKS.filter((n) => n !== tacheNum).every((n) => others[n]);
     try {
       const form = new FormData();
       form.append('question', question);
@@ -302,10 +316,21 @@ export default function SpeakingRecord() {
       // Same reason as the writing flow: the theme is not recoverable
       // from anything else on the submission.
       if (themeId) form.append('theme_id', themeId);
-      const { data } = await api.post('/api/speaking/analyze', form, {
+      /* Fired, then left. The request outlives this page: the server
+         persists the submission whatever the browser does next, and the
+         handlers below still run — saveTask writes to sessionStorage and
+         toast is global, neither of which needs a mounted component.
+         A 402 still raises the paywall, which is mounted in the app shell
+         and will appear over the dashboard instead of over this page. */
+      const pending = api.post('/api/speaking/analyze', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setResult(data);
+      if (finishesPaper) {
+        leavingRef.current = true;
+        navigate('/dashboard?marking=speaking');
+      }
+      const { data } = await pending;
+      if (!leavingRef.current) setResult(data);
       /* Graded. Inside the try, so the 402 paywall, the 422 with no speech in
          it and every network failure below count as nothing.
          `spoken` records whether the recogniser heard anything, which is the
@@ -333,7 +358,7 @@ export default function SpeakingRecord() {
          An answer the recogniser heard nothing in is the exception: it is
          graded and stored like any other, but what the candidate wants next is
          the re-record button on this page, not a result page. */
-      if (data.transcript && sittingComplete(sitting)) {
+      if (!leavingRef.current && data.transcript && sittingComplete(sitting)) {
         navigate(`${examBack}?set=${examSet}&review=${tacheNum}`);
       }
     } catch (err) {
@@ -343,7 +368,7 @@ export default function SpeakingRecord() {
       else toast.error(t('speak.analyseFailed'));
       await refreshUser();
     } finally {
-      setAnalyzing(false);
+      if (!leavingRef.current) setAnalyzing(false);
     }
   };
 
@@ -470,7 +495,7 @@ export default function SpeakingRecord() {
                 {t('speak.backToSitting')}
               </button>
             )}
-            <SpeakingResult result={result} tts={tts} />
+            <SpeakingResult result={result} tts={tts} taskType={tacheNum} />
 
 
             <div className="flex justify-center">

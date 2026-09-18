@@ -2,7 +2,7 @@
  *
  * Tâche 3 arms the microphone on the button but holds the countdown until the
  * candidate actually speaks, so reading the question costs them none of their
- * 2 min 30. Everything that decides "they have started" lives here.
+ * 4 min 30. Everything that decides "they have started" lives here.
  */
 import { listenForSpeech } from './recorder';
 

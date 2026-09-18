@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Microphone, Stop, X, Lightning, SpeakerHigh, SpeakerSlash,
-  Warning, PaperPlaneTilt,
+  Warning,
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, errMsg } from '../lib/api';
@@ -121,6 +121,35 @@ export default function ConversationModal({
   const isFree = mode === 'free';
   // Tâche 1: the examiner asks once, then listens for the whole window.
   const isMonologue = mode === 'tache1';
+  /* The exam is spoken, so the practice is spoken.
+   *
+   * Tâches 1 and 2 run with nothing written on screen: the examiner is heard
+   * and answered, exactly as on the day. Reading the question instead of
+   * listening to it, and reading back what you just said, are both things the
+   * real room does not allow — and a candidate who has only ever practised
+   * with the words in front of them has practised a different exam.
+   *
+   * Free practice keeps its transcript. It is not a tâche, nobody is being
+   * examined, and being able to see what the recogniser heard is most of why
+   * people use it. */
+  const showTranscript = isFree;
+  /* Tâche 2 is driven by the candidate, not by the microphone.
+   *
+   * Live recognition decides on its own when a turn has ended, and it decides
+   * from silence. In an interaction that is the wrong judge: thinking about
+   * how to phrase a request sounds exactly like having finished one, so the
+   * examiner answers a question that was still being asked. Two presses — one
+   * to start, one when you have actually finished — put the end of the turn
+   * where the candidate says it is.
+   *
+   * Nothing downstream changes. The same recorder, the same transcription
+   * call, the same exchange, the same grading: this only decides who closes
+   * the turn. It is the path browsers without live recognition have always
+   * taken, now taken by tâche 2 on every browser.
+   */
+  const manualTurns = mode === 'tache2';
+  // One name for "the candidate presses to talk", whichever reason applies.
+  const pressToTalk = manualTurns || !HAS_LIVE_STT;
   const { prep: PREP_SECONDS, speak: TOTAL_SECONDS } = TIMINGS[mode] || TIMINGS.tache2;
   // With segments the header still announces the whole session; the clock the
   // candidate watches belongs to the tâche actually running.
@@ -286,7 +315,9 @@ export default function ConversationModal({
   const listen = useCallback(() => {
     const segAtStart = segIdxRef.current;
     if (doneRef.current) return;
-    if (!HAS_LIVE_STT) { setStatus('idle'); return; }   // fallback uses the button
+    // Both fallbacks land here: a browser that cannot listen live, and a
+    // tâche that has chosen not to. Either way the button owns the turn.
+    if (!HAS_LIVE_STT || manualTurns) { setStatus('idle'); return; }
     try {
       const rec = new SpeechRec();
       rec.lang = 'fr-FR';
@@ -374,7 +405,9 @@ export default function ConversationModal({
     }
     // `t` is memoised on the active language, so this only rebuilds on a
     // language switch — which is exactly when the error copy must change.
-  }, [t]);
+    // `manualTurns` comes off the mode prop and never changes for a mounted
+    // modal; it is declared so the check above cannot go stale.
+  }, [t, manualTurns]);
   useEffect(() => { listenRef.current = listen; }, [listen]);
 
   /* ---------------- one exchange ---------------- */
@@ -610,10 +643,10 @@ export default function ConversationModal({
   const spokenTurns = turns.filter((t) => t.role === 'candidate').length;
   const statusLabel = {
     starting: t('conv.stStarting'),
-    listening: HAS_LIVE_STT ? t('conv.stListening') : t('conv.stRecording'),
+    listening: pressToTalk ? t('conv.stRecording') : t('conv.stListening'),
     thinking: t('conv.stThinking'),
     speaking: t('conv.stSpeaking'),
-    idle: HAS_LIVE_STT ? t('conv.stPaused') : t('conv.stPressSpeak'),
+    idle: pressToTalk ? t('conv.stPressSpeak') : t('conv.stPaused'),
   }[status];
 
   return (
@@ -745,7 +778,36 @@ export default function ConversationModal({
               </span>
             </div>
 
+            {/* The conversation, under exam conditions: heard, not read.
+                Everything below is still transcribed server-side and still
+                graded — see handleGraded. It is simply never put on screen. */}
+            {!showTranscript && (
+              <div className="flex min-h-[220px] flex-1 flex-col items-center justify-center gap-4 bg-gray-50/60 px-6 py-8 text-center"
+                data-testid="conv-audio-only">
+                <div className={`flex h-20 w-20 items-center justify-center rounded-full transition ${
+                  status === 'listening' ? 'bg-red-50 ring-4 ring-red-100'
+                    : status === 'speaking' ? 'bg-violet-50 ring-4 ring-violet-100'
+                      : 'bg-white ring-4 ring-gray-100'}`}>
+                  {status === 'speaking'
+                    ? <SpeakerHigh size={32} weight="fill" className="animate-pulse text-primary" />
+                    : <Microphone size={32} weight="fill" className={
+                        status === 'listening' ? 'animate-pulse text-red-500' : 'text-gray-400'} />}
+                </div>
+                <p className="font-heading text-base font-bold text-gray-900">{statusLabel}</p>
+                <p className="max-w-xs text-xs leading-relaxed text-gray-500">
+                  {t('conv.audioOnlyHint')}
+                </p>
+                {turns.length > 0 && (
+                  <span className="rounded-full bg-white px-3 py-1 text-[11px] font-bold text-gray-500 ring-1 ring-gray-200"
+                    data-testid="conv-exchange-count">
+                    {t('conv.exchanges', { n: turns.filter((x) => x.role === 'candidate').length })}
+                  </span>
+                )}
+              </div>
+            )}
+
             {/* transcript */}
+            {showTranscript && (
             <div ref={scrollRef} className="min-h-[220px] flex-1 space-y-3 overflow-y-auto bg-gray-50/60 px-6 py-4">
               {turns.length === 0 && status === 'thinking' && (
                 <p className="py-8 text-center text-xs text-gray-400">{t('conv.agentThinking')}</p>
@@ -776,6 +838,7 @@ export default function ConversationModal({
                 </div>
               )}
             </div>
+            )}
 
             {error && (
               <div className="flex items-start gap-2 border-t border-amber-100 bg-amber-50 px-6 py-2.5 text-xs text-amber-800">
@@ -788,14 +851,21 @@ export default function ConversationModal({
             {/* controls */}
             <div className="flex flex-col gap-2 border-t border-gray-100 px-6 py-4 sm:flex-row">
               {recording ? (
+                /* The same button, pressed a second time. It says what it
+                   does rather than what it sends: a candidate mid-sentence
+                   needs to know this is the one that ends their turn. */
                 <button onClick={stopPushToTalk}
+                  data-testid="conv-stop-speaking"
                   className="btn-primary flex-1 justify-center !bg-gradient-to-r !from-red-500 !to-rose-600">
-                  <Stop size={16} weight="fill" /> {t('conv.sendTurn')}
+                  <Stop size={16} weight="fill" /> {t('conv.pressWhenDone')}
                 </button>
-              ) : !HAS_LIVE_STT ? (
+              ) : pressToTalk ? (
+                /* Disabled while the examiner is thinking or talking — the one
+                   thing the real room does not let you do is speak over them. */
                 <button onClick={startPushToTalk} disabled={status === 'thinking' || status === 'speaking'}
+                  data-testid="conv-start-speaking"
                   className="btn-primary flex-1 justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600 disabled:opacity-50">
-                  <PaperPlaneTilt size={16} weight="fill" /> {t('conv.speak')}
+                  <Microphone size={16} weight="fill" /> {t('conv.pressToSpeak')}
                 </button>
               ) : status === 'idle' ? (
                 /* Live recognition exists but stalled (denied mic, no network,
@@ -806,10 +876,15 @@ export default function ConversationModal({
                 </button>
               ) : null}
               <button onClick={finish}
-                className={`btn-outline justify-center ${status !== 'idle' && HAS_LIVE_STT && !recording ? 'flex-1' : ''}`}>
+                className={`btn-outline justify-center ${status !== 'idle' && !pressToTalk && !recording ? 'flex-1' : ''}`}>
                 <Lightning size={16} weight="fill" /> {t('conv.finish')}
               </button>
             </div>
+            {pressToTalk && (
+              <p className="px-6 pb-1 text-center text-[11px] font-semibold text-gray-500">
+                {t('conv.pressHint')}
+              </p>
+            )}
             <p className="px-6 pb-3 text-center text-[10px] text-gray-400">
               {t('conv.turnHint', { n: spokenTurns })}
             </p>

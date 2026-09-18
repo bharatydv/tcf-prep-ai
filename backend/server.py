@@ -1846,7 +1846,7 @@ SPEAKING_TASKS = {
         "name": "Tâche 1 — Entretien dirigé"},
     2: {"prep_seconds": 120, "speak_seconds": 210, "min_words": 60,
         "name": "Tâche 2 — Exercice en interaction"},
-    3: {"prep_seconds": 0,   "speak_seconds": 150, "min_words": 90,
+    3: {"prep_seconds": 0,   "speak_seconds": 270, "min_words": 90,
         "name": "Tâche 3 — Expression d'un point de vue"},
 }
 
@@ -7122,13 +7122,78 @@ async def speaking_exam_sets():
     here either. Grading each tâche still goes through the existing speaking
     endpoints, which is where any charging decision lives.
     """
-    return {"sets": [
-        {"set_number": n,
-         "task2_theme": s["task2"]["theme"],
-         "task3_theme": s["task3"]["theme"],
-         "task3_question": s["task3"]["question"]}
-        for n, s in ((i, exam_sets.speaking_set(i))
-                     for i in range(1, len(exam_sets.SPEAKING_EXAM_SETS) + 1))]}
+    # Numbers, and nothing else.
+    #
+    # This carried task3_question, which printed the whole tâche 3 subject on
+    # every card, and the two themes beside it. Both are preparation: a
+    # candidate could read every question in the bank before sitting one, and
+    # even without them a theme is most of the work — "Environnement" tells
+    # you what to think about on the way in. A paper you can choose by subject
+    # is not a paper that measures anything.
+    #
+    # The set's own content is served by /api/speaking/exam-sets/{n}, when the
+    # candidate opens it, and each tâche reveals its subject as it is sat.
+    return {"sets": [{"set_number": n}
+                     for n in range(1, len(exam_sets.SPEAKING_EXAM_SETS) + 1)]}
+
+
+@app.get("/api/speaking/exam-sets/attempts")
+async def speaking_exam_sittings(user: User = Depends(get_current_user),
+                                 db: AsyncSession = Depends(get_db)):
+    """Where every speaking paper this candidate has sat currently stands.
+
+    Declared ABOVE /api/speaking/exam-sets/{set_number} on purpose. FastAPI
+    matches routes in declaration order and stops at the first whose path
+    fits: put this second and "attempts" is handed to the int set_number as a
+    422 rather than falling through to here.
+
+    One row per tâche per set — the LATEST attempt for each, since a candidate
+    who sat tâche 2 three times has one standing grade and two earlier tries.
+    The per-set endpoint below still serves the full history of one paper.
+
+    The combined mark is deliberately not computed here. Turning three tâche
+    grades into one Expression orale mark out of 20 and an NCLC band is done
+    by speakingPaperMark() in frontend/src/lib/tcf.js, and a second
+    implementation in Python is a second thing to keep in step with the
+    official conversion table. This returns the grades; the page does the
+    arithmetic it already knows how to do.
+    """
+    from sqlalchemy import text as sa_text
+
+    rows = (await db.execute(sa_text(
+        # DISTINCT ON is the cheap way to say "latest per group" in Postgres:
+        # one index-ordered pass rather than a self-join or a window filter.
+        "SELECT DISTINCT ON (exam_set, task_type) "
+        "       exam_set, task_type, submission_id, tcf_level, overall_score, "
+        "       created_at, "
+        "       COALESCE(jsonb_array_length(errors), 0) AS error_count "
+        "FROM submissions "
+        "WHERE user_id = :uid AND exam_set IS NOT NULL AND task_type IS NOT NULL "
+        "ORDER BY exam_set, task_type, created_at DESC"),
+        {"uid": user.user_id})).mappings().all()
+
+    sittings = {}
+    for r in rows:
+        sitting = sittings.setdefault(r["exam_set"], {
+            "set_number": r["exam_set"], "tasks": {}, "last_activity": None})
+        sitting["tasks"][str(r["task_type"])] = {
+            "submission_id": r["submission_id"],
+            "tcf_level": r["tcf_level"],
+            "overall_score": r["overall_score"],
+            "error_count": int(r["error_count"] or 0),
+            "created_at": r["created_at"],
+        }
+        if (sitting["last_activity"] is None
+                or r["created_at"] > sitting["last_activity"]):
+            sitting["last_activity"] = r["created_at"]
+
+    out = sorted(sittings.values(),
+                 key=lambda x: x["last_activity"], reverse=True)
+    for sitting in out:
+        # An unfinished paper is still worth listing: it is the one thing a
+        # candidate is most likely to want to get back to.
+        sitting["complete"] = len(sitting["tasks"]) == 3
+    return {"sittings": out}
 
 
 @app.get("/api/speaking/exam-sets/{set_number}")

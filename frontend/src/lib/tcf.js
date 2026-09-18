@@ -26,7 +26,7 @@ export const FREE_TRIAL_TOTAL = 6;
  * It used to stop accepting input at 200 words, on the reasoning that the exam
  * never asks for more than 180. That reasoning missed who actually uses this
  * box: someone typing up a SPOKEN answer to have it marked. Tâche 3 of the
- * oral is 150 seconds of speech, which is 300 to 400 words written out — so
+ * oral is 270 seconds of speech, which is 500 to 700 words written out — so
  * the cap silently truncated the middle of their answer and graded the part
  * that survived.
  *
@@ -42,7 +42,7 @@ export const FREE_WRITING = { warnWords: 180, maxChars: 6000 };
 export const SPEAKING_TASKS = {
   1: { prepSeconds: 0, speakSeconds: 120, name: 'Tâche 1 — Entretien dirigé' },
   2: { prepSeconds: 120, speakSeconds: 210, name: 'Tâche 2 — Exercice en interaction' },
-  3: { prepSeconds: 0, speakSeconds: 150, clockStartsOnSpeech: true,
+  3: { prepSeconds: 0, speakSeconds: 270, clockStartsOnSpeech: true,
     name: "Tâche 3 — Expression d'un point de vue" },
 };
 

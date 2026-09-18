@@ -5,7 +5,7 @@
  * and stop them altogether when the screen locks, so a candidate who switched
  * apps mid-answer came back with an under-counted clock: the writing
  * simulator's 60 minutes ran long, and the speaking recorder's auto-stop fired
- * after the official 2:00 / 3:30 / 2:30 limit rather than on it.
+ * after the official 2:00 / 3:30 / 4:30 limit rather than on it.
  *
  * For a product whose selling point is reproducing the real exam's
  * constraints, the clock is the one thing that cannot drift. These hooks work

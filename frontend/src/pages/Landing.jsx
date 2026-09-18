@@ -304,7 +304,7 @@ export default function Landing() {
                           <div className="space-y-1.5">
                             {[['Tâche 1 — Entretien dirigé', '02:00'],
                               ['Tâche 2 — Exercice en interaction', '03:30'],
-                              ['Tâche 3 — Point de vue', '02:30']].map(([name, clock], i) => (
+                              ['Tâche 3 — Point de vue', '04:30']].map(([name, clock], i) => (
                               <div key={name} className="film-in flex items-center justify-between gap-2 rounded-lg bg-gray-50 px-2 py-1.5 ring-1 ring-gray-100"
                                 style={{ animationDelay: `calc(var(--d) + ${i * 0.18}s)` }}>
                                 <span className="flex items-center gap-1.5 text-[8px] font-semibold text-gray-800 sm:text-[11px]">

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Receipt, Fire, Trophy, GameController, BookOpen, Headphones,
   PenNib, Microphone, Stack, ChartLineUp, Info,
@@ -12,7 +12,7 @@ import { api, errMsg, CATEGORY_META } from '../lib/api';
 import { RecordingPlayer } from '../components/RecordingPlayer';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
-import { displayMark, markFromCorrect } from '../lib/tcf';
+import { displayMark, markFromCorrect, speakingPaperMark } from '../lib/tcf';
 
 /* The four papers, each with a hue of its own so the current selection is
    readable at a glance rather than only from which pill is filled. The hues
@@ -77,7 +77,17 @@ export default function Dashboard() {
   // Which row has its recording open. One at a time: two players going
   // at once is never what the click meant.
   const [playing, setPlaying] = useState(null);
+  /* Whole speaking papers, which nothing on this page could show before.
+     A tâche shows up in the history below as one graded submission like any
+     other; the three of them as one Expression orale paper — the mark out of
+     20 and the NCLC band that mark converts to — existed only on the exam
+     page itself, which meant a candidate who closed that tab had no way back
+     to their result. */
+  const [sittings, setSittings] = useState([]);
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  // Set by the exam when it sends somebody here to wait out the marking.
+  const marking = params.get('marking') === 'speaking';
 
   // Every call used to swallow its error, so a backend outage left the page
   // spinning forever with nothing to click.
@@ -96,10 +106,41 @@ export default function Dashboard() {
     // four papers the learner sits.
     api.get('/api/reading/attempts').then(({ data }) => setReading(data.attempts || [])).catch(() => {});
     api.get('/api/listening/attempts').then(({ data }) => setListening(data.attempts || [])).catch(() => {});
+    api.get('/api/speaking/exam-sets/attempts')
+      .then(({ data }) => setSittings(data.sittings || [])).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(load, [load]);
+
+  /* Waiting out a marking that is still running somewhere else.
+   *
+   * The candidate was sent here the moment they finished their last tâche
+   * rather than being held on a spinner, so the grade lands after they
+   * arrive. This polls until the paper they just sat is complete — bounded,
+   * because a grader that failed must not leave the page asking forever, and
+   * the row is perfectly readable as "2 of 3" in the meantime. */
+  useEffect(() => {
+    if (!marking) return undefined;
+    let tries = 0;
+    const id = setInterval(() => {
+      tries += 1;
+      api.get('/api/speaking/exam-sets/attempts')
+        .then(({ data }) => {
+          const rows = data.sittings || [];
+          setSittings(rows);
+          if (rows[0]?.complete) {
+            clearInterval(id);
+            // Drop the flag so a reload does not start polling again.
+            setParams({}, { replace: true });
+          }
+        })
+        .catch(() => {});
+      if (tries >= 15) clearInterval(id);
+    }, 4000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marking]);
 
   /* Three sources, one shape, one scale: the mark out of 20 the exam reports.
      A graded submission carries the grader's working 0-100, and a comprehension
@@ -441,6 +482,68 @@ export default function Dashboard() {
                   strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
+          </div>
+        </section>
+      )}
+
+      {/* SPEAKING PAPERS — three tâches read as one result, which is the way
+          the exam reports Expression orale and the only way this page ever
+          shows a combined mark. */}
+      {(sittings.length > 0 || marking) && (
+        <section className="card mt-5 p-6" data-testid="dash-speaking-tests">
+          <Head title={t('dash.speakingTests')} note={t('dash.speakingTestsNote')} />
+          {marking && !sittings[0]?.complete && (
+            <p className="mb-3 flex items-center gap-2 rounded-xl bg-violet-50 px-3 py-2 text-xs text-primary"
+              data-testid="dash-marking">
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-violet-200 border-t-primary" />
+              {t('dash.markingNow')}
+            </p>
+          )}
+          <div className="space-y-2">
+            {sittings.map((sit) => {
+              const tasks = [1, 2, 3].map((n) => sit.tasks[String(n)] || null);
+              // The same arithmetic the exam page does, from the same helper —
+              // there is one conversion table and it lives in lib/tcf.js.
+              const paper = sit.complete ? speakingPaperMark(tasks) : null;
+              const answered = tasks.filter(Boolean).length;
+              return (
+                <Link key={sit.set_number} to={`/speaking/test?set=${sit.set_number}`}
+                  data-testid={`dash-sitting-${sit.set_number}`}
+                  className="flex flex-wrap items-center gap-3 rounded-2xl border border-gray-100 px-4 py-3 transition hover:border-violet-200 hover:bg-violet-50/40">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-pink-100 font-heading text-sm font-extrabold text-pink-700">
+                    {sit.set_number}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-heading text-sm font-bold text-gray-900">
+                      {t('dash.speakingSet', { n: sit.set_number })}
+                    </span>
+                    <span className="block text-[11px] text-gray-500">
+                      {tasks.map((task, i) => (
+                        <span key={i} className="mr-2">
+                          {t('hist.tache', { n: i + 1 })} {task ? task.tcf_level : '—'}
+                        </span>
+                      ))}
+                    </span>
+                  </span>
+                  {paper ? (
+                    <span className="flex items-center gap-2">
+                      <span className="font-heading text-lg font-extrabold text-gray-900">
+                        {paper.mark}<span className="text-xs text-gray-400">/20</span>
+                      </span>
+                      {paper.nclc && (
+                        <span className="rounded-full bg-green-100 px-2.5 py-1 text-[11px] font-bold text-green-700">
+                          {t('sexam.clb', { level: paper.nclc })}
+                        </span>
+                      )}
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-700">
+                      {t('dash.speakingPartial', { done: answered, total: 3 })}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
           </div>
         </section>
       )}

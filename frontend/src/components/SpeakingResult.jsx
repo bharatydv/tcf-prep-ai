@@ -16,6 +16,7 @@
 import { CheckCircle, XCircle, Sparkle } from '@phosphor-icons/react';
 import { SpeakButton } from './SpeakButton';
 import { SpeakingGrid } from './SpeakingGrid';
+import { TranscriptDiff } from './TranscriptDiff';
 import { useT } from '../i18n';
 
 // Each note names one sound in one word. The word gets a play button of its
@@ -37,8 +38,17 @@ const CAT_LABELS = {
   gender_number: 'Accord', anglicism: 'Anglicismes', improvement: 'Améliorations C1',
 };
 
-export function SpeakingResult({ result, tts, idPrefix = '' }) {
+/* Tâches 1 and 2 are practised without words on screen, so their results are
+   read the same way. Hiding the transcript during the conversation and then
+   printing it underneath the grade would be a rule that lasts ninety seconds.
+
+   The corrected rewrite goes with it: it is the same answer with the mistakes
+   taken out, so showing it hands back everything that was said. What stays is
+   the part that teaches — the criteria, the individual corrections, and the
+   suggestions — none of which reproduces the answer as a whole. */
+export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) {
   const t = useT();
+  const showTranscript = taskType !== 1 && taskType !== 2;
   if (!result) return null;
   return (
     <div className="space-y-5">
@@ -88,65 +98,108 @@ export function SpeakingResult({ result, tts, idPrefix = '' }) {
 
       <SpeakingGrid result={result} />
 
-      <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft">
-        <p className="font-heading text-sm font-bold text-gray-900">{t('speak.transcript')}</p>
-        <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-gray-700">
-          {result.transcript || t('speak.noSpeechLine')}
-        </p>
+      {!showTranscript && (
+        <div className="rounded-3xl border border-violet-100 bg-violet-50/40 p-5"
+          data-testid="transcript-withheld">
+          <p className="text-xs leading-relaxed text-gray-600">{t('speak.transcriptHidden')}</p>
+        </div>
+      )}
 
-        {/* The same answer with the mistakes taken out and nothing else
-            changed. It sits in this card rather than its own because it
-            is only worth anything read against the line above it: every
-            difference between the two is a mistake that was made. The
-            better-written version is further down and is a different
-            question — not what went wrong, but what could have been. */}
+      {/* The answer, twice, side by side.
+          Stacking the transcript above the corrected version meant comparing
+          two paragraphs by scrolling between them, and the whole value of
+          having both is reading one against the other: every difference is a
+          mistake that was made. Marked in place too — red on what was said,
+          green on what replaced it — so a correction can be found in its own
+          sentence rather than only in the table below. */}
+      {showTranscript && (
+      <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft"
+        data-testid="transcript-diff">
+        <p className="font-heading text-sm font-bold text-gray-900">{t('speak.transcript')}</p>
+        <div className="mt-3">
+          <TranscriptDiff
+            transcript={result.transcript}
+            corrected={result.corrected_version}
+            errors={result.errors || []}
+            action={(result.corrected_version || '').trim()
+              ? <SpeakButton text={result.corrected_version} id={`${idPrefix}corrected`} {...tts} />
+              : null} />
+        </div>
         {(result.corrected_version || '').trim() && (
-          <div className="mt-4 border-t border-violet-50 pt-4" data-testid="corrected-version">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="font-heading text-sm font-bold text-gray-900">
-                {t('speak.correctedTitle')}
-              </p>
-              <SpeakButton text={result.corrected_version} id={`${idPrefix}corrected`} {...tts} />
-            </div>
-            <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-gray-700">
-              {result.corrected_version}
-            </p>
-            <p className="mt-2 text-xs leading-relaxed text-gray-400">
-              {t('speak.correctedNote')}
-            </p>
-          </div>
+          <p className="mt-3 text-xs leading-relaxed text-gray-400">
+            {t('speak.correctedNote')}
+          </p>
         )}
       </div>
+      )}
 
+      {/* A table, because these are rows.
+          Every correction is the same four facts — what was said, what it
+          should have been, what kind of mistake it is, and why — and as
+          stacked cards those four landed in a different place on every one,
+          so nothing could be read down a column. Ten corrections are a list
+          to scan, not ten paragraphs to read.
+
+          Colour carries the wrong/right split, and it is deliberately not the
+          ONLY thing that does: the strike-through, the column headings and the
+          order of the two columns all say it as well, so the table still works
+          for a reader who cannot separate red from green. */}
       {Array.isArray(result.errors) && result.errors.length > 0 && (
-        <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft">
-          <p className="font-heading text-sm font-bold text-gray-900">{t('speak.corrections')}</p>
-          <div className="mt-3 space-y-3">
-            {result.errors.map((e, i) => (
-              <div key={i} className="rounded-2xl border border-violet-50 bg-violet-50/40 p-4">
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="text-red-500 line-through">{e.error}</span>
-                  {/* Both sides are playable, not just the right one. A
-                      speaker who cannot hear the difference between what they
-                      said and what they should have said cannot fix it, and
-                      the correction alone leaves them comparing a sound to a
-                      spelling. */}
-                  <SpeakButton text={e.error} id={`${idPrefix}said-${i}`} {...tts} />
-                  <span className="text-gray-400">→</span>
-                  <span className="font-semibold text-green-600">{e.correction}</span>
-                  <SpeakButton text={e.correction} id={`${idPrefix}fix-${i}`} {...tts} />
-                  <span className="ml-auto flex items-center gap-1.5">
-                    {SEVERITY_TONE[e.severity] && (
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${SEVERITY_TONE[e.severity]}`}>
-                        {t(`speak.severity.${e.severity}`)}
+        <div className="overflow-hidden rounded-3xl border border-violet-100 bg-white shadow-soft">
+          <p className="px-6 pb-3 pt-6 font-heading text-sm font-bold text-gray-900">
+            {t('speak.corrections')}
+          </p>
+          {/* Scrolls sideways rather than wrapping four columns into a mess on
+              a phone, which is the same thing the dashboard history does. */}
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[44rem] text-sm">
+              <thead className="bg-gray-50 text-left text-[10.5px] uppercase tracking-wide text-gray-500">
+                <tr>
+                  <th className="px-4 py-2.5 font-bold sm:px-6">{t('speak.colSaid')}</th>
+                  <th className="px-4 py-2.5 font-bold">{t('speak.colFix')}</th>
+                  <th className="px-4 py-2.5 font-bold">{t('speak.colType')}</th>
+                  <th className="px-4 py-2.5 font-bold sm:px-6">{t('speak.colWhy')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.errors.map((e, i) => (
+                  <tr key={i} className="border-t border-violet-50 align-top">
+                    <td className="bg-rose-50/40 px-4 py-3 sm:px-6">
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-red-600 line-through">{e.error}</span>
+                        {/* Both sides are playable, not just the right one. A
+                            speaker who cannot hear the difference between what
+                            they said and what they should have said cannot fix
+                            it, and the correction alone leaves them comparing a
+                            sound to a spelling. */}
+                        <SpeakButton text={e.error} id={`${idPrefix}said-${i}`} {...tts} />
                       </span>
-                    )}
-                    <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase text-primary">{CAT_LABELS[e.category] || e.category}</span>
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-gray-500">{e.explanation}</p>
-              </div>
-            ))}
+                    </td>
+                    <td className="bg-green-50/40 px-4 py-3">
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-semibold text-green-700">{e.correction}</span>
+                        <SpeakButton text={e.correction} id={`${idPrefix}fix-${i}`} {...tts} />
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        {SEVERITY_TONE[e.severity] && (
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${SEVERITY_TONE[e.severity]}`}>
+                            {t(`speak.severity.${e.severity}`)}
+                          </span>
+                        )}
+                        <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase text-primary">
+                          {CAT_LABELS[e.category] || e.category}
+                        </span>
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs leading-relaxed text-gray-500 sm:px-6">
+                      {e.explanation}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
