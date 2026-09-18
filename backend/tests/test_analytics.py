@@ -466,3 +466,160 @@ class TestSpeakingCost:
         assert "transcript=" not in call
         assert "audio_bytes" not in call
         assert "question" not in call
+
+
+# ------------------------------------------------------ anonymous visitors ---
+class TestVisitorLabel:
+    """A handle for somebody who has no name.
+
+    It is a label for a row on a screen, not an identity: derived from the
+    random id the browser already stores and from nothing about the person.
+    """
+
+    def test_it_reads_like_the_example(self):
+        assert m.visitor_label("a8f3c1d2-0000") == "Anonymous Visitor #A8F3"
+
+    def test_it_uses_only_the_random_id_the_browser_already_has(self):
+        """Nothing about the device, the address or the network goes into it."""
+        assert m.visitor_label("abcd") == "Anonymous Visitor #ABCD"
+
+    def test_punctuation_in_a_uuid_does_not_leak_into_the_label(self):
+        assert m.visitor_label("--ab--cd--") == "Anonymous Visitor #ABCD"
+
+    def test_no_id_is_not_a_crash(self):
+        assert m.visitor_label(None) == "Anonymous"
+        assert m.visitor_label("") == "Anonymous"
+        assert m.visitor_label("----") == "Anonymous"
+
+
+class TestJourneyPhase:
+    """The three bands. The hinge is drawn as well as the two halves."""
+
+    def test_activity_with_no_account_is_before_signup(self):
+        assert m.journey_phase("page_view", False) == "anonymous"
+
+    def test_activity_with_an_account_is_after_signup(self):
+        assert m.journey_phase("practice_start", True) == "identified"
+
+    @pytest.mark.parametrize("event", ["sign_up", "login"])
+    def test_the_identity_events_are_the_boundary(self, event):
+        assert m.journey_phase(event, True) == "identity"
+
+    def test_the_boundary_events_are_real_events(self):
+        assert m.IDENTITY_EVENTS <= (m.CLIENT_EVENTS | m.SERVER_EVENTS)
+
+
+class TestVisitorDirectorySql:
+    """The directory query, which cannot be executed here but can be read.
+
+    Only two things vary: which UNION branches are present and whether a search
+    clause is included. Both come from validated inputs, never from a caller's
+    string.
+    """
+
+    def test_all_shows_both_populations(self):
+        sql = m.build_visitor_sql("all")
+        assert "'registered' AS kind" in sql
+        assert "'anonymous' AS kind" in sql
+        assert "UNION ALL" in sql
+
+    def test_anonymous_only_drops_the_account_branch(self):
+        sql = m.build_visitor_sql("anonymous")
+        assert "'anonymous' AS kind" in sql
+        assert "'registered' AS kind" not in sql
+        assert "UNION ALL" not in sql
+
+    def test_registered_only_drops_the_browser_branch(self):
+        sql = m.build_visitor_sql("registered")
+        assert "'registered' AS kind" in sql
+        assert "'anonymous' AS kind" not in sql
+
+    @pytest.mark.parametrize("kind, clause", [
+        ("paid", "<> 'free'"),
+        ("free", "= 'free'"),
+    ])
+    def test_paid_and_free_filter_on_the_subscription(self, kind, clause):
+        sql = m.build_visitor_sql(kind)
+        assert f"COALESCE(u.subscription_status, 'free') {clause}" in sql
+        # Neither is a population that can include a browser: nobody knows
+        # whether an anonymous visitor has ever paid for anything.
+        assert "'anonymous' AS kind" not in sql
+
+    def test_an_account_with_no_events_is_still_a_row(self):
+        """Otherwise this screen silently disagrees with the user table."""
+        assert "LEFT JOIN by_user" in m.build_visitor_sql("all")
+
+    def test_every_event_has_exactly_one_owner(self):
+        """Resolved once, up front. Without this an event is counted against
+        both an account and a browser, or against neither."""
+        sql = m.build_visitor_sql("all")
+        assert "COALESCE(e.user_id, l.user_id) AS owner_user_id" in sql
+        assert "WHERE owner_user_id IS NOT NULL" in sql
+        assert "WHERE owner_user_id IS NULL" in sql
+
+    def test_a_browser_used_by_two_accounts_belongs_to_neither(self):
+        sql = m.build_visitor_sql("all")
+        assert "NOT EXISTS" in sql
+        assert "other.user_id <> ai.user_id" in sql
+
+    def test_the_search_term_is_bound_never_interpolated(self):
+        sql = m.build_visitor_sql("all", searching=True)
+        assert "ILIKE :q" in sql
+        plain = m.build_visitor_sql("all", searching=False)
+        assert "ILIKE" not in plain
+
+    def test_the_window_is_bound_too(self):
+        sql = m.build_visitor_sql("all")
+        assert ":since" in sql and ":until" in sql
+        assert ":limit" in sql and ":offset" in sql
+
+    def test_accounts_with_no_activity_sort_last_rather_than_first(self):
+        assert "ORDER BY last_seen DESC NULLS LAST" in m.build_visitor_sql("all")
+
+    def test_the_cte_does_not_shadow_a_postgres_keyword(self):
+        sql = m.build_visitor_sql("all")
+        assert "visitor_rows AS (" in sql
+        assert "), rows AS (" not in sql
+
+    def test_nothing_a_caller_sends_can_reach_the_sql(self):
+        """kind is validated against VISITOR_KINDS before it gets here, and
+        searching is a boolean. There is no third input."""
+        import inspect
+        params = inspect.signature(m.build_visitor_sql).parameters
+        assert set(params) == {"kind", "searching"}
+
+    def test_the_directory_offers_exactly_the_documented_filters(self):
+        assert m.VISITOR_KINDS == {"all", "registered", "anonymous",
+                                   "paid", "free"}
+
+
+class TestVisitorPrivacy:
+    def test_the_directory_selects_nothing_that_locates_a_person(self):
+        sql = m.build_visitor_sql("all").lower()
+        for forbidden in ("ip", "user_agent", "latitude", "longitude",
+                          "password", "token", "address"):
+            assert f" {forbidden}" not in sql, forbidden
+
+    def test_an_anonymous_row_carries_no_account_columns(self):
+        """Name, email and subscription are NULL on that branch, so there is
+        nothing to leak even if the screen asked for it."""
+        sql = m.build_visitor_sql("anonymous")
+        assert "NULL::varchar AS name" in sql
+        assert "NULL::varchar AS email" in sql
+        assert "NULL::varchar AS subscription_status" in sql
+
+
+class TestJourneyAcceptsEitherIdentity:
+    def test_it_takes_an_account_or_a_browser(self):
+        import inspect
+        params = inspect.signature(m.admin_analytics_journey).parameters
+        assert "user_id" in params and "anon_id" in params
+        # Both optional: the endpoint refuses neither-or-both itself, which is
+        # a clearer error than a query that silently returns everything.
+        assert params["user_id"].default.default is None
+        assert params["anon_id"].default.default is None
+
+    def test_it_refuses_an_ambiguous_request(self):
+        import inspect
+        src = inspect.getsource(m.admin_analytics_journey)
+        assert "bool(user_id) == bool(anon_id)" in src

@@ -8904,6 +8904,154 @@ def validate_choice(value, allowed, field):
     return v
 
 
+# The events at which an anonymous trail becomes an identified one. Used to
+# draw the boundary in a journey, not to decide anything about access.
+IDENTITY_EVENTS = {"sign_up", "login"}
+
+# Who a visitor may be filtered down to on the directory screen. "paid" and
+# "free" are subsets of registered; an anonymous visitor is neither, because
+# nobody knows whether they have ever paid for anything.
+VISITOR_KINDS = {"all", "registered", "anonymous", "paid", "free"}
+
+
+def visitor_label(anon_id):
+    """A short, readable handle for somebody who has no name.
+
+    Four characters off the front of the random id they already have. It is a
+    label for a row on a screen, not an identity: it is not derived from
+    anything about the person or their device, two visitors can share one, and
+    the full id is what actually distinguishes them.
+
+    The point of showing anything at all is that an admin can say "the visitor
+    who read three articles and bounced off the price" out loud without
+    reciting a UUID.
+    """
+    if not anon_id:
+        return "Anonymous"
+    short = "".join(c for c in str(anon_id) if c.isalnum())[:4].upper()
+    return f"Anonymous Visitor #{short}" if short else "Anonymous"
+
+
+def build_visitor_sql(kind, searching=False):
+    """The visitor directory query, as text.
+
+    Built here rather than inline in the endpoint for one reason: the test
+    suite has no database (tests/conftest.py), so a query assembled inside an
+    async endpoint could never be looked at by anything except a human reading
+    the diff. As a function it can at least be asserted about - that the paid
+    filter really filters, that the anonymous branch is absent when it should
+    be, that nothing a caller sends ever reaches the string.
+
+    Only two things vary: which branches of the UNION are present, and whether
+    a search clause is included. `kind` has already been validated against
+    VISITOR_KINDS and `searching` is a boolean, so nothing interpolated below
+    comes from a caller - the search TERM itself is bound as :q.
+
+    The shape of it:
+
+      ev      every event in the window
+      linked  browsers proven to belong to exactly one account
+      owned   one owner per event: the signed-in account, else the proven
+              account, else nobody
+      by_user / by_anon  the two populations, aggregated
+      rows    the two, unioned into one shape
+
+    Deciding ownership once, up front, is what stops an event being counted
+    against both a user and a browser, or against neither.
+    """
+    want_users = kind in {"all", "registered", "paid", "free"}
+    want_anon = kind in {"all", "anonymous"}
+
+    user_where = ["TRUE"]
+    if kind == "paid":
+        user_where.append("COALESCE(u.subscription_status, 'free') <> 'free'")
+    elif kind == "free":
+        user_where.append("COALESCE(u.subscription_status, 'free') = 'free'")
+    if searching:
+        user_where.append("(u.name ILIKE :q OR u.email ILIKE :q)")
+
+    anon_where = ["TRUE"]
+    if searching:
+        anon_where.append("a.anon_id ILIKE :q")
+
+    # Every column is cast on the anonymous branch so the two halves of the
+    # UNION agree on types without depending on what Postgres infers from an
+    # untyped NULL.
+    branches = []
+    if want_users:
+        branches.append(
+            "SELECT 'registered' AS kind, u.user_id AS id, u.name AS name, "
+            "u.email AS email, "
+            "COALESCE(u.subscription_status, 'free') AS subscription_status, "
+            "u.timezone AS timezone, u.created_at AS joined_at, "
+            "b.first_seen, b.last_seen, "
+            "COALESCE(b.sessions, 0) AS sessions, "
+            "COALESCE(b.events, 0) AS events "
+            # LEFT JOIN, so an account that has never generated an event is
+            # still a row. Leaving those out would make this screen disagree
+            # with the user table for no reason a reader could guess.
+            "FROM users u LEFT JOIN by_user b ON b.uid = u.user_id "
+            "WHERE " + " AND ".join(user_where))
+    if want_anon:
+        branches.append(
+            "SELECT 'anonymous' AS kind, a.anon_id AS id, "
+            "NULL::varchar AS name, NULL::varchar AS email, "
+            "NULL::varchar AS subscription_status, "
+            "NULL::varchar AS timezone, NULL::timestamptz AS joined_at, "
+            "a.first_seen, a.last_seen, a.sessions, a.events "
+            "FROM by_anon a "
+            "WHERE " + " AND ".join(anon_where))
+
+    return (
+        "WITH ev AS ("
+        " SELECT user_id, anon_id, session_id, created_at FROM usage_events"
+        " WHERE created_at >= :since AND created_at < :until"
+        "), linked AS ("
+        # A browser belongs to an account only when it has never been used to
+        # sign into another one.
+        " SELECT ai.anon_id, ai.user_id FROM analytics_identities ai"
+        " WHERE NOT EXISTS (SELECT 1 FROM analytics_identities other"
+        "                   WHERE other.anon_id = ai.anon_id"
+        "                     AND other.user_id <> ai.user_id)"
+        "), owned AS ("
+        " SELECT COALESCE(e.user_id, l.user_id) AS owner_user_id,"
+        "        e.anon_id, e.session_id, e.created_at"
+        " FROM ev e LEFT JOIN linked l ON l.anon_id = e.anon_id"
+        "), by_user AS ("
+        " SELECT owner_user_id AS uid, MIN(created_at) AS first_seen,"
+        "        MAX(created_at) AS last_seen,"
+        "        COUNT(DISTINCT session_id) AS sessions, COUNT(*) AS events"
+        " FROM owned WHERE owner_user_id IS NOT NULL GROUP BY owner_user_id"
+        "), by_anon AS ("
+        " SELECT anon_id, MIN(created_at) AS first_seen,"
+        "        MAX(created_at) AS last_seen,"
+        "        COUNT(DISTINCT session_id) AS sessions, COUNT(*) AS events"
+        " FROM owned WHERE owner_user_id IS NULL AND anon_id IS NOT NULL"
+        " GROUP BY anon_id"
+        # Named visitor_rows, not rows: ROWS is a keyword in Postgres (window
+        # frames) and a CTE that shadows one is a trap for whoever edits this
+        # next, even though it happens to parse today.
+        "), visitor_rows AS (" + " UNION ALL ".join(branches) + ") "
+        # The window function carries the unfiltered total alongside the page,
+        # so paging does not cost a second scan of the same CTEs.
+        "SELECT *, COUNT(*) OVER () AS total FROM visitor_rows "
+        "ORDER BY last_seen DESC NULLS LAST, id ASC "
+        "LIMIT :limit OFFSET :offset")
+
+
+def journey_phase(event_name, has_user):
+    """Which side of the signup a journey row sits on.
+
+    Three bands rather than two, because the moment itself is the interesting
+    part: the value of stitching is being able to see what somebody read
+    BEFORE they were willing to give an email address, and that story needs
+    the hinge drawn as well as the two halves.
+    """
+    if event_name in IDENTITY_EVENTS:
+        return "identity"
+    return "identified" if has_user else "anonymous"
+
+
 def retention_row(cohort_size, returned):
     """One cohort line: how many came back, and what share that is."""
     size = int(cohort_size or 0)
@@ -9316,7 +9464,8 @@ async def admin_analytics_funnel(
 
 @app.get("/api/admin/analytics/journey")
 async def admin_analytics_journey(
-        user_id: str = Query(..., min_length=1, max_length=64),
+        user_id: Optional[str] = Query(None, max_length=64),
+        anon_id: Optional[str] = Query(None, max_length=64),
         preset: str = Query("90d", max_length=16),
         start: Optional[str] = Query(None, max_length=32),
         end: Optional[str] = Query(None, max_length=32),
@@ -9329,42 +9478,95 @@ async def admin_analytics_journey(
         offset: int = Query(0, ge=0),
         admin: User = Depends(get_admin_user),
         db: AsyncSession = Depends(get_db)):
-    """One person's activity, oldest first, paginated.
+    """One visitor's activity, oldest first, paginated.
 
-    Includes the trail they left before they had an account, when - and only
-    when - that browser has never been used to sign into anybody else's. See
-    resolve_identity(): on a shared machine the honest answer is to show less
-    rather than to attribute one person's reading to another.
+    Takes either an account or a browser, and answers the same question about
+    both: what did this visitor actually do, in order.
+
+    Given an ACCOUNT, it includes the trail left before the account existed -
+    but only from browsers that have never been used to sign into anybody
+    else's. See resolve_identity(): on a shared machine the honest answer is to
+    show less rather than to attribute one person's reading to another.
+
+    Given a BROWSER, it returns everything that browser did, including anything
+    after it signed in. That is the same arc read from the other end, and it is
+    what makes an anonymous visitor who later registered legible as one story
+    rather than two unrelated ones.
 
     Ordered by (created_at, id). The id breaks ties, so two events written in
     the same millisecond still come back in the order they were written, and a
     page boundary can never repeat or skip a row.
     """
     from sqlalchemy import text as sa_text
+    if bool(user_id) == bool(anon_id):
+        raise HTTPException(status_code=400,
+                            detail="Give either user_id or anon_id, not both")
     since, until = analytics_range(preset, start, end)
     skill = validate_choice(skill, ANALYTICS_SKILLS, "skill")
     exam = validate_choice(exam, ANALYTICS_EXAMS, "exam")
     level = validate_choice(level, ANALYTICS_LEVELS, "level")
     event = validate_choice(event, KNOWN_EVENTS, "event") if event else None
 
-    res = await db.execute(select(User).where(User.user_id == user_id))
-    who = res.scalar_one_or_none()
-    if not who:
-        raise HTTPException(status_code=404, detail="No such user")
-
-    anon_ids = await resolve_identity(db, user_id)
-
     where = ["created_at >= :since", "created_at < :until"]
-    params = {"since": since, "until": until, "uid": user_id,
-              "limit": limit, "offset": offset}
-    if anon_ids:
-        names = []
-        for i, a in enumerate(anon_ids):
-            params[f"a{i}"] = a
-            names.append(f":a{i}")
-        where.append(f"(user_id = :uid OR anon_id IN ({', '.join(names)}))")
+    params = {"since": since, "until": until, "limit": limit, "offset": offset}
+    who = None
+    anon_ids = []
+    subject = {}
+
+    if user_id:
+        res = await db.execute(select(User).where(User.user_id == user_id))
+        who = res.scalar_one_or_none()
+        if not who:
+            raise HTTPException(status_code=404, detail="No such user")
+        anon_ids = await resolve_identity(db, user_id)
+        params["uid"] = user_id
+        if anon_ids:
+            names = []
+            for i, a in enumerate(anon_ids):
+                params[f"a{i}"] = a
+                names.append(f":a{i}")
+            where.append(f"(user_id = :uid OR anon_id IN ({', '.join(names)}))")
+        else:
+            where.append("user_id = :uid")
+        subject = {
+            "kind": "registered",
+            "id": who.user_id,
+            "label": who.name or who.email,
+            "email": who.email,
+            "country": country_from_timezone(who.timezone),
+            "joined_at": who.created_at.isoformat() if who.created_at else None,
+            "subscription_status": who.subscription_status,
+        }
     else:
-        where.append("user_id = :uid")
+        # Everything this browser did. A browser is not a person and is never
+        # claimed to be one: it is the only identity an anonymous visitor has,
+        # and the label on it is four characters of the random id it already
+        # carries. No address, no device fingerprint, no IP - none of which is
+        # collected anywhere in this application.
+        where.append("anon_id = :aid")
+        params["aid"] = anon_id
+        linked = await db.execute(sa_text(
+            "SELECT ai.user_id FROM analytics_identities ai "
+            "WHERE ai.anon_id = :aid "
+            "  AND NOT EXISTS (SELECT 1 FROM analytics_identities other "
+            "                  WHERE other.anon_id = ai.anon_id "
+            "                    AND other.user_id <> ai.user_id) "
+            "LIMIT 1"), {"aid": anon_id})
+        owner = linked.scalar_one_or_none()
+        if owner:
+            res = await db.execute(select(User).where(User.user_id == owner))
+            who = res.scalar_one_or_none()
+        subject = {
+            "kind": "anonymous",
+            "id": anon_id,
+            "label": visitor_label(anon_id),
+            # Filled only when this browser has signed into exactly one
+            # account. Two accounts and it stays unlinked for both of them,
+            # which is the whole point of resolve_identity's rule.
+            "linked_user_id": who.user_id if who else None,
+            "linked_user_label": (who.name or who.email) if who else None,
+            "country": country_from_timezone(who.timezone) if who else "Unknown",
+        }
     if event:
         where.append("event = :event")
         params["event"] = event
@@ -9404,6 +9606,9 @@ async def admin_analytics_journey(
             # were. Worth showing: it is the difference between a fact and an
             # inference, and the person reading the screen should see which.
             "identified": bool(r["user_id"]),
+            # Which side of the signup this sits on, so the screen can draw the
+            # three bands without having to work out where the hinge was.
+            "phase": journey_phase(r["event"], bool(r["user_id"])),
             "skill": meta.get("skill"),
             "exam": meta.get("exam"),
             "level": meta.get("level"),
@@ -9412,10 +9617,7 @@ async def admin_analytics_journey(
         })
 
     return {
-        "user": {"user_id": who.user_id, "name": who.name, "email": who.email,
-                 "country": country_from_timezone(who.timezone),
-                 "created_at": who.created_at.isoformat() if who.created_at else None,
-                 "subscription_status": who.subscription_status},
+        "subject": subject,
         "range": {"preset": preset, "since": since.isoformat(),
                   "until": until.isoformat()},
         "stitched_anon_ids": len(anon_ids),
@@ -9423,6 +9625,77 @@ async def admin_analytics_journey(
         "limit": limit, "offset": offset,
         "events": rows,
     }
+
+
+@app.get("/api/admin/analytics/visitors")
+async def admin_analytics_visitors(
+        kind: str = Query("all", max_length=16),
+        q: str = Query("", max_length=120),
+        preset: str = Query("28d", max_length=16),
+        start: Optional[str] = Query(None, max_length=32),
+        end: Optional[str] = Query(None, max_length=32),
+        limit: int = Query(50, ge=1, le=200),
+        offset: int = Query(0, ge=0),
+        admin: User = Depends(get_admin_user),
+        db: AsyncSession = Depends(get_db)):
+    """Everyone who has been here: accounts AND the browsers that never became
+    one.
+
+    Anonymous visitors are most of the funnel. A directory that listed only
+    registered users would describe the people who already converted and call
+    it the visitor population - which is exactly the reading that makes a
+    signup rate look healthy while most of the traffic leaves unmeasured.
+
+    An anonymous visitor is an anon_id: a random string their browser stores,
+    and nothing else. No address, no device fingerprint, no IP - this
+    application has never collected one and this screen does not start.
+
+    Ownership is decided once, in SQL, and every event belongs to exactly one
+    visitor: the account that was signed in, or failing that the account that
+    browser has been PROVEN to belong to, or failing that the browser itself. A
+    browser that has signed into two accounts is proven to belong to neither,
+    so it stays in the anonymous list and out of both journeys.
+
+    Registered users with no events at all are included, with nulls for when
+    they were last seen. Leaving them out would make the directory disagree
+    with the user table for no reason a reader could guess.
+    """
+    from sqlalchemy import text as sa_text
+    since, until = analytics_range(preset, start, end)
+    kind = validate_choice(kind, VISITOR_KINDS, "kind") or "all"
+
+    params = {"since": since, "until": until, "limit": limit, "offset": offset}
+    term = (q or "").strip()
+    if term:
+        params["q"] = f"%{term}%"
+
+    res = await db.execute(sa_text(build_visitor_sql(kind, bool(term))), params)
+    out, total = [], 0
+    for r in res.mappings().all():
+        total = int(r["total"] or 0)
+        anonymous = r["kind"] == "anonymous"
+        out.append({
+            "kind": r["kind"],
+            "id": r["id"],
+            "label": visitor_label(r["id"]) if anonymous
+                     else (r["name"] or r["email"]),
+            # Never for an anonymous visitor: there is nothing to show and
+            # nothing to look up.
+            "email": None if anonymous else r["email"],
+            "subscription_status": r["subscription_status"],
+            "country": "Unknown" if anonymous
+                       else country_from_timezone(r["timezone"]),
+            "joined_at": r["joined_at"].isoformat() if r["joined_at"] else None,
+            "first_seen": r["first_seen"].isoformat() if r["first_seen"] else None,
+            "last_seen": r["last_seen"].isoformat() if r["last_seen"] else None,
+            "sessions": int(r["sessions"] or 0),
+            "events": int(r["events"] or 0),
+        })
+
+    return {"range": {"preset": preset, "since": since.isoformat(),
+                      "until": until.isoformat()},
+            "kind": kind, "total": total, "limit": limit, "offset": offset,
+            "visitors": out}
 
 
 @app.get("/api/admin/analytics/events")
