@@ -9,6 +9,7 @@ import { useSpeak } from '../lib/speak';
 import { useT } from '../i18n';
 import { displayMark } from '../lib/tcf';
 import { Seo } from '../lib/seo';
+import { trackResultView } from '../lib/analytics';
 
 /* Same two sources the dashboard counts as speaking. */
 const SPEAKING_SOURCES = new Set(['speaking', 'conversation']);
@@ -24,7 +25,22 @@ export default function Feedback() {
 
   useEffect(() => {
     api.get(`/api/submissions/${submissionId}`)
-      .then(({ data }) => setSub(data.submission))
+      .then(({ data }) => {
+        setSub(data.submission);
+        /* The correction is on screen and readable. On the resolved request
+           rather than on mount, because a result that failed to load was not
+           read by anyone — and that difference is exactly the drop-off this
+           event exists to measure.
+           The band and which skill it was; never the text, the transcript, the
+           recording or the submission id. */
+        const row = data.submission || {};
+        trackResultView({
+          skill: SPEAKING_SOURCES.has(row.source || '') ? 'speaking' : 'writing',
+          exam: 'tcf',
+          level: row.tcf_level,
+          source: row.source,
+        });
+      })
       .catch((e) => { setError(errMsg(e)); toast.error(errMsg(e)); });
   }, [submissionId]);
 

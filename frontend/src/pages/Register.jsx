@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
 import { track } from '../lib/api';
+import { trackSignUp } from '../lib/analytics';
 
 export default function Register() {
   // Opening the form, as distinct from completing it: the drop between this
@@ -32,6 +33,17 @@ export default function Register() {
     setBusy(true);
     const res = await register(form.name, form.email, form.password);
     setBusy(false);
+    /* The account exists on the server by the time this line runs, on BOTH
+       success paths below: one opens a session straight away, the other waits
+       for the emailed confirmation, and an unconfirmed account is still an
+       account that was created. Placed here rather than in either branch so
+       there is one call for one signup.
+
+       A taken address, a password the server rejected, a rate limit or a
+       dropped request all come back with res.ok false and are counted as
+       nothing, which is the point — signup_start above already counts the
+       people who only opened the form. */
+    if (res.ok) trackSignUp('email');
     if (res.ok && res.verificationRequired) {
       // No session was opened, so there is nowhere to navigate to -- and
       // res.user is undefined on this path, which is why the old

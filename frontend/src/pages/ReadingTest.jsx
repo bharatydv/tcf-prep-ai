@@ -10,6 +10,7 @@ import { useAuth } from '../context/AuthContext';
 import { formatDateTime, useT } from '../i18n';
 import { BackLink, useConfirm } from '../components/shared';
 import AttemptHistory, { useAttempts } from '../components/AttemptHistory';
+import { trackPracticeStart, trackPracticeComplete } from '../lib/analytics';
 
 /* The official Compréhension écrite paper runs 60 minutes. Test mode counts
    down from it and hands the paper in at zero; practice mode is untimed. */
@@ -66,6 +67,17 @@ export default function ReadingTest() {
       .then(({ data }) => {
         if (cancelled) return;
         setQuestions(data.questions || []);
+        /* The paper is open. Counted here rather than on mount: a load that
+           fails navigates away below, and a paper nobody could open is not a
+           session anybody started. `exam_type` separates the timed hand-in
+           from untimed practice, which are different exercises entirely. */
+        trackPracticeStart({
+          skill: 'reading',
+          exam: 'tcf',
+          exam_type: isTest ? 'test' : 'practice',
+          test_number: Number(testNumber) || undefined,
+          questions: (data.questions || []).length,
+        });
       })
       .catch((e) => {
         if (cancelled) return;
@@ -91,6 +103,18 @@ export default function ReadingTest() {
       setCorrections(map);
       setResult(data);
       setIndex(0);
+      /* Marked and scored. Inside the try, after the server answered: the
+         catch below clears submittedRef so the paper can be handed in again,
+         and a hand-in that failed completed nothing.
+         A count out of a total — never the answer sheet, never a correction. */
+      trackPracticeComplete({
+        skill: 'reading',
+        exam: 'tcf',
+        exam_type: isTest ? 'test' : 'practice',
+        test_number: Number(testNumber) || undefined,
+        score: data.score,
+        total: data.total,
+      });
       reloadAttempts();   // the paper just handed in belongs in the history
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
@@ -100,7 +124,7 @@ export default function ReadingTest() {
       setSubmitting(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [answers, left, testNumber, t]);
+  }, [answers, left, testNumber, isTest, t]);
 
   /* Re-open a marked paper from the history.
    *

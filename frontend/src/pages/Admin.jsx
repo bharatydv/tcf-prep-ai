@@ -5,10 +5,18 @@ import { useConfirm } from '../components/shared';
 import { useT } from '../i18n';
 import { displayMark } from '../lib/tcf';
 import { Seo } from '../lib/seo';
+/* The behavioural half — funnel, journeys, retention, paths. Its own file
+   because this one is already long enough, and because none of it shares
+   anything with the content tools below. */
+import AdminAnalytics from './adminAnalytics';
 
 /* id drives the switch below; label is a translation key. */
 const TABS = [
   { id: 'analytics', label: 'admin.tabAnalytics' },
+  /* What the Analytics tab used to be. It answers a real question — is the
+     content any good — and it is untouched; it just is not what anyone means
+     by analytics, so it got the name it always deserved. */
+  { id: 'content', label: 'admin.tabContent' },
   { id: 'users', label: 'admin.tabUsers' },
   { id: 'submissions', label: 'admin.tabSubmissions' },
   { id: 'prompts', label: 'admin.tabPrompts' },
@@ -36,7 +44,8 @@ export default function Admin() {
         ))}
       </div>
       <div className="mt-8">
-        {tab === 'analytics' && <Analytics />}
+        {tab === 'analytics' && <AdminAnalytics />}
+        {tab === 'content' && <ContentQuality />}
         {tab === 'users' && <Users />}
         {tab === 'submissions' && <Submissions />}
         {tab === 'prompts' && <Prompts />}
@@ -50,8 +59,10 @@ export default function Admin() {
   );
 }
 
-/* ------------------------------------------------------------ Analytics ---- */
-function Analytics() {
+/* ------------------------------------------------------- Content quality ---
+   Submission counts and the mistakes learners actually repeat. Renamed from
+   Analytics, and otherwise exactly as it was. */
+function ContentQuality() {
   const t = useT();
   const [data, setData] = useState(null);
   useEffect(() => { api.get('/api/admin/analytics').then((r) => setData(r.data)).catch((e) => toast.error(errMsg(e))); }, []);

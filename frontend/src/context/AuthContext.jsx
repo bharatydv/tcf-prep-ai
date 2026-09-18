@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { api, errMsg } from '../lib/api';
+import { api, errMsg, resetIdentity } from '../lib/api';
+import { trackLogin } from '../lib/analytics';
 
 const AuthContext = createContext(null);
 
@@ -82,6 +83,16 @@ export function AuthProvider({ children }) {
       const { data } = await api.post('/auth/login', { email, password });
       setUser(data.user);
       markAnonymous(false);
+      /* The one moment this browser and this account are both known.
+       *
+       * Fired after the session cookie is set, so the request carries it, and
+       * the analytics id from lib/api.js goes in the body — which is what lets
+       * the server record that the two belong together and the admin journey
+       * show what this person read before they had an account at all.
+       *
+       * Nothing about the credentials is sent: not the address, not the
+       * password, not the token. Only `method`. */
+      trackLogin('email');
       return { ok: true, user: data.user };
     } catch (e) {
       // An unconfirmed address is not a failed login, and showing it as one
@@ -130,6 +141,20 @@ export function AuthProvider({ children }) {
     try { await api.post('/auth/logout'); } catch {}
     setUser(null);
     markAnonymous(true);
+    /* A different person may be about to use this browser.
+     *
+     * The `logout` event itself is recorded by the server, inside the call
+     * above, while the account is still known — firing it from here would race
+     * the cookie being cleared and land as an anonymous event belonging to
+     * nobody.
+     *
+     * This throws away the anonymous id and the session so that whoever
+     * browses next starts a new trail. Without it, a shared laptop hands the
+     * next account the previous account's anonymous history, and the two
+     * journeys merge into one person who appears to have done twice as much.
+     * The server refuses such a link independently (see resolve_identity in
+     * server.py), but the cheapest fix is not to record it. */
+    resetIdentity();
   };
 
   return (

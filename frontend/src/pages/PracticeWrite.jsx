@@ -9,6 +9,7 @@ import { FREE_WRITING, WRITING_TASKS, countWords, wordStatus } from '../lib/tcf'
 import { useAuth } from '../context/AuthContext';
 import { AnalysisProgress, BackLink, CreditsBadge, WordCountBar, streamAnalysis, useConfirm } from '../components/shared';
 import { useT } from '../i18n';
+import { trackPracticeStart, trackPracticeComplete } from '../lib/analytics';
 
 /* What the grader is told the candidate was asked to write about.
    A tâche 3 subject is incomplete without its two documents: the exam asks the
@@ -55,6 +56,36 @@ export default function PracticeWrite() {
   const { state: navState } = useLocation();
   const autoStartedRef = useRef(false);
   const defaultedRef = useRef(false);
+  // One practice_start per sitting at the editor, whatever route led here.
+  const startedRef = useRef(false);
+
+  /* Writing has begun.
+   *
+   * Keyed on the first words in the editor rather than on choosing a subject:
+   * free writing never picks one, and a subject opened and abandoned is not a
+   * session anybody started. This also catches the landing simulator's
+   * hand-off, which arrives with the text already filled in and submits
+   * straight away — that candidate did start, just somewhere else.
+   *
+   * The text itself is never sent. Only whether there is any. */
+  /* Same reason as the recorder: switching tâche or theme only changes the
+     query string, so this component stays mounted and the guard would still
+     be set from the previous subject. */
+  useEffect(() => {
+    startedRef.current = false;
+  }, [taskType, themeId, freeWriting]);
+
+  useEffect(() => {
+    if (startedRef.current || !text.trim()) return;
+    startedRef.current = true;
+    trackPracticeStart({
+      skill: 'writing',
+      exam: 'tcf',
+      exam_type: freeWriting ? 'free' : 'practice',
+      tache: taskType || undefined,
+      themed: Boolean(themeId),
+    });
+  }, [text, freeWriting, taskType, themeId]);
 
   useEffect(() => {
     api.get('/api/prompts').then(({ data }) => setPrompts(data.prompts)).catch(() => {});
@@ -142,6 +173,18 @@ export default function PracticeWrite() {
       onStage: setStage,
       onComplete: async (sub) => {
         await refreshUser();
+        /* The grade exists. onError is the other exit from this stream — a
+           spent allowance, a refusal, a dropped connection — and none of those
+           complete anything. The CEFR band and the length; never the essay,
+           never a correction, never the submission id. */
+        trackPracticeComplete({
+          skill: 'writing',
+          exam: 'tcf',
+          exam_type: freeWriting ? 'free' : 'practice',
+          tache: taskType || undefined,
+          level: sub.tcf_level,
+          words: countWords(text),
+        });
         toast.success(t('write.doneToast', { level: sub.tcf_level }));
         navigate(`/feedback/${sub.submission_id}`);
       },

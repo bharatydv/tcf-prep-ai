@@ -19,7 +19,8 @@
 import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { api, errMsg, track } from './api';
+import { api, errMsg } from './api';
+import { gaIds, trackCheckoutStart } from './analytics';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { usePrompt } from '../components/shared';
@@ -172,8 +173,25 @@ export function useCheckout() {
     return true;
   }, []);
 
-  const startCheckout = useCallback(async (planId) => {
-    const { data } = await api.post('/api/billing/subscribe', { plan_id: planId });
+  const startCheckout = useCallback(async (planId, ids) => {
+    /* The GA4 client and session ids travel with the order.
+     *
+     * The purchase event is sent by the server when the signed webhook lands,
+     * because that is the only thing that knows the money arrived. But the
+     * server has no idea which browser this is, and a Measurement Protocol
+     * event without a client id arrives as a brand-new user in no session: the
+     * revenue lands, attached to nothing, and no campaign is ever credited
+     * with a sale. Captured here, stored on the subscription row, read back by
+     * the webhook.
+     *
+     * Neither id identifies a person. Both are absent when the tag is blocked,
+     * and the server treats them as optional — checkout must not depend on an
+     * analytics script answering. */
+    const { data } = await api.post('/api/billing/subscribe', {
+      plan_id: planId,
+      ga_client_id: ids?.client_id || null,
+      ga_session_id: ids?.session_id || null,
+    });
     if (data?.provider === 'razorpay') {
       if (!data?.checkout?.order_id || !data?.checkout?.key_id) {
         // Sending the learner nowhere silently is how "I paid and nothing
@@ -209,9 +227,14 @@ export function useCheckout() {
     }
     if (busy) return false;
     setBusy(planId);
-    track('checkout_start', { plan: planId });
+    /* One call, two systems: GA4 gets checkout_start and the backend funnel
+       keeps the checkout_start it already had. See lib/analytics.js. */
+    trackCheckoutStart({ plan: planId });
+    // Resolves in about a millisecond with the tag loaded, and on its own
+    // short timeout without it. Never rejects, so checkout cannot stall here.
+    const ids = await gaIds();
     try {
-      return await startCheckout(planId);
+      return await startCheckout(planId, ids);
     } catch (err) {
       // The server names the missing phone in a 400. Collect it and carry on
       // rather than making the learner find a settings page mid-purchase.
@@ -220,7 +243,7 @@ export function useCheckout() {
         && /numéro de téléphone|phone/i.test(detail);
       if (needsPhone && await askForPhone()) {
         try {
-          return await startCheckout(planId);
+          return await startCheckout(planId, ids);
         } catch (retryErr) {
           toast.error(errMsg(retryErr, t('billing.failed')));
         }

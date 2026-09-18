@@ -55,7 +55,53 @@ try {
   }
 } catch (e) { /* no stored answer available; the denied defaults stand */ }
 
+/* The address, with anything private taken out of it.
+ *
+ * The first pageview reports whatever is in the address bar, and some of the
+ * addresses people arrive on carry secrets: /verify-email?token=,
+ * /account/verify?token= and /reset-password?token= are all opened straight
+ * from an email, and that token is a live credential until it is used. Sending
+ * it to an analytics property puts a working password-reset link in a
+ * third-party system, readable by anyone with report access. /speaking/record
+ * carries the exam question in ?q= for the same reason of convenience.
+ *
+ * An allowlist, not a blocklist: the parameter that must not leak is always
+ * the one nobody thought of. Campaign parameters stay, because GA4 reads
+ * attribution out of page_location and stripping them would send every
+ * acquisition report to direct/none.
+ *
+ * The same list lives in src/lib/analytics.js, which does this for the route
+ * changes React Router makes after load. Two copies because this file is
+ * served as-is from /public and cannot import from the bundle; they must not
+ * drift.
+ */
+var GA_CAMPAIGN_PARAMS = [
+  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+  'utm_id', 'utm_source_platform', 'gclid', 'gbraid', 'wbraid', 'dclid',
+  'fbclid', 'msclkid', 'ttclid', 'li_fat_id', 'twclid', 'ref'
+];
+
+function gaSafePath() {
+  try {
+    var kept = [];
+    new URLSearchParams(window.location.search).forEach(function (value, key) {
+      if (GA_CAMPAIGN_PARAMS.indexOf(key.toLowerCase()) !== -1) {
+        kept.push([key, value]);
+      }
+    });
+    var query = kept.length ? '?' + new URLSearchParams(kept).toString() : '';
+    return window.location.pathname + query;
+  } catch (e) {
+    // Never let this stop the pageview; the path alone is still the truth.
+    return window.location.pathname;
+  }
+}
+
 gtag('js', new Date());
 /* URL passthrough keeps campaign attribution working for a visitor who has
    not consented to storage, without setting anything on their device. */
-gtag('config', 'G-E829Q86M96', { url_passthrough: true });
+gtag('config', 'G-E829Q86M96', {
+  url_passthrough: true,
+  page_path: gaSafePath(),
+  page_location: window.location.origin + gaSafePath(),
+});

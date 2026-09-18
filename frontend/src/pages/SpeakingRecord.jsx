@@ -17,6 +17,7 @@ import { SpeakingResult } from '../components/SpeakingResult';
 import { useSpeak } from '../lib/speak';
 import { useT } from '../i18n';
 import { useSeo } from '../lib/seo';
+import { trackPracticeStart, trackPracticeComplete } from '../lib/analytics';
 
 // Official TCF Canada timings, shared with the backend grader.
 const TACHE_INFO = {
@@ -85,6 +86,8 @@ export default function SpeakingRecord() {
   // the screen locks, so counting ticks under-reported the elapsed time and
   // the official cut-off fired late. The clock is derived from a timestamp.
   const startedAtRef = useRef(0);
+  // One practice_start per sitting at this page, from whichever mode began it.
+  const startedRef = useRef(false);
   const fileInputRef = useRef(null);
   // Teardown for the speech detector, and the guard that starts the clock
   // anyway if it never hears anything.
@@ -128,6 +131,33 @@ export default function SpeakingRecord() {
     setResult(null);
   };
 
+  /* Speaking has begun — the preparation clock in record mode, a chosen file
+     in upload mode. Both routes lead to one answer being graded, so both are
+     the same event, fired once per sitting at this page.
+     Nothing about the audio itself is sent: not the file name, not its size,
+     not the question, and obviously not the recording. */
+  /* A different tâche at the same address is a different sitting. Only the
+     query string changes when one is opened from another, so React keeps this
+     component mounted and the guard below has to be cleared by hand — without
+     this, a candidate working through all three tâches without leaving the
+     page is counted as starting once. */
+  useEffect(() => {
+    startedRef.current = false;
+  }, [tacheNum, examSet, mode, themeId]);
+
+  const markStarted = () => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    trackPracticeStart({
+      skill: 'speaking',
+      exam: 'tcf',
+      exam_type: examSet ? 'test' : 'practice',
+      tache: tacheNum || undefined,
+      mode,
+      themed: Boolean(themeId),
+    });
+  };
+
   const handleFile = (e) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
@@ -137,6 +167,7 @@ export default function SpeakingRecord() {
     if (file.size > 25 * 1024 * 1024) {
       return toast.error(t('speak.tooBig'));
     }
+    markStarted();
     resetRecording();
     setAudioBlob(file);
     // An uploaded file already knows its own type; carry both through so the
@@ -219,6 +250,8 @@ export default function SpeakingRecord() {
   // Preparation countdown, then straight into recording.
   const startPreparation = () => {
     if (!user) return navigate('/login');
+    // After the sign-in guard: someone bounced to /login started nothing.
+    markStarted();
     if (!spec?.prepSeconds) return startRecording();
     resetRecording();
     setPrepLeft(spec.prepSeconds);
@@ -273,6 +306,19 @@ export default function SpeakingRecord() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setResult(data);
+      /* Graded. Inside the try, so the 402 paywall, the 422 with no speech in
+         it and every network failure below count as nothing.
+         `spoken` records whether the recogniser heard anything, which is the
+         one thing that separates a usable answer from a silent one — the
+         transcript itself, the audio and the question never leave the page. */
+      trackPracticeComplete({
+        skill: 'speaking',
+        exam: 'tcf',
+        exam_type: examSet ? 'test' : 'practice',
+        tache: tacheNum || undefined,
+        level: data.tcf_level,
+        spoken: Boolean(data.transcript),
+      });
       const sitting = examSet && tacheNum ? saveTask(examSet, tacheNum, data) : null;
       await refreshUser();
       if (!data.transcript) toast.error(t('speak.noSpeech'));

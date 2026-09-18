@@ -11,6 +11,10 @@ import Paywall from "./components/Paywall";
    it has to be able to answer before the first pageview is measured. It is a
    few hundred bytes and renders nothing once a choice has been stored. */
 import ConsentBanner from "./components/ConsentBanner";
+/* Static for the same reason: it has to be watching the location from the
+   first navigation onwards, and a lazy chunk would miss the ones that happen
+   while it loads. It renders nothing. */
+import RouteAnalytics from "./components/RouteAnalytics";
 /* Also static, and for a related reason: it is a fixed overlay that has to
    agree with the consent banner about who owns the bottom of the screen. It
    renders nothing at all until the groups are configured. */
@@ -82,6 +86,7 @@ export default function App() {
       <I18nProvider>
       <AuthProvider>
         <ScrollToTop />
+        <RouteAnalytics />
         <Header />
         <VerifyBanner />
         {/* Mounted once, above the routes: a spent allowance must be able to

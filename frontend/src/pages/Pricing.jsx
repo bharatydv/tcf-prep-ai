@@ -6,7 +6,7 @@ import { useT } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
 import { useBillingPlans } from '../lib/plans';
 import { useCheckout } from '../lib/checkout';
-import { track } from '../lib/api';
+import { trackViewPricing } from '../lib/analytics';
 
 const FEATURE_KEYS = ['pricing.feature1', 'pricing.feature2', 'pricing.feature3', 'pricing.feature4'];
 const FAQ_KEYS = [
@@ -29,7 +29,11 @@ export default function Pricing() {
 
   // Reaching the pricing page is the step before checkout, and the gap
   // between the two is the most useful number in the funnel.
-  useEffect(() => { track('pricing_view'); }, []);
+  //
+  // One call, two systems: GA4 gets view_pricing and our own backend keeps the
+  // pricing_view name it has always used, so the history behind that funnel
+  // stays continuous. See lib/analytics.js for the mapping.
+  useEffect(() => { trackViewPricing(); }, []);
 
   /* Product/Offer markup, built from the catalogue the page is rendering.
    *

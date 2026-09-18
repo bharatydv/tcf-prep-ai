@@ -40,6 +40,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import (
     String, Integer, Float, Boolean, DateTime, Text, ForeignKey, func, select,
     update as sa_update, delete as sa_delete, case, or_,
+    Index, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, ARRAY
 from sqlalchemy.ext.asyncio import (
@@ -3681,6 +3682,17 @@ class Subscription(Base):
     tax_amount: Mapped[float] = mapped_column(Float, default=0.0)
     cf_subscription_id: Mapped[Optional[str]] = mapped_column(
         String(128), nullable=True)
+    # The buyer's GA4 client and session, captured by the browser when checkout
+    # opened. The purchase event is sent from the webhook, which has no browser
+    # of its own: without these the sale reaches GA4 as a new user in no
+    # session, so the campaign that earned it is never credited. Neither
+    # identifies a person - they are random ids that mean nothing outside our
+    # own GA4 property - and both are optional, because a blocked analytics
+    # script must never be able to stop somebody buying.
+    ga_client_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True)
+    ga_session_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True)
     current_period_end: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True)
     cancelled_at: Mapped[Optional[datetime]] = mapped_column(
@@ -3775,14 +3787,81 @@ class UsageEvent(Base):
     __tablename__ = "usage_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # The browser's own id for this event, unique across the table.
+    #
+    # This is what makes ingestion idempotent. A POST to /api/events that is
+    # retried - by the browser, by a proxy, by a flaky connection that got the
+    # request through but lost the reply - carries the same event_id and is
+    # rejected here rather than counted a second time. Nullable because every
+    # row written before this column existed has no id to give, and because
+    # server-recorded events generate their own.
+    event_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, unique=True)
     event: Mapped[str] = mapped_column(String(48), index=True)
     user_id: Mapped[Optional[str]] = mapped_column(
         String(64), nullable=True, index=True)
     # A browser that has not signed up yet still has a funnel position.
-    anon_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    anon_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True)
+    # One visit: the same browser, with no thirty-minute gap in it. Assigned in
+    # lib/api.js, because only the browser can see idleness. It is what turns a
+    # pile of events into an ordered journey, and what the path analysis groups
+    # on. Server-recorded events have none - a webhook is in nobody's session.
+    session_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True)
+    # The page it happened on, query string already stripped back to campaign
+    # parameters by the browser and stripped again on arrival. Never a URL with
+    # a reset token or an exam question in it.
+    path: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     meta: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), index=True)
+
+    # Ordering inside a session, and every dashboard query's access pattern.
+    #
+    # There is deliberately no `sequence` column: `id` is a monotonic identity
+    # and already orders two events written in the same millisecond, so a
+    # second counter would be a second thing to keep correct for no answer it
+    # could give that (created_at, id) cannot.
+    __table_args__ = (
+        Index("ix_usage_events_user_created", "user_id", "created_at"),
+        Index("ix_usage_events_session_created", "session_id", "created_at"),
+        Index("ix_usage_events_event_created", "event", "created_at"),
+        Index("ix_usage_events_anon_created", "anon_id", "created_at"),
+    )
+
+
+class AnalyticsIdentity(Base):
+    """Which browser belongs to which account.
+
+    The smallest table that answers one question: when this person was still
+    anonymous, which trail was theirs? Without it the journey starts at the
+    signup form and the most interesting part - what they read, which skill
+    they tried, how long they considered the price - is unattributable.
+
+    A PAIR is unique, not an anon_id. That is the whole design. A shared
+    laptop, a family computer, an internet cafe: one browser legitimately signs
+    into several accounts, and a table keyed on anon_id alone would have to
+    pick a winner and would silently hand one person's study history to
+    another. Storing every pair instead keeps the truth, and resolve_identity()
+    below refuses to attribute anonymous activity to anyone when a browser
+    turns out to have served more than one account.
+
+    Nothing here is a credential. No token, no password, no address - two
+    opaque ids and two timestamps, which is everything needed and nothing more.
+    """
+
+    __tablename__ = "analytics_identities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    anon_id: Mapped[str] = mapped_column(String(64), index=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint("anon_id", "user_id", name="uq_identity_anon_user"),
+    )
 
 
 class BillingEvent(Base):
@@ -4332,13 +4411,22 @@ async def grant_premium(db: AsyncSession, user: User, period: timedelta,
 # Pydantic models
 # ----------------------------------------------------------------------------
 class SubscribeIn(BaseModel):
-    """What /api/billing/subscribe accepts: a plan id, and nothing else.
+    """What /api/billing/subscribe accepts: a plan id, and two analytics ids.
 
     The price is never sent by the browser - the server looks it up. See
     billing_subscribe().
+
+    The GA4 ids are the exception to "the browser tells us nothing", and a safe
+    one: they are opaque random strings that only mean something inside our own
+    GA4 property, nothing is decided by them, and the worst a forged pair can
+    do is attribute one sale to the wrong session in a reporting tool. They are
+    here because the purchase event is sent by the webhook, which has no
+    browser to ask. Both optional - an ad blocker must not break checkout.
     """
 
     plan_id: str = Field(min_length=1, max_length=32)
+    ga_client_id: Optional[str] = Field(default=None, max_length=64)
+    ga_session_id: Optional[str] = Field(default=None, max_length=64)
 
 
 class RegisterIn(BaseModel):
@@ -5247,6 +5335,59 @@ MIGRATIONS = [
     "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS audio_path TEXT DEFAULT ''",
     "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS audio_mime VARCHAR(40) "
     "DEFAULT ''",
+    # Where a sale came from, so the webhook can tell GA4. Nullable with no
+    # backfill: every order placed before this genuinely has no browser session
+    # attached to it, and inventing one would attribute old revenue to whoever
+    # happened to be measured first.
+    "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS ga_client_id "
+    "VARCHAR(64)",
+    "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS ga_session_id "
+    "VARCHAR(64)",
+
+    # ---- first-party journey analytics -----------------------------------
+    # Additive only. Every column is nullable with no backfill: rows written
+    # before this existed genuinely had no session and no page, and inventing
+    # one would put made-up journeys next to real ones.
+    "ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS event_id VARCHAR(64)",
+    "ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS session_id VARCHAR(64)",
+    "ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS path VARCHAR(200)",
+    # What makes ingestion idempotent. Partial, so the historical rows with no
+    # event_id do not all collide on NULL — and cheaper, because it indexes
+    # only the rows that have one.
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_usage_events_event_id "
+    "ON usage_events (event_id) WHERE event_id IS NOT NULL",
+    # anon_id was stored from the start and never indexed, so every question
+    # about an anonymous visitor was a sequential scan of the whole table.
+    "CREATE INDEX IF NOT EXISTS ix_usage_events_anon_id ON usage_events (anon_id)",
+    "CREATE INDEX IF NOT EXISTS ix_usage_events_session_id "
+    "ON usage_events (session_id)",
+    # The composites the dashboards actually read on: a journey is one user
+    # over time, a path is one session in order, a funnel is one event name
+    # over a window.
+    "CREATE INDEX IF NOT EXISTS ix_usage_events_user_created "
+    "ON usage_events (user_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_usage_events_session_created "
+    "ON usage_events (session_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_usage_events_event_created "
+    "ON usage_events (event, created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_usage_events_anon_created "
+    "ON usage_events (anon_id, created_at)",
+
+    # Which browser belongs to which account. create_all() makes this on a
+    # fresh database; this is for the ones that already exist.
+    "CREATE TABLE IF NOT EXISTS analytics_identities ("
+    " id SERIAL PRIMARY KEY,"
+    " anon_id VARCHAR(64) NOT NULL,"
+    " user_id VARCHAR(64) NOT NULL,"
+    " first_seen_at TIMESTAMPTZ NOT NULL,"
+    " last_seen_at TIMESTAMPTZ NOT NULL)",
+    # The pair is unique, never the anon_id on its own: one browser may
+    # legitimately have served several accounts, and the query layer decides
+    # what to do about that rather than the schema throwing one of them away.
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_identity_anon_user "
+    "ON analytics_identities (anon_id, user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_identity_user ON analytics_identities (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_identity_anon ON analytics_identities (anon_id)",
 ]
 
 
@@ -5491,6 +5632,14 @@ async def register(body: RegisterIn, response: Response,
     # logs the link instead), so this tells the caller whether we believe a
     # message went out -- not that one arrived.
     sent = await _send_verification_email(db, user)
+    # The account exists. "signup" has been in SERVER_EVENTS since the funnel
+    # was written and was never once recorded, so signup_start had nothing to
+    # be measured against and the drop-off at the form was unknowable. Written
+    # here, where an email already taken has raised above and a failed commit
+    # never reaches: the browser's GA4 sign_up is the same moment seen from the
+    # other side, and this one cannot be blocked or forged.
+    await record_event(db, "sign_up", user_id=user.user_id,
+                       method="email", verification_sent=bool(sent))
     return {"user": public_user(user),
             "verification_required": True,
             "email_sent": bool(sent)}
@@ -5596,6 +5745,12 @@ async def logout(request: Request, response: Response,
                 sa_update(User).where(User.user_id == claims["sub"])
                 .values(token_version=User.token_version + 1))
             await db.commit()
+            # Recorded here rather than from the browser: firing it client-side
+            # races this call clearing the cookie, so it would land as an
+            # anonymous event belonging to nobody. The browser does reset its
+            # analytics ids afterwards - see resetIdentity() in lib/api.js -
+            # which is what stops the next account inheriting this journey.
+            await record_event(db, "logout", user_id=claims["sub"])
             break
     clear_auth_cookies(response)
     return {"detail": "Logged out"}
@@ -5673,6 +5828,10 @@ async def verify_email(body: VerifyEmailIn,
         sa_update(User).where(User.user_id == user_id)
         .values(email_verified=True, email_verified_at=now_utc()))
     await db.commit()
+    # The gap between sign_up and this one is the share of accounts that never
+    # became usable, which is the single most actionable number in the funnel
+    # - and it was unmeasurable before, because nothing ever wrote this event.
+    await record_event(db, "email_verified", user_id=user_id)
     return {"detail": "Email confirmed"}
 
 
@@ -7672,6 +7831,25 @@ async def speaking_analyze(question: str = Form(...),
         db, sub["submission_id"], user.user_id, audio_bytes, mime))
     analysis["submission_id"] = sub.get("submission_id")
     analysis["streak"] = sub.get("streak")
+    # What this grade cost, in the same shape the writing flow already uses.
+    #
+    # Speaking is the most expensive thing the product does - a transcription,
+    # a grader and a second model listening to the audio - and it was the one
+    # feature whose cost never reached the events table, so the admin AI
+    # figures described writing and quietly implied they described everything.
+    #
+    # `chars` is the length of the transcript, which is what the grader was
+    # billed for. The transcript itself, the audio and the question are not
+    # recorded here and never will be: this is a cost row, not a copy of the
+    # candidate's answer.
+    await record_event(db, "ai_call", user_id=user.user_id, feature="speaking",
+                       provider=analysis.get("ai_provider"),
+                       model=analysis.get("ai_model"),
+                       tache=task_type,
+                       chars=len(transcript or ""))
+    await record_event(db, "ai_result", user_id=user.user_id,
+                       feature="speaking", skill="speaking", exam="tcf",
+                       level=analysis.get("tcf_level"))
     return public_analysis(analysis)
 
 
@@ -8136,6 +8314,9 @@ async def billing_subscribe(body: SubscribeIn,
         # row, and the webhook matches on it when the gateway reports its own
         # id rather than ours.
         cf_subscription_id=opened["gateway_order_id"],
+        # Read back by the webhook, months later if it is a refund.
+        ga_client_id=body.ga_client_id or None,
+        ga_session_id=body.ga_session_id or None,
         created_at=now, updated_at=now))
     await db.commit()
     return {
@@ -8336,14 +8517,26 @@ def _is_reversal(event_type: str, status: str) -> bool:
 # The funnel, in order. Only these names are accepted from a browser: an open
 # endpoint that writes whatever string it is given is a way to fill a disk.
 # Server-side callers may record anything, because they are this file.
+# The full catalogue, with what each event means and which parameters are safe
+# to attach to it, is frontend/src/lib/eventTaxonomy.js. These two sets are the
+# enforcement half of it: a browser must not be able to invent an event name,
+# so anything not listed here is accepted with a 204 and dropped.
+# tests/test_analytics.py asserts the two halves still agree.
 CLIENT_EVENTS = {
-    "landing_view", "signup_start", "pricing_view", "checkout_start",
-    "practice_start", "speaking_start", "mic_denied",
+    "landing_view", "page_view", "tcf_canada_view",
+    "signup_start", "login",
+    "practice_start", "practice_complete", "result_view",
+    "pricing_view", "checkout_start",
+    "community_click", "mic_denied",
+    # Retired in favour of practice_start with skill='speaking', which keeps
+    # the funnel to one name per step. Still accepted so that rows already
+    # written keep counting, and folded into practice_start by the queries.
+    "speaking_start",
 }
 # Recorded by the server, where they cannot be forged or missed: a browser that
 # closes before the redirect still paid, and an ad blocker still cannot hide it.
 SERVER_EVENTS = {
-    "signup", "email_verified", "ai_result", "ai_call", "ai_failure",
+    "sign_up", "email_verified", "logout", "ai_result", "ai_call", "ai_failure",
     "payment_success", "payment_reversed", "subscription_cancelled",
 }
 
@@ -8351,25 +8544,561 @@ SERVER_EVENTS = {
 async def record_event(db: AsyncSession, event: str,
                        user_id: Optional[str] = None,
                        anon_id: Optional[str] = None,
+                       session_id: Optional[str] = None,
+                       path: Optional[str] = None,
+                       event_id: Optional[str] = None,
                        **meta) -> None:
     """Write one event. Never raises.
 
     Measurement must not be able to break the thing being measured: a failed
     insert here would otherwise roll back the grade or the payment it was
-    recording. It is logged and dropped instead.
+    recording. It is logged and dropped instead — and that includes the unique
+    violation raised when the same event_id arrives twice, which is not a
+    failure at all but the deduplication working.
     """
     try:
-        db.add(UsageEvent(event=event[:48], user_id=user_id, anon_id=anon_id,
-                          meta=meta or {}, created_at=now_utc()))
+        db.add(UsageEvent(
+            event=event[:48],
+            # Server-recorded events get one of their own, so that every row in
+            # the table has a stable identity and a retried webhook or a
+            # re-run job cannot write the same moment twice either.
+            event_id=(event_id or new_id("evt"))[:64],
+            user_id=user_id, anon_id=anon_id,
+            session_id=session_id, path=(path or None),
+            meta=meta or {}, created_at=now_utc()))
         await db.commit()
     except Exception as exc:  # noqa: BLE001
         await db.rollback()
         log.warning("Could not record event %s: %s", event, exc)
 
 
+async def link_identity(db: AsyncSession, anon_id: str, user_id: str) -> None:
+    """Note that this browser has been used by this account. Never raises.
+
+    Called on every signed-in event that also carries an anonymous id — which
+    in practice means it is written at login and refreshed on everything after
+    it. Upserted rather than inserted, because it happens on every event and
+    only the timestamps change after the first.
+
+    It records a pair. It does not claim the browser BELONGS to the account,
+    and nothing here removes an earlier pair for the same browser: deciding
+    what a browser with two accounts behind it means is resolve_identity()'s
+    job, and a schema that had already thrown one of them away could not make
+    that decision honestly.
+    """
+    if not anon_id or not user_id:
+        return
+    try:
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        now = now_utc()
+        stmt = pg_insert(AnalyticsIdentity.__table__).values(
+            anon_id=anon_id[:64], user_id=user_id[:64],
+            first_seen_at=now, last_seen_at=now)
+        await db.execute(stmt.on_conflict_do_update(
+            index_elements=["anon_id", "user_id"],
+            set_={"last_seen_at": now}))
+        await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        await db.rollback()
+        log.warning("Could not link %s to %s: %s", anon_id, user_id, exc)
+
+
+async def resolve_identity(db: AsyncSession, user_id: str) -> List[str]:
+    """The anonymous ids that may safely be read as this account.
+
+    Only the browsers that have signed into THIS account and no other. A
+    browser that has served two accounts is excluded outright, for both of
+    them: on a shared laptop there is no way to tell which of the two people
+    read the pricing page, and guessing means showing one person's study
+    history inside another person's journey. An incomplete journey is a much
+    smaller problem than a wrong one.
+
+    Returns at most a handful of ids in practice — one per device the person
+    has signed in from — and is capped so that a pathological row count cannot
+    turn into an unbounded IN clause.
+    """
+    from sqlalchemy import text as sa_text
+    try:
+        # Written out rather than built with aliases and a correlated exists()
+        # in the ORM: the condition is the whole point of the function and it
+        # is worth being able to read it. Fully parameterised — user_id is
+        # bound, never interpolated.
+        rows = await db.execute(sa_text(
+            "SELECT ai.anon_id FROM analytics_identities ai "
+            "WHERE ai.user_id = :uid "
+            "  AND NOT EXISTS (SELECT 1 FROM analytics_identities other "
+            "                  WHERE other.anon_id = ai.anon_id "
+            "                    AND other.user_id <> :uid) "
+            "ORDER BY ai.last_seen_at DESC LIMIT 50"), {"uid": user_id})
+        return [r[0] for r in rows.fetchall() if r[0]]
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not resolve identity for %s: %s", user_id, exc)
+        return []
+
+
+# ----------------------------------------------------------------------------
+# Journey analytics: the pure half
+# ----------------------------------------------------------------------------
+# Everything in this section is a plain function over plain data. That is on
+# purpose: the test suite runs without a database (see tests/conftest.py), so
+# the only way funnel arithmetic, cohort bucketing, date validation and meta
+# redaction can be covered at all is if they do not touch one. The endpoints
+# below are then thin - a query, and a call into here.
+
+# Kept in step with CAMPAIGN_PARAMS in frontend/src/lib/eventTaxonomy.js. The
+# browser already strips a path before sending it; this is the same rule
+# applied again on arrival, because a path arrives from a browser and a browser
+# is not a trusted source. A reset token must not reach this table.
+CAMPAIGN_PARAMS = {
+    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+    "utm_id", "utm_source_platform", "gclid", "gbraid", "wbraid", "dclid",
+    "fbclid", "msclkid", "ttclid", "li_fat_id", "twclid", "ref",
+}
+
+
+def safe_event_path(raw):
+    """A reported path with everything private taken out of it.
+
+    An allowlist, because the parameter that must not leak is always the one
+    nobody thought of: /reset-password?token= and /account/verify?token= carry
+    live credentials, and /speaking/record?q= carries the exam question.
+    """
+    if not raw:
+        return None
+    from urllib.parse import urlsplit, urlencode, parse_qsl
+    try:
+        parts = urlsplit(str(raw))
+        # Path only. An absolute URL would let a caller record somebody else's
+        # host, and the origin is not in question here anyway.
+        path = (parts.path or "/")[:180]
+        kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=False)
+                if k.lower() in CAMPAIGN_PARAMS]
+        query = urlencode(kept)
+        return f"{path}?{query}"[:200] if query else path
+    except Exception:  # noqa: BLE001
+        return None
+
+
+# How long a dashboard may look back in one request. Not a retention policy - a
+# guard, so a hand-typed range cannot ask for a scan of every row ever written.
+ANALYTICS_MAX_DAYS = 366
+ANALYTICS_PRESETS = {"today": 1, "7d": 7, "28d": 28, "90d": 90}
+
+
+def analytics_range(preset="28d", start=None, end=None, now=None):
+    """The window a dashboard is asking about, validated.
+
+    Raises HTTPException(400) on anything it cannot make sense of rather than
+    falling back to a default: a filter that quietly ignores what was typed
+    produces numbers somebody will act on believing they mean something else.
+    """
+    now = now or now_utc()
+    preset = (preset or "28d").strip().lower()
+
+    if preset == "custom":
+        if not start or not end:
+            raise HTTPException(status_code=400,
+                                detail="A custom range needs start and end")
+        try:
+            since = datetime.fromisoformat(start).replace(tzinfo=timezone.utc)
+            until = datetime.fromisoformat(end).replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(status_code=400,
+                                detail="Dates must be ISO format, YYYY-MM-DD")
+        # The end date is inclusive: somebody asking for the 1st to the 7th
+        # means the whole of the 7th, not up to midnight as it began.
+        until = until + timedelta(days=1)
+        if until <= since:
+            raise HTTPException(status_code=400, detail="end is before start")
+        if (until - since).days > ANALYTICS_MAX_DAYS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Range is longer than {ANALYTICS_MAX_DAYS} days")
+        return since, until
+
+    days = ANALYTICS_PRESETS.get(preset)
+    if days is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Unknown range. Use one of: "
+                   + ", ".join(sorted(ANALYTICS_PRESETS)) + ", custom")
+    if preset == "today":
+        return now.replace(hour=0, minute=0, second=0, microsecond=0), now
+    return now - timedelta(days=days), now
+
+
+# The journey, as an ordered list of steps. Each step names the events that
+# count as reaching it, so a rename or a retired name is a change here and
+# nowhere else.
+#
+# `speaking_start` is folded into practice because it is what speaking starts
+# were briefly called before they were unified under practice_start; leaving it
+# out would put a hole in the history rather than tidying it up.
+FUNNEL_STEPS = [
+    ("visitors", "Visitors", {"landing_view", "page_view", "tcf_canada_view"}),
+    ("signup", "Signup", {"sign_up"}),
+    ("practice", "Practice", {"practice_start", "speaking_start"}),
+    ("completion", "Completion", {"practice_complete"}),
+    ("checkout", "Checkout", {"checkout_start"}),
+    ("purchase", "Purchase", {"payment_success"}),
+]
+
+
+def build_funnel(people, hits):
+    """Steps with their counts and the conversion from the step before.
+
+    Conversion is measured against the PREVIOUS step, not against the top, so
+    the number answers "how many of the people who got this far went on" -
+    which is the question that says where effort is worth spending.
+
+    It describes what was recorded. It is not a prediction, and a step can
+    legitimately exceed the one before it: somebody can arrive straight on a
+    practice page from a search result without ever seeing the landing page,
+    and clamping the number would hide a real acquisition path.
+    """
+    out = []
+    previous = None
+    for key, label, _events in FUNNEL_STEPS:
+        count = int(people.get(key, 0) or 0)
+        if previous is None:
+            conversion = 100.0 if count else 0.0
+        elif previous == 0:
+            conversion = 0.0
+        else:
+            conversion = round(count * 100.0 / previous, 1)
+        out.append({
+            "step": key,
+            "label": label,
+            "people": count,
+            "hits": int(hits.get(key, 0) or 0),
+            "conversion_from_previous": conversion,
+        })
+        previous = count
+    return out
+
+
+# The only meta keys a dashboard will ever show. An allowlist taken straight
+# from the documented taxonomy in frontend/src/lib/eventTaxonomy.js.
+#
+# A blocklist would be the wrong shape here: these rows are written from
+# whatever the browser sent, and the day somebody adds a parameter without
+# thinking is the day a blocklist lets it through onto a screen. Anything not
+# named here is dropped from the response, whatever it is and however it got
+# into the row.
+SAFE_META_KEYS = {
+    "skill", "exam", "exam_type", "level", "plan", "tache", "mode", "method",
+    "source", "slug", "id", "from", "paper", "feature", "provider", "model",
+    "test_number", "set_number", "score", "total", "questions", "words",
+    "seconds", "chars", "amount", "currency", "first_cycle", "themed",
+    # Whether the confirmation message went out. Named so that it cannot be
+    # mistaken for an address, by a reader or by the test that asserts nothing
+    # in this set reads as personal.
+    "spoken", "verification_sent",
+}
+
+
+def safe_journey_meta(meta):
+    """The showable part of an event's context.
+
+    Values are coerced to short scalars as well as filtered by key, so a nested
+    object that somehow got past ingestion cannot be rendered either.
+    """
+    if not isinstance(meta, dict):
+        return {}
+    out = {}
+    for key, value in meta.items():
+        if key not in SAFE_META_KEYS:
+            continue
+        if isinstance(value, bool) or isinstance(value, (int, float)):
+            out[key] = value
+        elif value is None:
+            continue
+        else:
+            out[key] = str(value)[:120]
+    return out
+
+
+# Where an account is, to the country, from the timezone it already gave us.
+#
+# Deliberately not from an IP address. This application has never geolocated
+# anyone and this is not the feature to start with: a timezone is chosen by the
+# account holder, is already stored, is accurate to a region rather than a
+# street, and cannot be used to find somebody.
+#
+# Curated rather than exhaustive. IANA names a city, not a country, so there is
+# no rule to derive this from - only a table. These are the zones this audience
+# actually uses; anything else reads as Unknown, which is an honest answer and
+# a much better one than a wrong flag.
+TIMEZONE_COUNTRY = {
+    "America/Toronto": "CA", "America/Montreal": "CA", "America/Vancouver": "CA",
+    "America/Edmonton": "CA", "America/Winnipeg": "CA", "America/Halifax": "CA",
+    "America/St_Johns": "CA", "America/Regina": "CA", "America/Moncton": "CA",
+    "America/New_York": "US", "America/Chicago": "US", "America/Denver": "US",
+    "America/Los_Angeles": "US", "America/Phoenix": "US", "America/Anchorage": "US",
+    "Europe/Paris": "FR", "Europe/Brussels": "BE", "Europe/Luxembourg": "LU",
+    "Europe/Zurich": "CH", "Europe/London": "GB", "Europe/Dublin": "IE",
+    "Europe/Madrid": "ES", "Europe/Lisbon": "PT", "Europe/Rome": "IT",
+    "Europe/Berlin": "DE", "Europe/Amsterdam": "NL", "Europe/Vienna": "AT",
+    "Europe/Stockholm": "SE", "Europe/Oslo": "NO", "Europe/Copenhagen": "DK",
+    "Europe/Helsinki": "FI", "Europe/Warsaw": "PL", "Europe/Prague": "CZ",
+    "Europe/Bucharest": "RO", "Europe/Athens": "GR", "Europe/Kyiv": "UA",
+    "Europe/Kiev": "UA", "Europe/Moscow": "RU", "Europe/Istanbul": "TR",
+    "Africa/Casablanca": "MA", "Africa/Algiers": "DZ", "Africa/Tunis": "TN",
+    "Africa/Cairo": "EG", "Africa/Dakar": "SN", "Africa/Abidjan": "CI",
+    "Africa/Lagos": "NG", "Africa/Accra": "GH", "Africa/Douala": "CM",
+    "Africa/Kinshasa": "CD", "Africa/Nairobi": "KE", "Africa/Johannesburg": "ZA",
+    "Africa/Bamako": "ML", "Africa/Ouagadougou": "BF", "Africa/Conakry": "GN",
+    "Africa/Niamey": "NE", "Africa/Lome": "TG", "Africa/Porto-Novo": "BJ",
+    "Africa/Libreville": "GA", "Africa/Brazzaville": "CG", "Africa/Tripoli": "LY",
+    "Africa/Nouakchott": "MR", "Africa/Khartoum": "SD",
+    "Asia/Kolkata": "IN", "Asia/Calcutta": "IN", "Asia/Karachi": "PK",
+    "Asia/Dhaka": "BD", "Asia/Colombo": "LK", "Asia/Kathmandu": "NP",
+    "Asia/Dubai": "AE", "Asia/Riyadh": "SA", "Asia/Qatar": "QA",
+    "Asia/Kuwait": "KW", "Asia/Beirut": "LB", "Asia/Amman": "JO",
+    "Asia/Damascus": "SY", "Asia/Baghdad": "IQ", "Asia/Tehran": "IR",
+    "Asia/Jerusalem": "IL", "Asia/Manila": "PH", "Asia/Jakarta": "ID",
+    "Asia/Bangkok": "TH", "Asia/Ho_Chi_Minh": "VN", "Asia/Saigon": "VN",
+    "Asia/Shanghai": "CN", "Asia/Hong_Kong": "HK", "Asia/Tokyo": "JP",
+    "Asia/Seoul": "KR", "Asia/Singapore": "SG", "Asia/Kuala_Lumpur": "MY",
+    "Australia/Sydney": "AU", "Australia/Melbourne": "AU", "Australia/Perth": "AU",
+    "Pacific/Auckland": "NZ",
+    "America/Sao_Paulo": "BR", "America/Mexico_City": "MX",
+    "America/Bogota": "CO", "America/Lima": "PE",
+    "America/Argentina/Buenos_Aires": "AR", "America/Santiago": "CL",
+    "America/Port-au-Prince": "HT",
+}
+
+
+def country_from_timezone(tz):
+    """An ISO country code, or "Unknown". Never a guess."""
+    if not tz:
+        return "Unknown"
+    return TIMEZONE_COUNTRY.get(str(tz).strip(), "Unknown")
+
+
+ANALYTICS_SKILLS = {"reading", "listening", "writing", "speaking"}
+ANALYTICS_EXAMS = {"tcf", "tef"}
+ANALYTICS_LEVELS = {"a1", "a2", "b1", "b2", "c1", "c2"}
+# Every name the taxonomy knows, for the admin event filter. Filtering on a
+# name that cannot exist should say so rather than return an empty screen that
+# looks like a business problem.
+KNOWN_EVENTS = CLIENT_EVENTS | SERVER_EVENTS
+
+
+def validate_choice(value, allowed, field):
+    """A filter value, or a 400 naming what was wrong with it.
+
+    Every admin filter that reaches SQL goes through one of these. The values
+    are bound as parameters regardless, so this is not what prevents injection
+    - it is what stops a typo silently returning an empty dashboard that looks
+    like a business problem rather than a spelling mistake.
+    """
+    if value is None or value == "":
+        return None
+    v = str(value).strip().lower()
+    if v not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail="Unknown " + field + ". Use one of: "
+                   + ", ".join(sorted(allowed)))
+    return v
+
+
+def retention_row(cohort_size, returned):
+    """One cohort line: how many came back, and what share that is."""
+    size = int(cohort_size or 0)
+    out = {"cohort": size}
+    for day in (1, 7, 28):
+        n = int(returned.get(day, 0) or 0)
+        out[f"d{day}"] = n
+        out[f"d{day}_pct"] = round(n * 100.0 / size, 1) if size else 0.0
+    return out
+
+
+def collapse_path(events, max_steps=10):
+    """One session's events as a readable path.
+
+    Consecutive repeats are collapsed - six page_views in a row are one step of
+    browsing, not six - and the path is cut at `max_steps` so a long session
+    does not produce a sequence so unique that it can only ever have a count of
+    one, which tells nobody anything.
+    """
+    out = []
+    for event in events:
+        if not event:
+            continue
+        if out and out[-1] == event:
+            continue
+        out.append(event)
+        if len(out) >= max_steps:
+            break
+    return out
+
+
+# ----------------------------------------------------------------------------
+# GA4, from the server
+# ----------------------------------------------------------------------------
+# The browser has its own GA4 tag (public/gtag-init.js, G-E829Q86M96) and sends
+# every event it can honestly see. Purchase is the one it cannot: reaching
+# /billing/return proves the gateway sent the customer back, not that the
+# charge settled, and the customer who closes the tab at the payment sheet has
+# still paid. So purchase is sent from here, by the webhook, over the
+# Measurement Protocol - the same event, the same property, arriving from the
+# only place that knows the money is real.
+#
+# The measurement id is repeated here rather than shared with the frontend
+# because there is no build step between the two; it defaults to the id the
+# browser tag uses, and both are overridable by environment.
+#
+# GA4_API_SECRET is created in GA4 under Admin > Data Streams > Measurement
+# Protocol API secrets. Without it nothing is sent and a line is logged once -
+# unconfigured must look like unconfigured, not like a property with no sales.
+GA4_MEASUREMENT_ID = os.environ.get("GA4_MEASUREMENT_ID", "G-E829Q86M96").strip()
+GA4_API_SECRET = os.environ.get("GA4_API_SECRET", "").strip()
+# Two different kinds of debugging, because they answer different questions and
+# only one of them records anything:
+#
+#   GA4_MP_DEBUG=1         real endpoint, with debug_mode on the event. The
+#                          purchase is RECORDED and appears in GA4 DebugView,
+#                          which is what you want when checking the whole path
+#                          end to end.
+#   GA4_MP_DEBUG=validate   the validation endpoint. It grades the payload and
+#                          returns what is wrong with it, and records NOTHING —
+#                          so nothing shows up in DebugView or in any report.
+#                          For checking the shape of the JSON, nothing else.
+#
+# Neither belongs in production: debug_mode events are still real events, and
+# the validation endpoint silently drops every sale.
+_GA4_MP_MODE = os.environ.get("GA4_MP_DEBUG", "").strip().lower()
+GA4_MP_VALIDATE = _GA4_MP_MODE in {"validate", "validation", "dry-run"}
+GA4_MP_DEBUG = _GA4_MP_MODE in {"1", "true", "yes", "debug"}
+GA4_MP_URL = ("https://www.google-analytics.com/debug/mp/collect"
+              if GA4_MP_VALIDATE
+              else "https://www.google-analytics.com/mp/collect")
+
+
+def ga4_configured() -> bool:
+    return bool(GA4_MEASUREMENT_ID and GA4_API_SECRET)
+
+
+def _ga4_client_id(stored: Optional[str], fallback_seed: str) -> str:
+    """The browser's GA4 client id, or a stable stand-in derived from the order.
+
+    The real one is captured at checkout and carried on the subscription row,
+    which is what lets the sale join the session and campaign that produced it.
+
+    When it is missing - the tag was blocked, or the row predates this - the
+    event is still worth sending: the revenue is real either way, and a
+    purchase absent from GA4 is a worse lie than one attributed to nobody. It
+    is derived from the order id rather than random so a retry of the same
+    webhook cannot invent a second user, and shaped like a gtag client id so
+    the collector accepts it.
+    """
+    if stored:
+        return stored
+    digest = hashlib.sha256(fallback_seed.encode("utf-8")).hexdigest()
+    return f"{int(digest[:8], 16)}.{int(digest[8:16], 16)}"
+
+
+def _ga4_post_sync(payload: dict) -> None:
+    import requests
+    resp = requests.post(
+        GA4_MP_URL,
+        params={"measurement_id": GA4_MEASUREMENT_ID,
+                "api_secret": GA4_API_SECRET},
+        json=payload,
+        timeout=10)
+    # The live endpoint answers 204 with an empty body whatever it thought of
+    # the payload, so a malformed event is indistinguishable from a good one
+    # here; only the validation endpoint says anything useful.
+    if GA4_MP_VALIDATE:
+        log.info("GA4 MP validation: %s", resp.text[:2000])
+    resp.raise_for_status()
+
+
+async def ga4_track_purchase(row: "Subscription", *, first_cycle: bool) -> None:
+    """One `purchase` into GA4 for one settled charge. Never raises.
+
+    Deduplication is not done here and does not need to be. This is called from
+    exactly one place - the branch of billing_webhook() that has just granted
+    premium - and that branch is already behind two independent guards: the
+    BillingEvent unique key, which drops a redelivery of the same webhook, and
+    the `status == active and current_period_end is not None` check, which
+    drops a second success event for an order that was already granted. A
+    purchase can only be sent on the transition that actually extended the
+    subscription. `transaction_id` is our own order id, so anything that did
+    slip past both would still collapse in GA4's reports rather than double the
+    revenue.
+
+    Nothing personal goes out: an order id, a plan id, an amount, a currency.
+    No email, no name, no phone, no card, no user id.
+
+    Sent off the event loop and awaited, because a webhook that has already
+    committed the grant can afford ten seconds; and swallowed on failure,
+    because measurement must never cost a customer the premium they paid for.
+    """
+    if not ga4_configured():
+        log.info("GA4 not configured - purchase for %s not sent",
+                 row.subscription_id)
+        return
+    try:
+        plan = BILLING_PLANS.get(row.plan_id) or {}
+        params = {
+            "transaction_id": row.subscription_id,
+            "value": round(float(row.amount or 0), 2),
+            "currency": (row.currency or BILLING_CURRENCY).upper(),
+            "plan": row.plan_id,
+            "first_cycle": first_cycle,
+            # Without an engagement time the event is attributed to no session
+            # and never appears in realtime.
+            "engagement_time_msec": 1,
+            # What puts this one event in DebugView. Off unless asked for:
+            # every debug_mode event is still a real, recorded event.
+            **({"debug_mode": True} if GA4_MP_DEBUG else {}),
+            "items": [{
+                "item_id": row.plan_id,
+                "item_name": plan.get("name") or row.plan_id,
+                "item_category": "subscription",
+                "price": round(float(row.amount or 0), 2),
+                "quantity": 1,
+            }],
+        }
+        # The session the checkout happened in, when the browser could tell us.
+        # Its absence is normal and not worth a log line.
+        if getattr(row, "ga_session_id", None):
+            params["session_id"] = row.ga_session_id
+        payload = {
+            "client_id": _ga4_client_id(getattr(row, "ga_client_id", None),
+                                        row.subscription_id),
+            # This property has never been granted ad storage - gtag-init.js
+            # denies both by default and the banner only ever grants analytics
+            # - so the server says the same thing rather than quietly
+            # contradicting the browser.
+            "non_personalized_ads": True,
+            "consent": {"ad_user_data": "DENIED",
+                        "ad_personalization": "DENIED"},
+            "events": [{"name": "purchase", "params": params}],
+        }
+        await asyncio.to_thread(_ga4_post_sync, payload)
+        log.info("GA4 purchase sent for %s (%s %s)", row.subscription_id,
+                 params["value"], params["currency"])
+    except Exception as exc:  # noqa: BLE001
+        log.warning("GA4 purchase for %s could not be sent: %s",
+                    row.subscription_id, exc)
+
+
 class EventIn(BaseModel):
     event: str = Field(min_length=1, max_length=48)
+    # The browser's id for this exact event. What makes a retried POST the same
+    # event rather than a second one. Optional so an older cached bundle, which
+    # does not send one, still records events.
+    event_id: Optional[str] = Field(default=None, max_length=64)
     anon_id: Optional[str] = Field(default=None, max_length=64)
+    session_id: Optional[str] = Field(default=None, max_length=64)
+    # The page it happened on. Already stripped of everything but campaign
+    # parameters by the browser; stripped again here, because a browser is not
+    # something to take a promise like that from.
+    path: Optional[str] = Field(default=None, max_length=300)
     # A small bag of context - a plan id, a task number. Size-capped because
     # this arrives from a browser.
     meta: Optional[Dict[str, Any]] = None
@@ -8391,6 +9120,16 @@ async def post_event(body: EventIn, request: Request,
         token = request.cookies.get("access_token")
         if token:
             user_id = decode_token(token, "access")
+        anon_id = (body.anon_id or None)
+        # This browser and this account, both known, in the same request.
+        #
+        # There is no separate identify endpoint and no client-supplied user
+        # id: the account comes from the session cookie the browser could not
+        # have forged, and the anonymous id comes from the body. That is the
+        # safest linking the existing authentication architecture allows, and
+        # it costs one upsert on events from signed-in visitors.
+        if user_id and anon_id:
+            await link_identity(db, anon_id, user_id)
         # Trim aggressively: this is analytics context, not a document store.
         #
         # Every value is coerced to a string BEFORE it is cut. Trimming only
@@ -8408,8 +9147,10 @@ async def post_event(body: EventIn, request: Request,
                 meta[k[:48]] = None
             else:
                 meta[k[:48]] = str(v)[:120]
-        await record_event(db, name, user_id=user_id,
-                           anon_id=(body.anon_id or None), **meta)
+        await record_event(db, name, user_id=user_id, anon_id=anon_id,
+                           session_id=(body.session_id or None),
+                           path=safe_event_path(body.path),
+                           event_id=(body.event_id or None), **meta)
     return Response(status_code=204)
 
 
@@ -8445,6 +9186,509 @@ async def admin_funnel(days: int = Query(30, ge=1, le=365),
            "tokens": int(r[4] or 0)} for r in res.fetchall()]
 
     return {"days": days, "events": counts, "ai": ai}
+
+
+# ----------------------------------------------------------------------------
+# Journey analytics: the endpoints
+# ----------------------------------------------------------------------------
+# Every one of these depends on get_admin_user, which is the same
+# authorisation the rest of the admin API uses. That dependency is what
+# enforces it: the frontend hiding a tab is a convenience, not a control, and
+# an analytics endpoint left open would hand anyone who guessed the URL a
+# readable history of what every learner did.
+#
+# Every filter is validated and every value is bound as a query parameter.
+# Nothing a caller sends is ever interpolated into SQL.
+#
+# Every query aggregates in Postgres. None of them selects rows into Python to
+# count them - usage_events is the fastest-growing table in the database, and
+# the admin panel is a page somebody opens casually.
+
+
+def _events_in(prefix, step_events):
+    """An IN list as bound parameter names, plus the values to bind.
+
+    The parameter NAMES are generated here from a prefix this module chooses;
+    the event names only ever travel as bound values. Nothing a caller sends
+    reaches the SQL text.
+
+    The prefix keeps two funnel steps that happen to share an event name from
+    colliding on the same bind parameter.
+    """
+    names, params = [], {}
+    for i, ev in enumerate(sorted(step_events)):
+        key = f"{prefix}_{i}"
+        names.append(f":{key}")
+        params[key] = ev
+    return ", ".join(names), params
+
+
+@app.get("/api/admin/analytics/overview")
+async def admin_analytics_overview(
+        preset: str = Query("28d", max_length=16),
+        start: Optional[str] = Query(None, max_length=32),
+        end: Optional[str] = Query(None, max_length=32),
+        admin: User = Depends(get_admin_user),
+        db: AsyncSession = Depends(get_db)):
+    """The headline numbers for a window.
+
+    People rather than hits everywhere: one person reloading the pricing page
+    six times is one person considering it. A "person" is the account when
+    there is one and the browser when there is not, which is the most precise
+    thing that can honestly be said about an anonymous visitor.
+    """
+    from sqlalchemy import text as sa_text
+    since, until = analytics_range(preset, start, end)
+
+    params = {"since": since, "until": until}
+    selects = []
+    for key, _label, events in FUNNEL_STEPS:
+        placeholders, p = _events_in(key, events)
+        params.update(p)
+        selects.append(
+            f"COUNT(DISTINCT COALESCE(user_id, anon_id)) "
+            f"FILTER (WHERE event IN ({placeholders})) AS {key}_people")
+        selects.append(
+            f"COUNT(*) FILTER (WHERE event IN ({placeholders})) AS {key}_hits")
+
+    selects.append("COUNT(DISTINCT user_id) AS active_users")
+    selects.append("COUNT(DISTINCT session_id) AS sessions")
+
+    res = await db.execute(sa_text(
+        "SELECT " + ", ".join(selects) +
+        " FROM usage_events WHERE created_at >= :since AND created_at < :until"),
+        params)
+    row = res.mappings().first() or {}
+
+    return {
+        "range": {"preset": preset, "since": since.isoformat(),
+                  "until": until.isoformat()},
+        "visitors": int(row.get("visitors_people") or 0),
+        "active_users": int(row.get("active_users") or 0),
+        "sessions": int(row.get("sessions") or 0),
+        "signups": int(row.get("signup_people") or 0),
+        "practices_started": int(row.get("practice_people") or 0),
+        "practices_completed": int(row.get("completion_people") or 0),
+        "checkout_starts": int(row.get("checkout_people") or 0),
+        "purchases": int(row.get("purchase_people") or 0),
+        "purchase_events": int(row.get("purchase_hits") or 0),
+    }
+
+
+@app.get("/api/admin/analytics/funnel")
+async def admin_analytics_funnel(
+        preset: str = Query("28d", max_length=16),
+        start: Optional[str] = Query(None, max_length=32),
+        end: Optional[str] = Query(None, max_length=32),
+        admin: User = Depends(get_admin_user),
+        db: AsyncSession = Depends(get_db)):
+    """Visitors to purchase, with the conversion between each pair of steps.
+
+    Recorded events only. Nothing here is modelled, estimated or predicted.
+    """
+    from sqlalchemy import text as sa_text
+    since, until = analytics_range(preset, start, end)
+
+    people, hits, params = {}, {}, {"since": since, "until": until}
+    selects = []
+    for key, _label, events in FUNNEL_STEPS:
+        placeholders, p = _events_in(key, events)
+        params.update(p)
+        selects.append(
+            f"COUNT(DISTINCT COALESCE(user_id, anon_id)) "
+            f"FILTER (WHERE event IN ({placeholders})) AS {key}_people")
+        selects.append(
+            f"COUNT(*) FILTER (WHERE event IN ({placeholders})) AS {key}_hits")
+
+    res = await db.execute(sa_text(
+        "SELECT " + ", ".join(selects) +
+        " FROM usage_events WHERE created_at >= :since AND created_at < :until"),
+        params)
+    row = res.mappings().first() or {}
+    for key, _label, _events in FUNNEL_STEPS:
+        people[key] = row.get(f"{key}_people") or 0
+        hits[key] = row.get(f"{key}_hits") or 0
+
+    return {"range": {"preset": preset, "since": since.isoformat(),
+                      "until": until.isoformat()},
+            "steps": build_funnel(people, hits)}
+
+
+@app.get("/api/admin/analytics/journey")
+async def admin_analytics_journey(
+        user_id: str = Query(..., min_length=1, max_length=64),
+        preset: str = Query("90d", max_length=16),
+        start: Optional[str] = Query(None, max_length=32),
+        end: Optional[str] = Query(None, max_length=32),
+        event: Optional[str] = Query(None, max_length=48),
+        skill: Optional[str] = Query(None, max_length=16),
+        exam: Optional[str] = Query(None, max_length=16),
+        level: Optional[str] = Query(None, max_length=8),
+        session_id: Optional[str] = Query(None, max_length=64),
+        limit: int = Query(100, ge=1, le=500),
+        offset: int = Query(0, ge=0),
+        admin: User = Depends(get_admin_user),
+        db: AsyncSession = Depends(get_db)):
+    """One person's activity, oldest first, paginated.
+
+    Includes the trail they left before they had an account, when - and only
+    when - that browser has never been used to sign into anybody else's. See
+    resolve_identity(): on a shared machine the honest answer is to show less
+    rather than to attribute one person's reading to another.
+
+    Ordered by (created_at, id). The id breaks ties, so two events written in
+    the same millisecond still come back in the order they were written, and a
+    page boundary can never repeat or skip a row.
+    """
+    from sqlalchemy import text as sa_text
+    since, until = analytics_range(preset, start, end)
+    skill = validate_choice(skill, ANALYTICS_SKILLS, "skill")
+    exam = validate_choice(exam, ANALYTICS_EXAMS, "exam")
+    level = validate_choice(level, ANALYTICS_LEVELS, "level")
+    event = validate_choice(event, KNOWN_EVENTS, "event") if event else None
+
+    res = await db.execute(select(User).where(User.user_id == user_id))
+    who = res.scalar_one_or_none()
+    if not who:
+        raise HTTPException(status_code=404, detail="No such user")
+
+    anon_ids = await resolve_identity(db, user_id)
+
+    where = ["created_at >= :since", "created_at < :until"]
+    params = {"since": since, "until": until, "uid": user_id,
+              "limit": limit, "offset": offset}
+    if anon_ids:
+        names = []
+        for i, a in enumerate(anon_ids):
+            params[f"a{i}"] = a
+            names.append(f":a{i}")
+        where.append(f"(user_id = :uid OR anon_id IN ({', '.join(names)}))")
+    else:
+        where.append("user_id = :uid")
+    if event:
+        where.append("event = :event")
+        params["event"] = event
+    if session_id:
+        where.append("session_id = :sid")
+        params["sid"] = session_id
+    # JSONB ->> is an indexed-safe comparison against a bound value; the key
+    # names are literals chosen here, never anything a caller sent.
+    if skill:
+        where.append("meta->>'skill' = :skill")
+        params["skill"] = skill
+    if exam:
+        where.append("meta->>'exam' = :exam")
+        params["exam"] = exam
+    if level:
+        where.append("lower(meta->>'level') = :level")
+        params["level"] = level
+
+    clause = " AND ".join(where)
+    total = await db.scalar(sa_text(
+        f"SELECT COUNT(*) FROM usage_events WHERE {clause}"), params)
+    res = await db.execute(sa_text(
+        "SELECT id, created_at, event, path, session_id, user_id, anon_id, meta "
+        f"FROM usage_events WHERE {clause} "
+        "ORDER BY created_at ASC, id ASC LIMIT :limit OFFSET :offset"), params)
+
+    rows = []
+    for r in res.mappings().all():
+        meta = safe_journey_meta(r["meta"])
+        rows.append({
+            "id": r["id"],
+            "at": r["created_at"].isoformat() if r["created_at"] else None,
+            "event": r["event"],
+            "page": r["path"],
+            "session_id": r["session_id"],
+            # Whether this row was them signed in, or the browser before they
+            # were. Worth showing: it is the difference between a fact and an
+            # inference, and the person reading the screen should see which.
+            "identified": bool(r["user_id"]),
+            "skill": meta.get("skill"),
+            "exam": meta.get("exam"),
+            "level": meta.get("level"),
+            "plan": meta.get("plan"),
+            "meta": meta,
+        })
+
+    return {
+        "user": {"user_id": who.user_id, "name": who.name, "email": who.email,
+                 "country": country_from_timezone(who.timezone),
+                 "created_at": who.created_at.isoformat() if who.created_at else None,
+                 "subscription_status": who.subscription_status},
+        "range": {"preset": preset, "since": since.isoformat(),
+                  "until": until.isoformat()},
+        "stitched_anon_ids": len(anon_ids),
+        "total": int(total or 0),
+        "limit": limit, "offset": offset,
+        "events": rows,
+    }
+
+
+@app.get("/api/admin/analytics/events")
+async def admin_analytics_events(
+        preset: str = Query("28d", max_length=16),
+        start: Optional[str] = Query(None, max_length=32),
+        end: Optional[str] = Query(None, max_length=32),
+        event: Optional[str] = Query(None, max_length=48),
+        skill: Optional[str] = Query(None, max_length=16),
+        exam: Optional[str] = Query(None, max_length=16),
+        level: Optional[str] = Query(None, max_length=8),
+        user_id: Optional[str] = Query(None, max_length=64),
+        session_id: Optional[str] = Query(None, max_length=64),
+        limit: int = Query(100, ge=1, le=500),
+        offset: int = Query(0, ge=0),
+        admin: User = Depends(get_admin_user),
+        db: AsyncSession = Depends(get_db)):
+    """The raw event stream, filtered and paginated. Newest first.
+
+    The counts-per-event summary comes back alongside the page, so the screen
+    can show what exists without a second round trip.
+    """
+    from sqlalchemy import text as sa_text
+    since, until = analytics_range(preset, start, end)
+    skill = validate_choice(skill, ANALYTICS_SKILLS, "skill")
+    exam = validate_choice(exam, ANALYTICS_EXAMS, "exam")
+    level = validate_choice(level, ANALYTICS_LEVELS, "level")
+    event = validate_choice(event, KNOWN_EVENTS, "event") if event else None
+
+    where = ["created_at >= :since", "created_at < :until"]
+    params = {"since": since, "until": until, "limit": limit, "offset": offset}
+    if event:
+        where.append("event = :event")
+        params["event"] = event
+    if user_id:
+        where.append("user_id = :uid")
+        params["uid"] = user_id
+    if session_id:
+        where.append("session_id = :sid")
+        params["sid"] = session_id
+    if skill:
+        where.append("meta->>'skill' = :skill")
+        params["skill"] = skill
+    if exam:
+        where.append("meta->>'exam' = :exam")
+        params["exam"] = exam
+    if level:
+        where.append("lower(meta->>'level') = :level")
+        params["level"] = level
+    clause = " AND ".join(where)
+
+    total = await db.scalar(sa_text(
+        f"SELECT COUNT(*) FROM usage_events WHERE {clause}"), params)
+    res = await db.execute(sa_text(
+        "SELECT id, created_at, event, path, user_id, anon_id, session_id, meta "
+        f"FROM usage_events WHERE {clause} "
+        "ORDER BY created_at DESC, id DESC LIMIT :limit OFFSET :offset"), params)
+    rows = [{
+        "id": r["id"],
+        "at": r["created_at"].isoformat() if r["created_at"] else None,
+        "event": r["event"],
+        "page": r["path"],
+        "user_id": r["user_id"],
+        "session_id": r["session_id"],
+        "identified": bool(r["user_id"]),
+        "meta": safe_journey_meta(r["meta"]),
+    } for r in res.mappings().all()]
+
+    summary = await db.execute(sa_text(
+        "SELECT event, COUNT(*) AS hits, "
+        "COUNT(DISTINCT COALESCE(user_id, anon_id)) AS people "
+        "FROM usage_events WHERE created_at >= :since AND created_at < :until "
+        "GROUP BY event ORDER BY hits DESC LIMIT 50"),
+        {"since": since, "until": until})
+
+    return {"range": {"preset": preset, "since": since.isoformat(),
+                      "until": until.isoformat()},
+            "total": int(total or 0), "limit": limit, "offset": offset,
+            "events": rows,
+            "summary": [{"event": r[0], "hits": r[1], "people": r[2]}
+                        for r in summary.fetchall()]}
+
+
+@app.get("/api/admin/analytics/breakdown")
+async def admin_analytics_breakdown(
+        dimension: str = Query("skill", max_length=16),
+        preset: str = Query("28d", max_length=16),
+        start: Optional[str] = Query(None, max_length=32),
+        end: Optional[str] = Query(None, max_length=32),
+        admin: User = Depends(get_admin_user),
+        db: AsyncSession = Depends(get_db)):
+    """Activity grouped by skill, by exam, or by country.
+
+    Skill and exam come out of the event's own metadata. Country comes from the
+    account's stored timezone and nothing else - no IP lookup, no precise
+    location - so it is only ever available for signed-in activity, and an
+    account whose zone is not in the table reads as Unknown.
+
+    Aggregates are rates, never rankings: this says how reading is going, not
+    which learner is best at it.
+    """
+    from sqlalchemy import text as sa_text
+    since, until = analytics_range(preset, start, end)
+    dimension = validate_choice(dimension, {"skill", "exam", "country"},
+                                "dimension")
+
+    if dimension == "country":
+        res = await db.execute(sa_text(
+            "SELECT u.timezone AS tz, "
+            "COUNT(DISTINCT e.user_id) AS people, COUNT(*) AS hits "
+            "FROM usage_events e JOIN users u ON u.user_id = e.user_id "
+            "WHERE e.created_at >= :since AND e.created_at < :until "
+            "GROUP BY u.timezone"), {"since": since, "until": until})
+        merged = {}
+        for tz, people, hits in res.fetchall():
+            code = country_from_timezone(tz)
+            row = merged.setdefault(code, {"key": code, "people": 0, "hits": 0})
+            row["people"] += int(people or 0)
+            row["hits"] += int(hits or 0)
+        rows = sorted(merged.values(), key=lambda r: -r["people"])
+        return {"dimension": "country",
+                "range": {"preset": preset, "since": since.isoformat(),
+                          "until": until.isoformat()},
+                "rows": rows}
+
+    # skill or exam: a literal column name chosen here from a validated set,
+    # never a caller's string reaching the query.
+    key = "skill" if dimension == "skill" else "exam"
+    res = await db.execute(sa_text(
+        f"SELECT meta->>'{key}' AS k, "
+        "COUNT(*) FILTER (WHERE event IN ('practice_start', 'speaking_start')) AS starts, "
+        "COUNT(*) FILTER (WHERE event = 'practice_complete') AS completions, "
+        "COUNT(*) FILTER (WHERE event = 'result_view') AS results, "
+        "COUNT(DISTINCT COALESCE(user_id, anon_id)) AS people "
+        "FROM usage_events "
+        "WHERE created_at >= :since AND created_at < :until "
+        f"AND meta->>'{key}' IS NOT NULL "
+        "GROUP BY 1 ORDER BY starts DESC"), {"since": since, "until": until})
+
+    rows = []
+    for k, starts, completions, results, people in res.fetchall():
+        starts = int(starts or 0)
+        rows.append({
+            "key": k,
+            "starts": starts,
+            "completions": int(completions or 0),
+            "results": int(results or 0),
+            "people": int(people or 0),
+            "completion_rate": (round(int(completions or 0) * 100.0 / starts, 1)
+                                if starts else 0.0),
+        })
+
+    if dimension == "exam":
+        # Every exam the taxonomy knows about, including the ones with nothing
+        # against them. A missing row reads as "not measured"; a zero reads as
+        # "measured, and nobody did it", and only one of those is true.
+        seen = {r["key"] for r in rows}
+        for known in sorted(ANALYTICS_EXAMS):
+            if known not in seen:
+                rows.append({"key": known, "starts": 0, "completions": 0,
+                             "results": 0, "people": 0, "completion_rate": 0.0})
+
+    return {"dimension": dimension,
+            "range": {"preset": preset, "since": since.isoformat(),
+                      "until": until.isoformat()},
+            "rows": rows}
+
+
+@app.get("/api/admin/analytics/retention")
+async def admin_analytics_retention(
+        preset: str = Query("90d", max_length=16),
+        start: Optional[str] = Query(None, max_length=32),
+        end: Optional[str] = Query(None, max_length=32),
+        admin: User = Depends(get_admin_user),
+        db: AsyncSession = Depends(get_db)):
+    """Of the people who signed up in this window, how many came back.
+
+    A cohort is the accounts whose sign_up landed in the range. "Came back"
+    means a meaningful event - a practice, a completion, a result, a checkout -
+    and specifically NOT a page_view, because a bounce off a marketing page is
+    not somebody returning to study.
+
+    Day 1 / 7 / 28 are windows from each account's own signup, not calendar
+    days, so a cohort is measured the same way whenever it happened.
+    """
+    from sqlalchemy import text as sa_text
+    since, until = analytics_range(preset, start, end)
+
+    res = await db.execute(sa_text(
+        "WITH cohort AS ("
+        "  SELECT user_id, MIN(created_at) AS signed_up_at"
+        "  FROM usage_events"
+        "  WHERE event = 'sign_up' AND user_id IS NOT NULL"
+        "    AND created_at >= :since AND created_at < :until"
+        "  GROUP BY user_id"
+        "), activity AS ("
+        "  SELECT c.user_id, c.signed_up_at,"
+        "         e.created_at - c.signed_up_at AS gap"
+        "  FROM cohort c JOIN usage_events e ON e.user_id = c.user_id"
+        "  WHERE e.event IN ('practice_start', 'speaking_start',"
+        "                    'practice_complete', 'result_view',"
+        "                    'checkout_start', 'payment_success')"
+        "    AND e.created_at > c.signed_up_at"
+        ") "
+        "SELECT (SELECT COUNT(*) FROM cohort) AS cohort_size,"
+        "       COUNT(DISTINCT user_id) FILTER "
+        "         (WHERE gap <= INTERVAL '1 day') AS d1,"
+        "       COUNT(DISTINCT user_id) FILTER "
+        "         (WHERE gap <= INTERVAL '7 days') AS d7,"
+        "       COUNT(DISTINCT user_id) FILTER "
+        "         (WHERE gap <= INTERVAL '28 days') AS d28 "
+        "FROM activity"), {"since": since, "until": until})
+    row = res.mappings().first() or {}
+
+    return {"range": {"preset": preset, "since": since.isoformat(),
+                      "until": until.isoformat()},
+            "retention": retention_row(
+                row.get("cohort_size"),
+                {1: row.get("d1"), 7: row.get("d7"), 28: row.get("d28")})}
+
+
+@app.get("/api/admin/analytics/paths")
+async def admin_analytics_paths(
+        preset: str = Query("28d", max_length=16),
+        start: Optional[str] = Query(None, max_length=32),
+        end: Optional[str] = Query(None, max_length=32),
+        limit: int = Query(20, ge=1, le=100),
+        admin: User = Depends(get_admin_user),
+        db: AsyncSession = Depends(get_db)):
+    """The sequences people actually move through, most common first.
+
+    One row per session, ordered by time, consecutive repeats collapsed -
+    otherwise every path is a unique snowflake with a count of one and the view
+    says nothing. Only sessions with at least two distinct steps are counted.
+
+    Built from session_id, so it covers everything recorded since sessions
+    existed and nothing before it.
+    """
+    from sqlalchemy import text as sa_text
+    since, until = analytics_range(preset, start, end)
+
+    # Aggregated per session in Postgres; only the collapsed sequences come
+    # back, capped, so the whole table is never in memory here.
+    res = await db.execute(sa_text(
+        "SELECT session_id, array_agg(event ORDER BY created_at, id) AS steps "
+        "FROM usage_events "
+        "WHERE created_at >= :since AND created_at < :until "
+        "  AND session_id IS NOT NULL "
+        "GROUP BY session_id "
+        "HAVING COUNT(*) BETWEEN 2 AND 200 "
+        "LIMIT 20000"), {"since": since, "until": until})
+
+    counts = {}
+    for _sid, steps in res.fetchall():
+        path = collapse_path(list(steps or []))
+        if len(path) < 2:
+            continue
+        key = " > ".join(path)
+        counts[key] = counts.get(key, 0) + 1
+
+    ordered = sorted(counts.items(), key=lambda kv: -kv[1])[:limit]
+    return {"range": {"preset": preset, "since": since.isoformat(),
+                      "until": until.isoformat()},
+            "sessions_considered": sum(counts.values()),
+            "paths": [{"path": k, "steps": k.split(" > "), "sessions": v}
+                      for k, v in ordered]}
 
 
 # ----------------------------------------------------------------------------
@@ -8912,6 +10156,10 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         await record_event(db, "payment_success", user_id=user.user_id,
                            plan=row.plan_id, amount=row.amount,
                            currency=row.currency, first_cycle=(not was_active))
+        # GA4's purchase, from the only place that knows the charge is real.
+        # Reached only on the transition that actually granted a cycle, which
+        # is what keeps one payment to one purchase - see ga4_track_purchase().
+        await ga4_track_purchase(row, first_cycle=(not was_active))
         return finish({"ok": True, "granted": True})
 
     # Checked BEFORE cancellation: a refund event often carries a cancelled

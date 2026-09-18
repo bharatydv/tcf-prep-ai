@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
 import { AccentToolbar, AnalysisProgress, BackLink, streamAnalysis } from '../components/shared';
+import { trackPracticeComplete } from '../lib/analytics';
 
 export default function CheckWriting() {
   const { user, refreshUser } = useAuth();
@@ -30,6 +31,17 @@ export default function CheckWriting() {
       onStage: setStage,
       onComplete: async (sub) => {
         await refreshUser();
+        /* A pasted text came back graded. Only the success path: onError below
+           covers the paywall and every failure, which finish nothing.
+           There is no practice_start to match this one — a paste is the whole
+           exercise, and counting the same moment twice would only inflate it.
+           The CEFR band alone; the text the learner pasted stays here. */
+        trackPracticeComplete({
+          skill: 'writing',
+          exam: 'tcf',
+          exam_type: 'check',
+          level: sub.tcf_level,
+        });
         toast.success(t('write.doneToast', { level: sub.tcf_level }));
         navigate(`/feedback/${sub.submission_id}`);
       },
