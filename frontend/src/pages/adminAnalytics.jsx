@@ -20,14 +20,14 @@
  * the labels here are event names out of the taxonomy — `practice_start` is
  * not a word that should be translated, because it is a key in a database.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { api, errMsg } from '../lib/api';
 
 const SUB_TABS = [
   ['overview', 'Overview'],
   ['funnel', 'Funnel'],
-  ['journey', 'User Journey'],
+  ['users', 'Users'],
   ['skills', 'Skills'],
   ['exams', 'Exams'],
   ['countries', 'Countries'],
@@ -205,109 +205,290 @@ function Funnel({ range }) {
   );
 }
 
-/* --------------------------------------------------------- User Journey --- */
-function Journey({ range }) {
+/* ------------------------------------------------------------- Visitors --- */
+/* Everyone who has been here, not only the ones who signed up.
+ *
+ * Anonymous visitors are most of the funnel, and a directory that listed only
+ * accounts would describe the people who already converted and quietly call
+ * that the visitor population. An anonymous visitor is an anon_id and nothing
+ * else: a random string their own browser stores. No address, no device
+ * fingerprint, no IP — none of which this application has ever collected.
+ */
+
+const KINDS = [
+  ['all', 'All'],
+  ['registered', 'Registered'],
+  ['anonymous', 'Anonymous'],
+  ['paid', 'Paid'],
+  ['free', 'Free'],
+];
+
+const KIND_STYLE = {
+  registered: 'bg-violet-100 text-violet-700',
+  anonymous: 'bg-gray-200 text-gray-600',
+};
+
+function Visitors({ range }) {
+  // `All` by default, deliberately: the complete population is the honest
+  // starting point, and anything narrower is a question the admin has to
+  // choose to ask.
+  const [kind, setKind] = useState('all');
   const [term, setTerm] = useState('');
-  const [users, setUsers] = useState([]);
-  const [selected, setSelected] = useState(null);
+  const [query, setQuery] = useState('');
+  const [offset, setOffset] = useState(0);
+  const [open, setOpen] = useState(null);
+  const LIMIT = 50;
+
+  const params = useMemo(
+    () => ({ ...range, kind, q: query, limit: LIMIT, offset }),
+    [range, kind, query, offset]);
+  const { data, loading } = useAnalytics('visitors', params, !open);
+
+  useEffect(() => { setOffset(0); }, [kind, query, range]);
+
+  if (open) {
+    return <Journey range={range} subject={open} onBack={() => setOpen(null)} />;
+  }
+
+  const rows = data?.visitors || [];
+
+  return (
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          {KINDS.map(([id, label]) => (
+            <button key={id} onClick={() => setKind(id)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                kind === id ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              data-testid={`visitors-kind-${id}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input value={term} onChange={(e) => setTerm(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && setQuery(term)}
+            placeholder="Name, email or visitor id"
+            className="w-64 rounded-lg border border-gray-200 px-3 py-1.5 text-sm" />
+          <button onClick={() => setQuery(term)} className="btn-outline text-xs">Search</button>
+        </div>
+      </div>
+
+      {loading && <Spinner />}
+      {!loading && !rows.length && <Empty>Nobody matches these filters.</Empty>}
+
+      {!loading && rows.length > 0 && (
+        <>
+          <div className="mt-4 card overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
+                <tr>
+                  <th className="px-4 py-3">Visitor</th>
+                  <th className="px-4 py-3">Country</th>
+                  <th className="px-4 py-3">First seen</th>
+                  <th className="px-4 py-3">Last seen</th>
+                  <th className="px-4 py-3 text-right">Sessions</th>
+                  <th className="px-4 py-3 text-right">Events</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((v) => (
+                  <tr key={`${v.kind}:${v.id}`}
+                    onClick={() => setOpen(v)}
+                    className="cursor-pointer border-t border-gray-100 hover:bg-violet-50/60"
+                    data-testid={`visitor-${v.id}`}>
+                    <td className="px-4 py-3">
+                      <span className={`pill mr-2 text-[10px] ${KIND_STYLE[v.kind] || ''}`}>
+                        {v.kind === 'anonymous' ? 'anon' : (v.subscription_status || 'free')}
+                      </span>
+                      <span className="font-semibold">{v.label}</span>
+                      {v.email && <span className="ml-2 text-xs text-gray-500">{v.email}</span>}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-500">{v.country}</td>
+                    <td className="px-4 py-3 text-xs tabular-nums text-gray-500">{when(v.first_seen)}</td>
+                    <td className="px-4 py-3 text-xs tabular-nums text-gray-500">{when(v.last_seen)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{fmt(v.sessions)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{fmt(v.events)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between text-sm">
+            <button disabled={offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - LIMIT))}
+              className="btn-outline text-xs disabled:opacity-40">Previous</button>
+            <span className="text-xs text-gray-500">
+              {offset + 1}–{Math.min(offset + LIMIT, data.total || 0)} of {fmt(data.total)}
+            </span>
+            <button disabled={offset + LIMIT >= (data.total || 0)}
+              onClick={() => setOffset(offset + LIMIT)}
+              className="btn-outline text-xs disabled:opacity-40">Next</button>
+          </div>
+        </>
+      )}
+
+      <p className="mt-6 text-xs text-gray-400">
+        An anonymous visitor is a browser, identified only by the random id that
+        browser stores for itself — never an address, a device fingerprint or an
+        IP. Registered accounts appear even when they have generated no events
+        at all, with no first or last seen. Every event belongs to exactly one
+        row here: the account that was signed in, or the account that browser
+        has been proven to belong to, or the browser itself.
+      </p>
+    </>
+  );
+}
+
+/* --------------------------------------------------------- User Journey --- */
+/* One visitor, in order. Works from either end: an account, or the browser
+ * that was reading long before there was an account.
+ *
+ * The three bands are the point of the screen. What somebody read BEFORE they
+ * were willing to give an email address is the part that explains why they
+ * signed up, and it is the part no analytics tool that starts at the signup
+ * form can show at all.
+ */
+const PHASE_BANDS = {
+  anonymous: { title: 'BEFORE SIGNUP', note: 'Anonymous activity' },
+  identity: { title: 'SIGNUP / LOGIN', note: 'The browser and the account become one person' },
+  identified: { title: 'AFTER SIGNUP', note: 'Registered activity' },
+};
+
+function Journey({ range, subject, onBack }) {
   const [filters, setFilters] = useState({ event: '', skill: '', exam: '', level: '' });
   const [offset, setOffset] = useState(0);
   const LIMIT = 100;
 
-  const search = useCallback(async (q) => {
-    if (!q.trim()) { setUsers([]); return; }
-    try {
-      // The admin user list already exists and already enforces admin auth;
-      // there is no reason for a second search endpoint beside it.
-      const { data } = await api.get(
-        `/api/admin/users?q=${encodeURIComponent(q.trim())}&limit=20`);
-      setUsers(data.users || []);
-    } catch (e) { toast.error(errMsg(e)); }
-  }, []);
-
   const params = useMemo(() => ({
-    ...range, ...filters, user_id: selected?.user_id, limit: LIMIT, offset,
-  }), [range, filters, selected, offset]);
+    ...range,
+    ...filters,
+    // One or the other, never both — the server refuses the ambiguity.
+    ...(subject.kind === 'anonymous'
+      ? { anon_id: subject.id }
+      : { user_id: subject.id }),
+    limit: LIMIT,
+    offset,
+  }), [range, filters, subject, offset]);
 
-  const { data, loading } = useAnalytics('journey', params, Boolean(selected));
+  const { data, loading } = useAnalytics('journey', params);
+  useEffect(() => { setOffset(0); }, [subject, filters, range]);
 
-  useEffect(() => { setOffset(0); }, [selected, filters, range]);
+  const who = data?.subject;
+  // Memoised, not `data?.events || []`: that fallback is a new array on every
+  // render, which would rebuild the trail below on every render too.
+  const events = useMemo(() => data?.events || [], [data]);
+
+  // The page-by-page trail, which is what the journey is actually for. Built
+  // from the rows already on screen, consecutive repeats collapsed, so it
+  // reads as a route rather than a log.
+  const trail = useMemo(() => {
+    const out = [];
+    events.forEach((e) => {
+      if (e.page && out[out.length - 1] !== e.page) out.push(e.page);
+    });
+    return out.slice(0, 12);
+  }, [events]);
 
   return (
     <>
-      <div className="card p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <button onClick={onBack} className="btn-outline text-xs">← All visitors</button>
         <div className="flex flex-wrap gap-2">
-          <input value={term} onChange={(e) => setTerm(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && search(term)}
-            placeholder="Search a learner by name, email or phone"
-            className="min-w-[260px] flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm" />
-          <button onClick={() => search(term)} className="btn-primary text-sm">Search</button>
+          <select value={filters.skill}
+            onChange={(e) => setFilters({ ...filters, skill: e.target.value })}
+            className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs">
+            <option value="">Any skill</option>
+            {SKILLS.map((x) => <option key={x} value={x}>{x}</option>)}
+          </select>
+          <select value={filters.exam}
+            onChange={(e) => setFilters({ ...filters, exam: e.target.value })}
+            className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs">
+            <option value="">Any exam</option>
+            {EXAMS.map((x) => <option key={x} value={x}>{x.toUpperCase()}</option>)}
+          </select>
+          <select value={filters.level}
+            onChange={(e) => setFilters({ ...filters, level: e.target.value })}
+            className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs">
+            <option value="">Any level</option>
+            {LEVELS.map((x) => <option key={x} value={x}>{x.toUpperCase()}</option>)}
+          </select>
         </div>
-        {users.length > 0 && (
-          <ul className="mt-3 max-h-48 space-y-1 overflow-auto text-sm">
-            {users.map((u) => (
-              <li key={u.user_id}>
-                <button onClick={() => { setSelected(u); setUsers([]); }}
-                  className="w-full rounded-lg px-3 py-1.5 text-left hover:bg-gray-100">
-                  <span className="font-semibold">{u.name || '—'}</span>
-                  <span className="ml-2 text-gray-500">{u.email}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
 
-      {!selected && <Empty>Search for a learner to see their journey.</Empty>}
+      {loading && <Spinner />}
 
-      {selected && (
+      {!loading && who && (
         <>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <select value={filters.skill}
-              onChange={(e) => setFilters({ ...filters, skill: e.target.value })}
-              className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs">
-              <option value="">Any skill</option>
-              {SKILLS.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <select value={filters.exam}
-              onChange={(e) => setFilters({ ...filters, exam: e.target.value })}
-              className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs">
-              <option value="">Any exam</option>
-              {EXAMS.map((s) => <option key={s} value={s}>{s.toUpperCase()}</option>)}
-            </select>
-            <select value={filters.level}
-              onChange={(e) => setFilters({ ...filters, level: e.target.value })}
-              className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs">
-              <option value="">Any level</option>
-              {LEVELS.map((s) => <option key={s} value={s}>{s.toUpperCase()}</option>)}
-            </select>
+          <div className="mt-4 card p-4 text-sm">
+            <p className="font-heading text-lg font-bold">{who.label}</p>
+            <p className="mt-1 text-xs text-gray-500">
+              {who.kind === 'anonymous' ? 'Anonymous browser' : who.email}
+              {' · '}{who.country}
+              {who.joined_at && <> · joined {when(who.joined_at)}</>}
+              {who.subscription_status && <> · {who.subscription_status}</>}
+              {' · '}{fmt(data.total)} events
+              {data.stitched_anon_ids > 0 && (
+                <> · {data.stitched_anon_ids} pre-signup browser
+                  {data.stitched_anon_ids === 1 ? '' : 's'} stitched in</>
+              )}
+            </p>
+            {who.kind === 'anonymous' && who.linked_user_id && (
+              <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                This browser went on to sign in as{' '}
+                <span className="font-semibold">{who.linked_user_label}</span>,
+                and has never been used for any other account — so the activity
+                below is one continuous journey.
+              </p>
+            )}
+            {who.kind === 'anonymous' && !who.linked_user_id && (
+              <p className="mt-2 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                Not linked to any account. Either this visitor never signed in,
+                or the browser has been used for more than one account — in
+                which case the journeys are deliberately kept apart rather than
+                guessed at.
+              </p>
+            )}
           </div>
 
-          {loading && <Spinner />}
-
-          {!loading && data && (
-            <>
-              <div className="mt-4 card p-4 text-sm">
-                <p><span className="font-semibold">{data.user?.name || '—'}</span>
-                  <span className="ml-2 text-gray-500">{data.user?.email}</span></p>
-                <p className="mt-1 text-xs text-gray-500">
-                  {data.user?.country} · joined {when(data.user?.created_at)} ·
-                  {' '}{data.user?.subscription_status} ·
-                  {' '}{fmt(data.total)} events
-                  {data.stitched_anon_ids > 0 && (
-                    <> · including {data.stitched_anon_ids} pre-signup browser
-                      {data.stitched_anon_ids === 1 ? '' : 's'}</>
-                  )}
-                </p>
+          {trail.length > 0 && (
+            <div className="mt-4 card p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500">Path</p>
+              <div className="mt-2 flex flex-wrap items-center gap-1 text-xs">
+                {trail.map((page, i) => (
+                  <span key={`${page}-${i}`} className="flex items-center gap-1">
+                    {i > 0 && <span className="text-gray-300">→</span>}
+                    <span className="rounded bg-gray-100 px-2 py-0.5 font-semibold">{page}</span>
+                  </span>
+                ))}
               </div>
+            </div>
+          )}
 
-              {!data.events?.length && <Empty>No events in this range.</Empty>}
+          {!events.length && <Empty>No events in this range.</Empty>}
 
-              {data.events?.length > 0 && (
-                <ol className="mt-4 space-y-1">
-                  {data.events.map((e) => (
-                    <li key={e.id}
-                      className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg px-3 py-2 text-sm odd:bg-gray-50">
+          {events.length > 0 && (
+            <ol className="mt-4">
+              {events.map((e, i) => {
+                const band = e.phase !== events[i - 1]?.phase ? PHASE_BANDS[e.phase] : null;
+                return (
+                  <li key={e.id}>
+                    {band && (
+                      <div className="mt-4 flex items-center gap-3 first:mt-0">
+                        <span className={`rounded-full px-3 py-1 text-[10px] font-bold tracking-widest ${
+                          e.phase === 'identity' ? 'bg-primary text-white'
+                            : e.phase === 'identified' ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-gray-200 text-gray-600'}`}>
+                          {band.title}
+                        </span>
+                        <span className="text-xs text-gray-400">{band.note}</span>
+                        <span className="h-px flex-1 bg-gray-200" />
+                      </div>
+                    )}
+                    <div className={`mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg border-l-2 px-3 py-2 text-sm ${
+                      e.phase === 'identity' ? 'border-primary bg-violet-50'
+                        : e.phase === 'identified' ? 'border-emerald-200' : 'border-gray-200'}`}>
                       <span className="w-40 shrink-0 tabular-nums text-xs text-gray-500">{when(e.at)}</span>
                       <span className="font-semibold text-primary">{e.event}</span>
                       {e.page && <span className="text-xs text-gray-500">{e.page}</span>}
@@ -315,34 +496,33 @@ function Journey({ range }) {
                       {e.exam && <span className="pill bg-sky-100 text-xs">{e.exam}</span>}
                       {e.level && <span className="pill bg-emerald-100 text-xs">{e.level}</span>}
                       {e.plan && <span className="pill bg-amber-100 text-xs">{e.plan}</span>}
-                      {!e.identified && (
-                        <span className="text-xs italic text-gray-400">before signup</span>
-                      )}
-                    </li>
-                  ))}
-                </ol>
-              )}
-
-              <div className="mt-4 flex items-center justify-between text-sm">
-                <button disabled={offset === 0}
-                  onClick={() => setOffset(Math.max(0, offset - LIMIT))}
-                  className="btn-outline text-xs disabled:opacity-40">Previous</button>
-                <span className="text-xs text-gray-500">
-                  {offset + 1}–{Math.min(offset + LIMIT, data.total || 0)} of {fmt(data.total)}
-                </span>
-                <button disabled={offset + LIMIT >= (data.total || 0)}
-                  onClick={() => setOffset(offset + LIMIT)}
-                  className="btn-outline text-xs disabled:opacity-40">Next</button>
-              </div>
-
-              <p className="mt-4 text-xs text-gray-400">
-                Activity from before this person signed up is included only when
-                the browser it came from has never been used to sign into any
-                other account. On a shared machine there is no way to tell who
-                read what, so nothing is attributed rather than the wrong thing.
-              </p>
-            </>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
           )}
+
+          <div className="mt-4 flex items-center justify-between text-sm">
+            <button disabled={offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - LIMIT))}
+              className="btn-outline text-xs disabled:opacity-40">Previous</button>
+            <span className="text-xs text-gray-500">
+              {offset + 1}–{Math.min(offset + LIMIT, data.total || 0)} of {fmt(data.total)}
+            </span>
+            <button disabled={offset + LIMIT >= (data.total || 0)}
+              onClick={() => setOffset(offset + LIMIT)}
+              className="btn-outline text-xs disabled:opacity-40">Next</button>
+          </div>
+
+          <p className="mt-4 text-xs text-gray-400">
+            Pre-signup activity is shown only when the browser it came from has
+            never been used to sign into any other account. On a shared machine
+            there is no way to tell who read what, so nothing is attributed
+            rather than the wrong thing. Only parameters on the documented
+            allowlist are returned: no essays, transcripts, recordings, answer
+            sheets, addresses, tokens or payment details.
+          </p>
         </>
       )}
     </>
@@ -653,7 +833,7 @@ export default function AdminAnalytics() {
             <Paths range={applied} />
           </>
         )}
-        {ready && sub === 'journey' && <Journey range={applied} />}
+        {ready && sub === 'users' && <Visitors range={applied} />}
         {ready && sub === 'skills' && (
           <Breakdown range={applied} dimension="skill"
             caption={'Aggregate activity per skill. Completion rate is completions over starts within the range, so a paper begun just before the window and finished inside it counts as a completion with no start — over a week or more that rounds out. These are rates for the product, not a ranking of learners.'} />
