@@ -353,10 +353,13 @@ export default function ExamSimulator() {
                 <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-100 font-heading text-lg font-extrabold text-primary">
                   {x.set_number}
                 </span>
-                <h3 className="mt-4 font-heading text-base font-bold text-gray-900">
+                {/* A number and a name. The tâche 3 document used to be
+                    previewed here, which let a candidate read twenty papers
+                    and choose the one they were readiest for — the opposite
+                    of what a fixed set is for. */}
+                <h3 className="mt-4 flex-1 font-heading text-base font-bold text-gray-900">
                   {t('sim.setN', { n: x.set_number })}
                 </h3>
-                <p className="mt-1 flex-1 text-xs leading-relaxed text-gray-500">{x.task3_preview}…</p>
               </div>
             </button>
           ))}
