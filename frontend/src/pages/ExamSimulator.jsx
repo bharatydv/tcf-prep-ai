@@ -9,6 +9,7 @@ import { formatDateTime, useT } from '../i18n';
 import { Seo } from '../lib/seo';
 import AttemptHistory, { useAttempts } from '../components/AttemptHistory';
 import { AccentToolbar, BackLink, ErrorHighlightedText, WordCountBar, useConfirm } from '../components/shared';
+import { trackPracticeStart, trackPracticeComplete } from '../lib/analytics';
 
 const GUIDE = {
   1: { name: WRITING_TASKS[1].name, min: WRITING_TASKS[1].minWords, max: WRITING_TASKS[1].maxWords },
@@ -149,6 +150,18 @@ export default function ExamSimulator() {
       setAttempt(data.attempt);
       setPastAttempt(null);
       setPhase('results');
+      /* Marked, and the report is on screen. Not moved any earlier: the catch
+         below puts the candidate back in the exam, so anything counted before
+         the server answered would count papers that were never graded.
+         The CEFR band and the clock only — never the three texts. */
+      trackPracticeComplete({
+        skill: 'writing',
+        exam: 'tcf',
+        exam_type: 'simulator',
+        level: data.attempt?.tcf_level,
+        set_number: setNumber || undefined,
+        time_used_seconds: timeUsed,
+      });
       reloadAttempts();   // the paper just handed in belongs in the history
       localStorage.removeItem(DRAFT_KEY);
       await refreshUser();
@@ -159,7 +172,7 @@ export default function ExamSimulator() {
     // reloadAttempts is stable for a given list and would re-create submit on
     // every history refresh, which the expiry timer holds a reference to.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tasks, texts, refreshUser]);
+  }, [tasks, texts, refreshUser, setNumber]);
 
   useEffect(() => { secondsRef.current = seconds; }, [seconds]);
 
@@ -367,7 +380,20 @@ export default function ExamSimulator() {
             <li>🚫 {t('sim.rule3')}</li>
             <li>💳 {t('sim.rule4')}</li>
           </ul>
-          <button className="btn-primary w-full" onClick={() => setPhase('exam')} data-testid="start-simulator-button">
+          {/* The clock starts with this click. The restore path above also
+              reaches phase 'exam', and deliberately does not count: resuming
+              an interrupted sitting is the same sitting, not a second one. */}
+          <button className="btn-primary w-full"
+            onClick={() => {
+              trackPracticeStart({
+                skill: 'writing',
+                exam: 'tcf',
+                exam_type: 'simulator',
+                set_number: setNumber || undefined,
+              });
+              setPhase('exam');
+            }}
+            data-testid="start-simulator-button">
             {t('sim.start')}
           </button>
         </div>

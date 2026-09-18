@@ -12,6 +12,7 @@ import { BackLink } from '../components/shared';
 import ConversationModal from '../components/ConversationModal';
 import { SpeakingResult } from '../components/SpeakingResult';
 import { useSpeak } from '../lib/speak';
+import { trackPracticeStart, trackPracticeComplete } from '../lib/analytics';
 import { speakingPaperMark, displayMark } from '../lib/tcf';
 import { readSitting, writeSitting } from '../lib/speakingExam';
 import AttemptHistory, { useAttempts } from '../components/AttemptHistory';
@@ -123,6 +124,11 @@ export default function SpeakingExam() {
   const startTask = (n) => {
     if (!user) return navigate('/login');
     if (n === 3) {
+      /* Deliberately not counted here. Tâche 3 is recorded on
+         /speaking/record, which fires its own practice_start the moment the
+         preparation clock starts — and navigating to a recorder is not the
+         same as beginning to speak into it. Counting both would double every
+         tâche 3 in the funnel. */
       // The monologue recorder owns the preparation timer; send it the question.
       // `exam` tells the recorder this is a sitting, not free practice: it
       // reports the grade back into the sitting instead of ending the paper.
@@ -131,10 +137,30 @@ export default function SpeakingExam() {
                + `&q=${encodeURIComponent(paper.task3.question)}`);
       return;
     }
+    /* Tâches 1 and 2 are spoken into the modal this opens, on this page, so
+       this is where they begin. */
+    trackPracticeStart({
+      skill: 'speaking',
+      exam: 'tcf',
+      exam_type: 'test',
+      tache: n,
+      set_number: setNumber || undefined,
+    });
     setLive(n);
   };
 
   const onGraded = (taskType) => (data) => {
+    /* The modal only calls this with a grade in hand, so it is the completion
+       for tâches 1 and 2 — tâche 3 completes on /speaking/record, which counts
+       its own. The CEFR band only; the conversation stays in the modal. */
+    trackPracticeComplete({
+      skill: 'speaking',
+      exam: 'tcf',
+      exam_type: 'test',
+      tache: taskType,
+      level: data?.tcf_level,
+      set_number: setNumber || undefined,
+    });
     const next = { ...results, [taskType]: data };
     setResults(next);
     writeSitting(setNumber, next);

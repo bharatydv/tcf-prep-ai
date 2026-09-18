@@ -1,4 +1,6 @@
 import axios from "axios";
+// Leaf module: imports nothing, so there is no cycle with lib/analytics.js.
+import { currentPath } from './eventTaxonomy';
 
 
 // In production (GCP + Nginx), we use relative paths.
@@ -89,12 +91,37 @@ api.interceptors.response.use(
  * never be able to break the thing it measures.
  */
 const ANON_KEY = 'prepfrancais.anon';
+const SESSION_KEY = 'prepfrancais.session';
 
-function anonId() {
+/* How long a gap ends a visit. Thirty minutes is the convention GA4 and
+   everyone else uses; the number matters less than the fact that both systems
+   use the same one, so a session in the admin funnel means the same span of
+   time as a session in GA4. */
+const SESSION_IDLE_MS = 30 * 60 * 1000;
+
+function randomId() {
+  try {
+    if (crypto.randomUUID) return crypto.randomUUID();
+  } catch { /* not available in this context */ }
+  // Two draws, because one Math.random() is about 52 bits and these have to
+  // stay unique across every browser that ever posts an event.
+  return `${Date.now().toString(36)}-${String(Math.random()).slice(2)}`
+    + `-${String(Math.random()).slice(2)}`;
+}
+
+/* The browser, across visits.
+ *
+ * Random, stored here, and meaningless anywhere else: it is not a fingerprint
+ * and not derived from anything about the device or the person. It exists so a
+ * visitor who has not signed up yet still occupies a position in the funnel,
+ * and so the trail they leave before registering can be joined to the account
+ * they eventually open. See resetIdentity() for why it does not survive a
+ * logout. */
+export function anonId() {
   try {
     let id = localStorage.getItem(ANON_KEY);
     if (!id) {
-      id = (crypto.randomUUID?.() || String(Math.random()).slice(2)).slice(0, 36);
+      id = randomId().slice(0, 36);
       localStorage.setItem(ANON_KEY, id);
     }
     return id;
@@ -105,10 +132,91 @@ function anonId() {
   }
 }
 
+/* One visit.
+ *
+ * localStorage rather than sessionStorage, deliberately, for two reasons:
+ * sessionStorage is per-tab, so opening the pricing page in a second tab would
+ * start a second session and split one visit in half; and it is cleared when
+ * the tab closes, so somebody who closes the tab and comes back two minutes
+ * later would be counted as a returning visitor rather than the same one
+ * carrying on.
+ *
+ * The window is idle-based, not fixed-length: `lastSeen` moves with every
+ * event, so a candidate who sits a sixty-minute paper and then opens the
+ * pricing page is still in the session that started when they arrived, which
+ * is the whole point of measuring a journey.
+ *
+ * Reads and writes are wrapped because localStorage throws outright in some
+ * privacy modes, and a storage error must never take down the page it is
+ * measuring. When it does throw this returns a fresh id every time: every
+ * event becomes its own session, which undercounts session length but never
+ * merges two people's journeys, and that is the right way round to fail.
+ */
+export function sessionId(now = Date.now()) {
+  try {
+    let saved = null;
+    try {
+      saved = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+    } catch { /* corrupt entry - treated as no session below */ }
+
+    const fresh = !saved || !saved.id || typeof saved.lastSeen !== 'number'
+      || (now - saved.lastSeen) > SESSION_IDLE_MS;
+    const id = fresh ? randomId().slice(0, 36) : saved.id;
+    // Written on every call, including the ones that did not start a session:
+    // this IS the activity clock, and a session that stopped being extended
+    // would expire thirty minutes after it began rather than thirty minutes
+    // after the visitor stopped doing anything.
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ id, lastSeen: now }));
+    return id;
+  } catch {
+    return randomId().slice(0, 36);
+  }
+}
+
+/* A different person is now using this browser.
+ *
+ * Called on logout. Both ids are thrown away and the next event starts a new
+ * anonymous identity and a new visit.
+ *
+ * This is the primary defence against two accounts on one machine - a shared
+ * laptop, an internet cafe, a family computer - being stitched into one
+ * journey. The server has a second, independent guard (it refuses to attribute
+ * anonymous activity to an account when the same anon_id has been seen signing
+ * into more than one), but that one is a repair; this one stops the damage
+ * being recorded in the first place.
+ *
+ * It costs the cross-visit continuity of the anonymous id for somebody who
+ * logs out and carries on browsing. That is the correct trade: the alternative
+ * is attributing one person's study history to a different person's account. */
+export function resetIdentity() {
+  try {
+    localStorage.removeItem(ANON_KEY);
+    localStorage.removeItem(SESSION_KEY);
+  } catch {
+    // Nothing stored means nothing to reset.
+  }
+}
+
+/* One first-party event.
+ *
+ * `event_id` is generated here rather than on the server so that a retry of
+ * this POST - by the browser, by a proxy, by a service worker - is the SAME
+ * event and is rejected by the unique index rather than counted twice. It is
+ * the only thing standing between a flaky connection and a doubled funnel.
+ *
+ * `path` is the page this happened on, with its query string stripped back to
+ * campaign parameters, so no caller has to remember to pass it and no caller
+ * can accidentally pass a URL with a reset token in it. */
 export function track(event, meta) {
   try {
-    api.post('/api/events', { event, anon_id: anonId(), meta: meta || {} })
-      .catch(() => {});
+    api.post('/api/events', {
+      event,
+      event_id: randomId(),
+      anon_id: anonId(),
+      session_id: sessionId(),
+      path: currentPath(),
+      meta: meta || {},
+    }).catch(() => {});
   } catch {
     // Never let a metric throw into a render path.
   }

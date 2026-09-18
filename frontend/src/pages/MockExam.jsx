@@ -8,10 +8,19 @@ import { formatDateTime, useT } from '../i18n';
 import { Seo } from '../lib/seo';
 import { ComingSoon } from '../components/shared';
 import AttemptHistory, { useAttempts } from '../components/AttemptHistory';
+import { trackPracticeStart, trackPracticeComplete } from '../lib/analytics';
 
 // Mock exams are not open yet. Module scope, so the fetch effect below does
 // not take it as a dependency. Flip to false to restore the page.
 const NOT_READY = true;
+
+/* The two mock papers, as a skill name the rest of the funnel already uses.
+   Keeps 'reading' meaning reading whether it came from a mock, a test or
+   untimed practice, instead of splitting one skill across three spellings. */
+const SKILL = {
+  'reading-comprehension': 'reading',
+  'oral-comprehension': 'listening',
+};
 
 const TYPES = {
   'reading-comprehension': { label: 'mock.reading', icon: BookOpen },
@@ -42,7 +51,21 @@ export default function MockExam() {
   useEffect(() => {
     if (NOT_READY) return;
     setQuestions(null); setAnswers({}); setResult(null); setPastAttempt(null);
-    api.get(`/api/exam/questions/${examType}`).then(({ data }) => setQuestions(data.questions)).catch(() => setQuestions([]));
+    api.get(`/api/exam/questions/${examType}`)
+      .then(({ data }) => {
+        setQuestions(data.questions);
+        /* The paper is open. On the resolved promise rather than on mount, so
+           a paper the server could not produce is not counted as a sitting
+           anybody began. */
+        trackPracticeStart({
+          skill: SKILL[examType] || 'reading',
+          exam: 'tcf',
+          exam_type: 'mock',
+          paper: examType,
+          questions: (data.questions || []).length,
+        });
+      })
+      .catch(() => setQuestions([]));
   }, [examType]);
 
   const finish = async () => {
@@ -53,6 +76,16 @@ export default function MockExam() {
         exam_type: examType, answers, time_used_seconds: 0,
       });
       setResult(data);
+      /* Graded. Inside the try: the catch below leaves the paper unmarked and
+         open, which is not a completion. A score and a total, nothing else. */
+      trackPracticeComplete({
+        skill: SKILL[examType] || 'reading',
+        exam: 'tcf',
+        exam_type: 'mock',
+        paper: examType,
+        score: data.score,
+        total: data.total,
+      });
       reloadAttempts();   // the paper just handed in belongs in the history
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
