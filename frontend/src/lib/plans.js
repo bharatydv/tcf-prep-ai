@@ -94,9 +94,9 @@ export function feeBreakdown(base, feePercent = FALLBACK_FEE_PERCENT) {
    pricing page with three empty cards is worse than one showing last known
    prices. `configured` stays false for these, so nothing is buyable from them. */
 export const PLANS = [
-  { id: 'week', name: '1 Week', amount: 1320, first_amount: 1320, price: '₹1,320', wasPrice: null, bonus: 3, checkout: feeBreakdown(1320), ...PLAN_STYLE.week },
-  { id: 'month', name: '1 Month', amount: 5280, first_amount: 5280, price: '₹5,280', wasPrice: null, bonus: 8, checkout: feeBreakdown(5280), ...PLAN_STYLE.month },
-  { id: 'quarter', name: '3 Months', amount: 15840, first_amount: 15840, price: '₹15,840', wasPrice: null, bonus: 15, checkout: feeBreakdown(15840), ...PLAN_STYLE.quarter },
+  { id: 'week', name: '1 Week', amount: 1299, first_amount: 1299, price: '₹1,299', wasPrice: null, bonus: 3, checkout: feeBreakdown(1299), ...PLAN_STYLE.week },
+  { id: 'month', name: '1 Month', amount: 4999, first_amount: 4999, price: '₹4,999', wasPrice: null, bonus: 8, checkout: feeBreakdown(4999), ...PLAN_STYLE.month },
+  { id: 'quarter', name: '3 Months', amount: 14999, first_amount: 14999, price: '₹14,999', wasPrice: null, bonus: 15, checkout: feeBreakdown(14999), ...PLAN_STYLE.quarter },
 ];
 
 /* The live catalogue.
