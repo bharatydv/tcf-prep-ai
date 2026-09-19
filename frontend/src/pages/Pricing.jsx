@@ -4,7 +4,7 @@ import { CheckCircle } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
-import { useBillingPlans } from '../lib/plans';
+import { useBillingPlans, CheckoutBreakdown } from '../lib/plans';
 import { useCheckout } from '../lib/checkout';
 import { trackViewPricing } from '../lib/analytics';
 
@@ -131,12 +131,6 @@ export default function Pricing() {
               )}
               <p className="mt-1 text-sm font-semibold text-white/90">+ {t('pricing.bonus', { n: p.bonus })}</p>
             </div>
-            {/* The processing fee is deliberately not itemised on the card any
-                more: the plan price stands on its own, and the fee is added to
-                the order, so the figure the customer confirms is the one on
-                Cashfree's payment page. Nothing about what is charged changed
-                -- checkout_breakdown() on the server still computes it, and
-                the order is still created for the total including the fee. */}
             <ul className="space-y-3 p-6 text-sm">
               {FEATURE_KEYS.map((k) => (
                 <li key={k} className="flex items-start gap-2">
@@ -144,7 +138,15 @@ export default function Pricing() {
                 </li>
               ))}
             </ul>
-            <div className="px-6 pb-6">
+            {/* The fee is itemised here because the gateway will not do it.
+                PayU's page prints one "Total Payable" and nothing else — it
+                accepts an additional_charges field and then ignores it, so the
+                only place the customer can be shown the plan price and the fee
+                as separate lines is before they leave. Without this the card
+                says 1,299 and PayU says 1,337.84 with nothing accounting for
+                the difference. */}
+            <CheckoutBreakdown plan={p} currency={currency} />
+            <div className="px-6 pb-6 pt-4">
               {configured ? (
                 <button onClick={() => subscribe(p.id)} disabled={Boolean(busy)}
                   className="btn-primary w-full justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600 disabled:opacity-60"
