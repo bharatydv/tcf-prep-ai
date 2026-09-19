@@ -7,7 +7,7 @@ import server as m
 def _response_hash(fields):
     values = [
         fields.get("additionalCharges", ""), m.PAYU_SALT,
-        fields["status"], "", "", "", "", "", "", "", "", "",
+        fields["status"], "", "", "", "", "", "", "", "", "", "",
         fields["email"], fields["firstname"], fields["productinfo"],
         fields["amount"], fields["txnid"], fields["key"],
     ]
@@ -22,7 +22,7 @@ def test_request_hash_uses_payu_form_order(monkeypatch):
         "firstname": "Marie", "email": "marie@example.com",
     }
     expected = hashlib.sha512(
-        "merchant-key|sub_123|82.39|1 Month|Marie|marie@example.com||||||||||merchant-salt"
+        "merchant-key|sub_123|82.39|1 Month|Marie|marie@example.com|||||||||||merchant-salt"
         .encode()).hexdigest()
     assert m.payu_request_hash(fields) == expected
 
