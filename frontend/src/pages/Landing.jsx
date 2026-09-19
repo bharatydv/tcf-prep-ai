@@ -709,9 +709,9 @@ export default function Landing() {
                     </li>
                   ))}
                 </ul>
-                <Link to="/register" data-testid="plan-free"
+                <Link to={user ? '/dashboard' : '/register'} data-testid="plan-free"
                   className="btn-outline mt-7 w-full justify-center !border-green-300 !text-green-800">
-                  {t('pricing.createAccount')}
+                  {user ? t('pricing.goDashboard') : t('pricing.createAccount')}
                 </Link>
               </div>
             </div>
