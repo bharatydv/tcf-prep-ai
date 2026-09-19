@@ -166,7 +166,22 @@ export default function SpeakingExam() {
     return next;
   });
 
-  const openReview = (n) => setReviewing((open) => new Set(open).add(n));
+  /* Opening a correction from the attempt list below puts it on screen — and
+     the screen is often somewhere else entirely, because that list sits under
+     all three tâches. Pressing Review and watching nothing happen reads as a
+     broken button; the panel had opened, a page further up. Deferred by a tick
+     so the panel exists to be scrolled to. */
+  const scrollToTache = (n) => {
+    setTimeout(() => {
+      document.getElementById(`tache-${n}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
+  };
+
+  const openReview = (n) => {
+    setReviewing((open) => new Set(open).add(n));
+    scrollToTache(n);
+  };
 
   /* The tâche is over; the marking of it is not, and the candidate does not
      wait for it.
@@ -292,7 +307,12 @@ export default function SpeakingExam() {
      then kept with the rest of the sitting. */
   const openAttempt = async (row) => {
     if (results[row.task]?.errors?.length || results[row.task]?.loaded) {
-      setReviewing(row.task);
+      /* openReview, not setReviewing: `reviewing` is a Set of open tâches, and
+         assigning the number here replaced it with one. The next render then
+         called reviewing.has() on a number, which threw and took the whole
+         page down — a blank screen from pressing Review on a correction that
+         was already in hand. */
+      openReview(row.task);
       return;
     }
     setOpeningId(row.id);
@@ -418,9 +438,12 @@ export default function SpeakingExam() {
           {stages.map((s) => {
             const Icon = TASK_ICON[s.n];
             const result = results[s.n];
+            /* Named so the attempt list further down can bring its correction
+               into view rather than opening it off-screen. */
             return (
-              <div key={s.n} className={`rounded-3xl border p-5 shadow-soft ${
-                result ? 'border-green-200 bg-green-50/40' : 'border-violet-100 bg-white'}`}>
+              <div key={s.n} id={`tache-${s.n}`}
+                className={`scroll-mt-20 rounded-3xl border p-5 shadow-soft ${
+                  result ? 'border-green-200 bg-green-50/40' : 'border-violet-100 bg-white'}`}>
                 <div className="flex items-start gap-3">
                   <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${
                     result ? 'bg-green-100 text-green-700' : 'bg-violet-100 text-primary'}`}>
