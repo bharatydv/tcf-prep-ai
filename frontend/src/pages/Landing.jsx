@@ -12,6 +12,7 @@ import { useT } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
 import { track } from '../lib/api';
 import { useBillingPlans, formatPrice } from '../lib/plans';
+import { useCheckout } from '../lib/checkout';
 
 /* ===================================================================== page */
 /* Verifiable description of the product, in place of invented testimonials. */
@@ -31,10 +32,12 @@ export default function Landing() {
   const [simTopic, setSimTopic] = useState('');
   const [simAnswer, setSimAnswer] = useState('');
   const trialTo = user ? '/dashboard' : '/register';
-  /* A plan card is purchase intent, so it carries the chosen plan to
-     /checkout rather than to /pricing. Clicking "1 Month" and being shown a
-     page that asks which plan you want is a step that sells nothing — the
-     visitor already said. */
+  /* A plan card is purchase intent, so it opens the real checkout here rather
+     than linking to /pricing.
+     Clicking "1 Month" and being shown a page that asks which plan you want is
+     a step that sells nothing — the visitor already said. The hook handles the
+     signed-out case itself, carrying the chosen plan through registration. */
+  const { subscribe, busy, promptDialog } = useCheckout();
 
   // The top of the funnel. Everything else is measured against this number.
   useEffect(() => { track('landing_view'); }, []);
@@ -89,6 +92,9 @@ export default function Landing() {
 
   return (
     <main className="overflow-x-clip bg-white">
+      {/* The phone prompt renders through this; without it, a Cashfree
+          checkout that needs a number would stall with nothing on screen. */}
+      {promptDialog}
       <Seo
         titleKey="seo.home.title"
         descKey="seo.home.desc"
@@ -737,18 +743,14 @@ export default function Landing() {
                       <li key={f} className="flex items-center gap-2.5"><CheckCircle size={17} weight="fill" className="shrink-0 text-primary" /> {t(f)}</li>
                     ))}
                   </ul>
-                  {/* Itemised here because PayU's page will not: it prints a
-                      single "Total Payable" and ignores the additional_charges
-                      field, so this is the only place the plan price and the
-                      fee can be shown as separate lines. */}
-                  {/* One hop to /checkout, not straight to the gateway. PayU's
-                      page carries a bare total and none of this site, so the
-                      order is confirmed on a page of ours first. */}
-                  <Link to={`/checkout?plan=${encodeURIComponent(p.id)}`}
-                    data-testid={`plan-${p.id}`}
+                  {/* Opens the gateway from here. Someone who clicked a
+                      specific plan is asking to buy it, and every screen
+                      between that click and the card form costs conversions. */}
+                  <button type="button" data-testid={`plan-${p.id}`}
+                    onClick={() => subscribe(p.id)} disabled={Boolean(busy)}
                     className={`mt-7 ${p.popular ? 'btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600 w-full justify-center' : 'btn-outline w-full justify-center'}`}>
-                    {t('land.getStarted')}
-                  </Link>
+                    {busy === p.id ? t('billing.redirecting') : t('land.getStarted')}
+                  </button>
                 </div>
               </div>
             </Reveal>
