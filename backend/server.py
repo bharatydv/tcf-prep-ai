@@ -4101,7 +4101,7 @@ def payu_request_hash(fields: dict) -> str:
         fields.get("productinfo", ""), fields.get("firstname", ""),
         fields.get("email", ""), fields.get("udf1", ""), fields.get("udf2", ""),
         fields.get("udf3", ""), fields.get("udf4", ""), fields.get("udf5", ""),
-        "", "", "", "", PAYU_SALT,
+        "", "", "", "", "", PAYU_SALT,
     ]
     return hashlib.sha512("|".join(_payu_text(v) for v in values).encode()).hexdigest()
 
@@ -4114,7 +4114,7 @@ def verify_payu_response(fields: dict) -> bool:
     values = [
         fields.get("additionalCharges", fields.get("additional_charges", "")),
         PAYU_SALT, fields.get("status", ""), "", "", "", "", "", "", "",
-        "", "", fields.get("email", ""), fields.get("firstname", ""),
+        "", "", "", fields.get("email", ""), fields.get("firstname", ""),
         fields.get("productinfo", ""), fields.get("amount", ""),
         fields.get("txnid", ""), fields.get("key", ""),
     ]
