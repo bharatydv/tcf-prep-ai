@@ -242,7 +242,11 @@ export default function SpeakingExam() {
    * exactly as it did before. */
   useEffect(() => {
     if (revealedRef.current) return;
-    const marked = TASKS.filter((n) => results[n]);
+    /* Answered is not enough to open: a tâche still being marked is held as a
+       bare `pending` flag with no grade behind it, and revealing that would
+       open a correction panel over nothing. The paper reveals itself once the
+       last mark is actually in, which is the moment this exists for. */
+    const marked = TASKS.filter((n) => results[n] && !results[n].pending);
     if (marked.length < TASKS.length) return;
     // Set before the fetches below, or each one updating `results` would run
     // this effect again and ask for the same submissions a second time.
@@ -380,11 +384,11 @@ export default function SpeakingExam() {
   /* Answered is not marked. A tâche handed off for marking counts towards the
      progress line and unlocks the next one, but the paper is only complete —
      and only computes a mark — once every tâche has a grade behind it. */
-  const marked = (n) => Boolean(results[n]) && !results[n].pending;
+  const isMarked = (n) => Boolean(results[n]) && !results[n].pending;
   // A real sitting runs 1 → 2 → 3 with no skipping ahead, so a tâche unlocks
   // only once the one before it has been answered.
   const unlocked = (n) => n === 1 || Boolean(results[n - 1]);
-  const finished = stages.every((s) => marked(s.n));
+  const finished = stages.every((s) => isMarked(s.n));
   const levels = stages.map((s) => results[s.n]?.tcf_level).filter(Boolean);
   // Expression orale is reported the way the real paper reports it: one mark
   // out of 20 for the skill, and the NCLC/CLB level that mark converts to.
