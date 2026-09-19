@@ -92,7 +92,10 @@ export default function SpeakingExam() {
       const next = { ...held };
       let added = false;
       Object.entries(latest).forEach(([n, a]) => {
-        if (next[n]) return;
+        // A tâche still being marked is held as a bare `pending` flag, which
+        // carries no grade. The server's stub is better than that the moment
+        // it exists, so it is not treated as something already in hand.
+        if (next[n] && !next[n].pending) return;
         // A stub, not a grade: enough for the page to know the tâche was
         // answered and what it scored. The corrections themselves are fetched
         // only when the candidate opens them, which is the one place they are
@@ -165,23 +168,50 @@ export default function SpeakingExam() {
 
   const openReview = (n) => setReviewing((open) => new Set(open).add(n));
 
-  const onGraded = (taskType) => (data) => {
-    /* The modal only calls this with a grade in hand, so it is the completion
-       for tâches 1 and 2 — tâche 3 completes on /speaking/record, which counts
-       its own. The CEFR band only; the conversation stays in the modal. */
-    trackPracticeComplete({
-      skill: 'speaking',
-      exam: 'tcf',
-      exam_type: 'test',
-      tache: taskType,
-      level: data?.tcf_level,
-      set_number: setNumber || undefined,
-    });
-    const next = { ...results, [taskType]: data };
+  /* The tâche is over; the marking of it is not, and the candidate does not
+     wait for it.
+     A real sitting does not pause between tâches while an examiner reads, and
+     this page never shows a mark mid-paper anyway — an answered tâche says
+     "answered" and nothing else until all three are in. So the answer goes off
+     to be marked, the row turns green, and the next tâche opens on the spot.
+     The grade lands in place whenever it lands. */
+  const onSubmitted = (taskType) => (request) => {
+    advance(taskType, { pending: true });
+    request
+      .then(({ data }) => {
+        trackPracticeComplete({
+          skill: 'speaking',
+          exam: 'tcf',
+          exam_type: 'test',
+          tache: taskType,
+          level: data?.tcf_level,
+          set_number: setNumber || undefined,
+        });
+        setResults((held) => {
+          const next = { ...held, [taskType]: data };
+          writeSitting(setNumber, next);
+          return next;
+        });
+        reloadAttempts();   // the tâche just marked belongs in the history
+      })
+      .catch((err) => {
+        /* The answer was spoken and the paper has moved on, so the tâche is
+           not un-answered here — that would strand a candidate mid-sitting
+           over a request they cannot see. The mark is what is missing, and
+           the reload below is what finds it if the server did record one. */
+        if (err?.response?.status !== 402) {
+          toast.error(errMsg(err, t('conv.errAnalysis')));
+        }
+        reloadAttempts();
+      });
+  };
+
+  /* Store the tâche's outcome, then open whatever comes next. */
+  const advance = (taskType, outcome) => {
+    const next = { ...results, [taskType]: outcome };
     setResults(next);
     writeSitting(setNumber, next);
     setLive(null);
-    reloadAttempts();   // the tâche just graded belongs in the history
 
     /* Straight on to the next unanswered tâche.
      *
@@ -199,7 +229,7 @@ export default function SpeakingExam() {
     /* That was the last tâche. The paper is finished and it now lives on the
        dashboard, which is where the candidate is sent — the full three-tâche
        result is one click from the row that appears there. */
-    navigate('/dashboard?marking=speaking');
+    return navigate('/dashboard?marking=speaking');
   };
 
   /* A finished paper opens everything, once.
@@ -347,10 +377,14 @@ export default function SpeakingExam() {
       theme: paper.task3.theme, meta: t('sexam.metaT3') },
   ];
   const done = stages.filter((s) => results[s.n]).length;
+  /* Answered is not marked. A tâche handed off for marking counts towards the
+     progress line and unlocks the next one, but the paper is only complete —
+     and only computes a mark — once every tâche has a grade behind it. */
+  const marked = (n) => Boolean(results[n]) && !results[n].pending;
   // A real sitting runs 1 → 2 → 3 with no skipping ahead, so a tâche unlocks
   // only once the one before it has been answered.
   const unlocked = (n) => n === 1 || Boolean(results[n - 1]);
-  const finished = done === 3;
+  const finished = stages.every((s) => marked(s.n));
   const levels = stages.map((s) => results[s.n]?.tcf_level).filter(Boolean);
   // Expression orale is reported the way the real paper reports it: one mark
   // out of 20 for the skill, and the NCLC/CLB level that mark converts to.
@@ -429,7 +463,7 @@ export default function SpeakingExam() {
                         data-testid={`answered-task-${s.n}`}>
                         <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-green-700 shadow-sm">
                           <CheckCircle size={12} weight="fill" className="mr-1 inline" />
-                          {t('sexam.answered')}
+                          {result.pending ? t('sexam.marking') : t('sexam.answered')}
                         </span>
                         <button onClick={() => startTask(s.n)} className="text-xs font-semibold text-primary underline">
                           <ArrowClockwise size={12} weight="bold" className="mr-1 inline" />{t('sexam.again')}
@@ -533,13 +567,13 @@ export default function SpeakingExam() {
         <ConversationModal mode="tache1" tacheTitle={paper.timings['1'].name}
           examSet={setNumber}
           consigne={paper.task1.brief}
-          onCancel={() => setLive(null)} onGraded={onGraded(1)} />
+          onCancel={() => setLive(null)} onSubmitted={onSubmitted(1)} />
       )}
       {live === 2 && (
         <ConversationModal mode="tache2" tacheTitle={paper.timings['2'].name}
           examSet={setNumber}
           consigne={paper.task2.consigne}
-          onCancel={() => setLive(null)} onGraded={onGraded(2)} />
+          onCancel={() => setLive(null)} onSubmitted={onSubmitted(2)} />
       )}
     </main>
   );
