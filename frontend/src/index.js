@@ -29,6 +29,19 @@ if (!redirectLegacyLocale()) {
   // repaint, which is the flash react-snap exists to avoid.
   const container = document.getElementById("root");
   if (container.hasChildNodes()) {
+    // A mismatch between the react-snap snapshot and the live app can make
+    // hydration throw instead of the usual silent client-side recovery. When
+    // that happens the prerendered markup stays on screen looking normal, but
+    // React never finished attaching to it, so nothing on the page responds.
+    // Falling back to a clean client render trades the flash react-snap
+    // exists to avoid for a page that actually works.
+    const onHydrateFail = (e) => {
+      if (!/Minified React error #4\d\d/.test(e.message || "")) return;
+      window.removeEventListener("error", onHydrateFail);
+      container.innerHTML = "";
+      ReactDOM.createRoot(container).render(<App />);
+    };
+    window.addEventListener("error", onHydrateFail);
     ReactDOM.hydrateRoot(container, <App />);
   } else {
     ReactDOM.createRoot(container).render(<App />);
