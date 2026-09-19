@@ -27,21 +27,16 @@ if (!redirectLegacyLocale()) {
   // not run JavaScript still see the page. Hydrating that markup keeps it on
   // screen; calling createRoot on it would throw the prerendered HTML away and
   // repaint, which is the flash react-snap exists to avoid.
+  // A hydration mismatch needs NO handling here, and handling it is worse than
+  // leaving it alone. React reports one through reportError(), which reaches
+  // window.onerror and reads in the console as an uncaught "Minified React
+  // error #418" — but React has already caught it and is re-rendering the root
+  // on the client by itself. Code that listens for that error and starts a
+  // second root on the same container fights that recovery: /speaking/tasks
+  // and /practice/tasks, whose snapshots differ most from the signed-in app,
+  // were left with an empty #root and nothing on screen.
   const container = document.getElementById("root");
   if (container.hasChildNodes()) {
-    // A mismatch between the react-snap snapshot and the live app can make
-    // hydration throw instead of the usual silent client-side recovery. When
-    // that happens the prerendered markup stays on screen looking normal, but
-    // React never finished attaching to it, so nothing on the page responds.
-    // Falling back to a clean client render trades the flash react-snap
-    // exists to avoid for a page that actually works.
-    const onHydrateFail = (e) => {
-      if (!/Minified React error #4\d\d/.test(e.message || "")) return;
-      window.removeEventListener("error", onHydrateFail);
-      container.innerHTML = "";
-      ReactDOM.createRoot(container).render(<App />);
-    };
-    window.addEventListener("error", onHydrateFail);
     ReactDOM.hydrateRoot(container, <App />);
   } else {
     ReactDOM.createRoot(container).render(<App />);
