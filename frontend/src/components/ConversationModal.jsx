@@ -108,6 +108,13 @@ export default function ConversationModal({
      with the grade so the answer is findable as part of that paper instead of
      living only in the tab it was spoken in. Absent for free practice. */
   examSet = null,
+  /* Given by a caller that does not want to hold the candidate while the
+     answer is marked — a sitting, where the next tâche should start straight
+     away. It receives the in-flight request instead of the grade: the marking
+     carries on in the background and the caller decides what to do with it.
+     Practice passes nothing and keeps the wait, because there the mark IS the
+     point of pressing the button. */
+  onSubmitted = null,
 }) {
   const t = useT();
   /* A session given `segments` runs them in order, each with its own clock and
@@ -534,12 +541,20 @@ export default function ConversationModal({
   const finish = useCallback(async () => {
     if (doneRef.current && phase === 'grading') return;
     teardown();
+    const body = {
+      consigne, history: turnsRef.current, mode,
+      ...(examSet ? { exam_set: examSet } : {}),
+    };
+    /* Handed over in flight, and this modal is done. The request is already
+       on its way, so the marking is not skipped — it simply stops being
+       something the candidate sits and watches between two tâches. */
+    if (onSubmitted) {
+      onSubmitted(api.post('/api/speaking/converse/grade', body));
+      return;
+    }
     setPhase('grading');
     try {
-      const { data } = await api.post('/api/speaking/converse/grade', {
-        consigne, history: turnsRef.current, mode,
-        ...(examSet ? { exam_set: examSet } : {}),
-      });
+      const { data } = await api.post('/api/speaking/converse/grade', body);
       onGraded(data);
     } catch (err) {
       if (err?.response?.status === 402) {
@@ -553,7 +568,7 @@ export default function ConversationModal({
       setPhase('live');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [consigne, onGraded, onCancel, phase, teardown]);
+  }, [consigne, onGraded, onSubmitted, onCancel, phase, teardown]);
 
   // Wall-clock deadlines: the official 2 minutes of preparation and 3 min 30
   // of interaction must not stretch because the tab lost focus.
@@ -875,9 +890,13 @@ export default function ConversationModal({
                   <Microphone size={16} weight="fill" /> {t('conv.resumeListening')}
                 </button>
               ) : null}
+              {/* "Finish", not "Finish and analyse", when the marking is not
+                  what happens next: in a sitting the tâche just ends and the
+                  next one starts. Promising an analysis and then moving on
+                  describes a different button. */}
               <button onClick={finish}
                 className={`btn-outline justify-center ${status !== 'idle' && !pressToTalk && !recording ? 'flex-1' : ''}`}>
-                <Lightning size={16} weight="fill" /> {t('conv.finish')}
+                <Lightning size={16} weight="fill" /> {onSubmitted ? t('conv.finishOnly') : t('conv.finish')}
               </button>
             </div>
             {pressToTalk && (
