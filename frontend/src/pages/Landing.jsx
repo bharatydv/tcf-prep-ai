@@ -11,7 +11,7 @@ import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
 import { track } from '../lib/api';
-import { useBillingPlans, formatPrice } from '../lib/plans';
+import { useBillingPlans, formatPrice, CheckoutBreakdown } from '../lib/plans';
 import { useCheckout } from '../lib/checkout';
 
 /* ===================================================================== page */
@@ -743,6 +743,14 @@ export default function Landing() {
                       <li key={f} className="flex items-center gap-2.5"><CheckCircle size={17} weight="fill" className="shrink-0 text-primary" /> {t(f)}</li>
                     ))}
                   </ul>
+                  {/* Itemised here because PayU's page will not: it prints a
+                      single "Total Payable" and ignores the additional_charges
+                      field, so this is the only place the plan price and the
+                      fee can be shown as separate lines. */}
+                  {/* -mx-6 against the card's px-7: the block's own px-6 then
+                      lands its text on the same 28px inset as everything above
+                      it, instead of 28px further in again. */}
+                  <CheckoutBreakdown plan={p} currency={currency} className="-mx-6 mt-4 text-left" />
                   {/* Opens the gateway from here. Someone who clicked a
                       specific plan is asking to buy it, and every screen
                       between that click and the card form costs conversions. */}
