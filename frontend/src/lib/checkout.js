@@ -169,15 +169,7 @@ export function useCheckout() {
       form.appendChild(input);
     });
     document.body.appendChild(form);
-    // Not form.submit(): that method skips the native "submit" event by spec,
-    // which is the event GA4/GTM's own outbound-form tracking relies on. Some
-    // of their scripts patch the method to compensate, and that patched path
-    // has been seen finishing the navigation late enough to fall outside the
-    // browser's read of the page's own CSP, blocking the redirect to the
-    // gateway outright. requestSubmit() fires the real event, so the same
-    // script sees a normal submission and there is nothing left to patch
-    // around.
-    form.requestSubmit();
+    form.submit();
     return true;
   }, []);
 
