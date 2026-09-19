@@ -11,7 +11,7 @@ import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
 import { track } from '../lib/api';
-import { useBillingPlans, formatPrice, CheckoutBreakdown } from '../lib/plans';
+import { useBillingPlans, formatPrice } from '../lib/plans';
 
 /* ===================================================================== page */
 /* Verifiable description of the product, in place of invented testimonials. */
@@ -741,10 +741,6 @@ export default function Landing() {
                       single "Total Payable" and ignores the additional_charges
                       field, so this is the only place the plan price and the
                       fee can be shown as separate lines. */}
-                  {/* -mx-6 against the card's px-7: the block's own px-6 then
-                      lands its text on the same 28px inset as everything above
-                      it, instead of 28px further in again. */}
-                  <CheckoutBreakdown plan={p} currency={currency} className="-mx-6 mt-4 text-left" />
                   {/* One hop to /checkout, not straight to the gateway. PayU's
                       page carries a bare total and none of this site, so the
                       order is confirmed on a page of ours first. */}

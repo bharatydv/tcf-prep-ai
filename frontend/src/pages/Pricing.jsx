@@ -4,7 +4,7 @@ import { CheckCircle } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
-import { useBillingPlans, CheckoutBreakdown } from '../lib/plans';
+import { useBillingPlans } from '../lib/plans';
 import { trackViewPricing } from '../lib/analytics';
 
 const FEATURE_KEYS = ['pricing.feature1', 'pricing.feature2', 'pricing.feature3', 'pricing.feature4'];
@@ -133,15 +133,9 @@ export default function Pricing() {
                 </li>
               ))}
             </ul>
-            {/* The fee is itemised here because the gateway will not do it.
-                PayU's page prints one "Total Payable" and nothing else — it
-                accepts an additional_charges field and then ignores it, so the
-                only place the customer can be shown the plan price and the fee
-                as separate lines is before they leave. Without this the card
-                says 1,299 and PayU says 1,337.84 with nothing accounting for
-                the difference. */}
-            <CheckoutBreakdown plan={p} currency={currency} />
-            <div className="px-6 pb-6 pt-4">
+            {/* No itemisation on the card: the plan price stands on its own
+                here, and /checkout breaks the total down before anyone pays. */}
+            <div className="px-6 pb-6">
               {configured ? (
                 /* To /checkout rather than straight to the gateway: the order
                    is confirmed on a page of ours, because PayU's shows a bare
