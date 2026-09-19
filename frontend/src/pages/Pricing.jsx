@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
 import { useBillingPlans } from '../lib/plans';
+import { useCheckout } from '../lib/checkout';
 import { trackViewPricing } from '../lib/analytics';
 
 const FEATURE_KEYS = ['pricing.feature1', 'pricing.feature2', 'pricing.feature3', 'pricing.feature4'];
@@ -22,6 +23,9 @@ export default function Pricing() {
   // be the catalogue's rather than a guess — the whole point of the schema is
   // that it agrees with what the page charges.
   const { plans, currency, configured, loading } = useBillingPlans();
+  /* Checkout lives in lib/checkout.js so the landing page can open the same
+     one. This page is now a caller like any other. */
+  const { subscribe, busy, promptDialog } = useCheckout();
 
   // Reaching the pricing page is the step before checkout, and the gap
   // between the two is the most useful number in the funnel.
@@ -83,6 +87,7 @@ export default function Pricing() {
           collapsed FAQ item underneath them. Now driven by whether the server
           actually holds payment credentials, rather than a hardcoded flag that
           someone has to remember to flip. */}
+      {promptDialog}
       {!loading && !configured && (
         <div className="mx-auto mt-6 max-w-2xl rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-center"
           data-testid="pricing-unavailable-notice">
@@ -133,18 +138,16 @@ export default function Pricing() {
                 </li>
               ))}
             </ul>
-            {/* No itemisation on the card: the plan price stands on its own
-                here, and /checkout breaks the total down before anyone pays. */}
+            {/* One price, itemised nowhere, because there is nothing to
+                itemise: the tax percentage is zero and this figure is what
+                PayU asks for. See INTERNATIONAL_CARD_FEE_PERCENT. */}
             <div className="px-6 pb-6">
               {configured ? (
-                /* To /checkout rather than straight to the gateway: the order
-                   is confirmed on a page of ours, because PayU's shows a bare
-                   total and none of this site around it. */
-                <Link to={`/checkout?plan=${encodeURIComponent(p.id)}`}
-                  className="btn-primary w-full justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600"
+                <button onClick={() => subscribe(p.id)} disabled={Boolean(busy)}
+                  className="btn-primary w-full justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600 disabled:opacity-60"
                   data-testid={`plan-cta-${p.name.toLowerCase()}`}>
-                  {t('pricing.subscribe')}
-                </Link>
+                  {busy === p.id ? t('billing.redirecting') : t('pricing.subscribe')}
+                </button>
               ) : (
                 <button disabled
                   className="w-full cursor-not-allowed rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm font-semibold text-gray-400"

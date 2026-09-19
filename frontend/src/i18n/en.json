@@ -345,15 +345,6 @@
     "textPlaceholder": "Paste your French text here…",
     "title": "Check my writing"
   },
-  "checkout": {
-    "accountFirst": "You need an account before you can pay — it keeps your corrections, mistakes and progress together.",
-    "back": "Back to plans",
-    "haveAccount": "I already have an account",
-    "pay": "Pay {{amount}}",
-    "refunds": "Refund and cancellation policy",
-    "secure": "You will be taken to PayU to pay. Your card details never reach this site.",
-    "title": "Order summary"
-  },
   "combo": {
     "heroA": "Recent",
     "heroB": "Topics",
