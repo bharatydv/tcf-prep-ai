@@ -191,6 +191,7 @@
     "currentPhone": "Registered number:",
     "dismiss": "Dismiss",
     "email": "Email",
+    "phone": "Phone number (with country code)",
     "emailChanged": "Address changed — a new confirmation link is on its way.",
     "forgot": "Forgot your password?",
     "forgotButton": "Send the reset link",

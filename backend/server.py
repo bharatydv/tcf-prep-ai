@@ -4464,6 +4464,19 @@ class RegisterIn(BaseModel):
     email: EmailStr
     # bcrypt only hashes the first 72 bytes, so cap the input there too.
     password: str = Field(min_length=8, max_length=72)
+    # Required, and stored as typed.
+    #
+    # The column has existed since phone confirmation was added, but nothing
+    # ever asked for it at the door, so almost every account has none — which
+    # is why the Learners tab prints a column of dashes and why there is no
+    # way to reach a learner whose email bounces.
+    #
+    # The same pattern as the download form: people write a number with a
+    # country code, spaces, brackets or none of those, and a regex that
+    # guessed at a format would refuse a real number to store a tidier one.
+    # This refuses only what cannot be a number at all.
+    phone: str = Field(min_length=6, max_length=32,
+                       pattern=r"^[0-9+()\-.\s]{6,32}$")
 
 
 class LoginIn(BaseModel):
@@ -5655,6 +5668,7 @@ async def register(body: RegisterIn, response: Response,
         email=email,
         password_hash=hash_password(body.password),
         name=body.name.strip(),
+        phone=body.phone.strip(),
         role="admin" if email == ADMIN_EMAIL else "user",
         created_at=now_utc(),
         free_submissions_used=0,
