@@ -18,6 +18,10 @@ const TABS = [
      by analytics, so it got the name it always deserved. */
   { id: 'content', label: 'admin.tabContent' },
   { id: 'users', label: 'admin.tabUsers' },
+  /* People who took the free PDF but never opened an account. They belong
+     next to Learners because it is the same question — who is out there —
+     asked of the half that has no account behind it. */
+  { id: 'leads', label: 'admin.tabLeads' },
   { id: 'submissions', label: 'admin.tabSubmissions' },
   { id: 'prompts', label: 'admin.tabPrompts' },
   { id: 'questions', label: 'admin.tabQuestions' },
@@ -47,6 +51,7 @@ export default function Admin() {
         {tab === 'analytics' && <AdminAnalytics />}
         {tab === 'content' && <ContentQuality />}
         {tab === 'users' && <Users />}
+        {tab === 'leads' && <Leads />}
         {tab === 'submissions' && <Submissions />}
         {tab === 'prompts' && <Prompts />}
         {tab === 'questions' && <Questions />}
@@ -935,6 +940,111 @@ function SimPrompts() {
         ))}
       </section>
     </div>
+  );
+}
+
+/* --------------------------------------------------------------- Leads ---- */
+/* The names, addresses and numbers left by people who took the free PDF
+   without opening an account. They are not learners — there is no account
+   behind them — so they cannot appear in the Learners tab, and until this
+   existed the only way to read them was a psql session on the VM.
+
+   Where each row came from is worth as much as the row: `exit_intent` is
+   somebody who was leaving, `resources` is somebody who went looking, and a
+   tab that showed only the numbers could not tell those apart. */
+const LEAD_SOURCES = {
+  exit_intent: ['bg-violet-50 text-violet-700', 'admin.leadSourceExit'],
+  resources: ['bg-emerald-50 text-emerald-700', 'admin.leadSourceResources'],
+  dwell: ['bg-amber-50 text-amber-700', 'admin.leadSourceDwell'],
+};
+
+function Leads() {
+  const t = useT();
+  const [rows, setRows] = useState(null);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [q, setQ] = useState('');
+  /* Typed on every keystroke, queried on the pause — the same reason the
+     learner search debounces: without it an eight-letter name is eight round
+     trips and eight chances for an older answer to land last. */
+  const [term, setTerm] = useState('');
+
+  useEffect(() => {
+    const id = setTimeout(() => { setTerm(q.trim()); setOffset(0); }, 300);
+    return () => clearTimeout(id);
+  }, [q]);
+
+  useEffect(() => {
+    setRows(null);
+    api.get('/api/admin/leads', { params: { limit: PAGE_SIZE, offset, q: term } })
+      .then((r) => { setRows(r.data.leads); setTotal(r.data.total ?? r.data.leads.length); })
+      .catch((e) => toast.error(errMsg(e)));
+  }, [offset, term]);
+
+  /* A plain link, not a fetch: the admin cookie rides along on a same-origin
+     navigation, and the browser's own download UI handles the file. The
+     export follows the search box, so what is downloaded is what is on
+     screen rather than a different set of people. */
+  const csvHref = `/api/admin/leads?fmt=csv${term ? `&q=${encodeURIComponent(term)}` : ''}`;
+
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <input value={q} onChange={(e) => setQ(e.target.value)}
+          placeholder={t('admin.leadsSearch')} data-testid="admin-lead-search"
+          className="w-full max-w-xs rounded-xl border border-gray-200 px-3 py-2 text-sm" />
+        <a href={csvHref} download data-testid="admin-leads-csv"
+          className="rounded-xl bg-gray-100 px-3 py-2 text-xs font-semibold text-gray-600 transition hover:bg-gray-200">
+          {t('admin.leadsExport')}
+        </a>
+        {rows && <span className="ml-auto text-xs text-gray-500">{total}</span>}
+      </div>
+
+      {!rows ? <Spinner /> : rows.length === 0 ? (
+        <p className="card p-8 text-center text-sm text-gray-500">{t('admin.leadsEmpty')}</p>
+      ) : (
+        <div className="card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
+                <tr>
+                  {['admin.thName', 'admin.thEmail', 'admin.thPhone',
+                    'admin.thResource', 'admin.thSource', 'admin.thJoined'].map((k) => (
+                      <th key={k} className="px-4 py-3">{t(k)}</th>
+                    ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={`${r.email}-${r.resource}`}
+                    className="border-t border-gray-100 hover:bg-violet-50/50">
+                    <td className="px-4 py-3 font-medium">{r.name}</td>
+                    {/* Both are meant to be acted on, so both are one click
+                        away from a mail client and a dialler. */}
+                    <td className="px-4 py-3">
+                      <a href={`mailto:${r.email}`} className="text-primary hover:underline">{r.email}</a>
+                    </td>
+                    <td className="px-4 py-3">
+                      <a href={`tel:${r.phone}`} className="text-primary hover:underline">{r.phone}</a>
+                    </td>
+                    <td className="px-4 py-3 text-gray-500">{r.resource}</td>
+                    {/* A source this build has no name for still prints
+                        something true: the raw value, rather than a key. */}
+                    <td className="px-4 py-3">
+                      <Pill tone={LEAD_SOURCES[r.source]?.[0] || 'bg-gray-100 text-gray-500'}>
+                        {LEAD_SOURCES[r.source] ? t(LEAD_SOURCES[r.source][1]) : r.source}
+                      </Pill>
+                    </td>
+                    <td className="px-4 py-3">{fmtDate(r.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pager offset={offset} limit={PAGE_SIZE} total={total} onOffset={setOffset} />
+        </div>
+      )}
+    </section>
   );
 }
 

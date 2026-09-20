@@ -6141,20 +6141,36 @@ async def download_resource(slug: str, t: str = "",
 
 @app.get("/api/admin/leads")
 async def admin_leads(resource: Optional[str] = None,
+                      q: Optional[str] = None,
                       fmt: str = Query("json", pattern="^(json|csv)$"),
-                      limit: int = Query(500, ge=1, le=5000),
+                      limit: int = Query(100, ge=1, le=5000),
+                      offset: int = Query(0, ge=0),
                       admin: User = Depends(get_admin_user),
                       db: AsyncSession = Depends(get_db)):
-    """The captured names, newest first — as JSON, or as a CSV to import.
+    """The captured names, newest first — as a page of JSON, or as a CSV.
 
     Without this the leads are only reachable with a psql session, which is
-    the same as not collecting them.
+    the same as not collecting them. The CSV ignores the page and exports
+    everything that matches the filter, because a spreadsheet of the first
+    hundred is not what anyone means by an export.
     """
-    q = select(Lead).order_by(Lead.created_at.desc()).limit(limit)
+    where = []
     if resource:
-        q = q.where(Lead.resource == resource)
-    rows = (await db.execute(q)).scalars().all()
+        where.append(Lead.resource == resource)
+    if q:
+        # One box over the three fields somebody would actually search by.
+        term = f"%{q.strip().lower()}%"
+        where.append(or_(func.lower(Lead.name).like(term),
+                         func.lower(Lead.email).like(term),
+                         Lead.phone.like(term)))
+
+    base = select(Lead)
+    if where:
+        base = base.where(*where)
+
     if fmt == "csv":
+        rows = (await db.execute(
+            base.order_by(Lead.created_at.desc()))).scalars().all()
         out = io.StringIO()
         w = csv.writer(out)
         w.writerow(["name", "email", "phone", "resource", "source",
@@ -6167,7 +6183,14 @@ async def admin_leads(resource: Optional[str] = None,
             content=out.getvalue(), media_type="text/csv",
             headers={"Content-Disposition":
                      f'attachment; filename="prepfrancais-leads-{stamp}.csv"'})
-    return {"leads": [{"name": r.name, "email": r.email, "phone": r.phone,
+
+    total = await db.scalar(
+        select(func.count()).select_from(base.subquery())) or 0
+    rows = (await db.execute(
+        base.order_by(Lead.created_at.desc())
+        .limit(limit).offset(offset))).scalars().all()
+    return {"total": total,
+            "leads": [{"name": r.name, "email": r.email, "phone": r.phone,
                        "resource": r.resource, "source": r.source,
                        "created_at": (r.created_at.isoformat()
                                       if r.created_at else None)}
