@@ -21,14 +21,18 @@ import { diffWords } from '../lib/wordDiff';
 /* Matched pair: the same shape and weight on both sides, so the eye reads
    them as one correction with two halves rather than as a punishment and a
    reward. */
+/* The prototype's red and green, literally — #b91c1c and #15803d, on their
+   own tints. Matched pair: the same shape and weight on both sides, so the
+   eye reads them as one correction with two halves rather than as a
+   punishment and a reward. */
 const TONE = {
-  said: 'rounded bg-rose-100 px-0.5 font-semibold text-red-700',
-  fix: 'rounded bg-green-100 px-0.5 font-semibold text-green-800',
+  said: 'rounded bg-[#fff1f2] px-0.5 font-bold text-[#b91c1c]',
+  fix: 'rounded bg-[#effcf3] px-0.5 font-extrabold text-[#15803d]',
 };
 
 export function CorrectionText({ said, correction, side, className = '' }) {
   const parts = diffWords(said, correction)[side === 'fix' ? 'fix' : 'said'];
-  const plain = side === 'fix' ? 'text-gray-700' : 'text-gray-600';
+  const plain = 'text-[#334155]';
   return (
     <span className={`min-w-0 ${className}`}>
       {parts.map((part, i) => (

@@ -1,6 +1,8 @@
 /* The mark out of 20 is now the only score the app shows, so the conversion
    is the one place a rounding slip would rewrite every number on screen. */
-import { markOutOf20, displayMark, markFromCorrect, nclcFromMark } from './tcf';
+import {
+  markOutOf20, displayMark, markFromCorrect, nclcFromMark, levelFromScore,
+} from './tcf';
 
 describe('markOutOf20', () => {
   it('places a score inside the band of the level it was given', () => {
@@ -57,5 +59,35 @@ describe('markFromCorrect', () => {
   it('gives null for a paper with no questions rather than dividing by zero', () => {
     expect(markFromCorrect(0, 0)).toBeNull();
     expect(markFromCorrect(3, null)).toBeNull();
+  });
+});
+
+/* The band a criterion's score falls in, for the profile cards. Bands are
+   duplicated in the grader prompt; a test is what keeps the two honest. */
+describe('levelFromScore', () => {
+  it('matches the rubric bands at every boundary', () => {
+    expect(levelFromScore(4)).toBe('A1');
+    expect(levelFromScore(5)).toBe('A1');
+    expect(levelFromScore(19)).toBe('A1');
+    expect(levelFromScore(20)).toBe('A2');
+    expect(levelFromScore(39)).toBe('A2');
+    expect(levelFromScore(40)).toBe('B1');
+    expect(levelFromScore(54)).toBe('B1');
+    expect(levelFromScore(55)).toBe('B2');
+    expect(levelFromScore(69)).toBe('B2');
+    expect(levelFromScore(70)).toBe('C1');
+    expect(levelFromScore(84)).toBe('C1');
+    expect(levelFromScore(85)).toBe('C2');
+    expect(levelFromScore(100)).toBe('C2');
+  });
+
+  it('reads a score below the scale as A1, not as nothing', () => {
+    expect(levelFromScore(0)).toBe('A1');
+  });
+
+  it('answers null when there is no score to band', () => {
+    expect(levelFromScore(null)).toBeNull();
+    expect(levelFromScore(undefined)).toBeNull();
+    expect(levelFromScore('n/a')).toBeNull();
   });
 });

@@ -2865,51 +2865,87 @@ async def record_mistakes(db: AsyncSession, user_id: str, source: str,
 # counted repeats since review was built, and every graded answer is a
 # submission with a score on it.
 
-# Twice is a coincidence; three times is a habit. Two is the honest threshold
-# for "you keep doing this" — the mistakes table counts a repeat only when the
-# same normalised error comes back, so two already means two separate answers.
-RECURRING_MIN_REPEATS = 2
+# What counts as "you keep doing this".
+#
+# The obvious reading — a mistakes row whose times_repeated has reached two —
+# is the wrong one, and quietly so: times_repeated only moves when the SAME
+# normalised sentence comes back. Nobody repeats a sentence. They repeat the
+# KIND of mistake: "les gens est" on Monday and "les voisins était" on Friday
+# are one habit and two rows, each stuck at one, so a section keyed on that
+# counter would have stayed empty for almost everybody.
+#
+# So the grouping is by category, and a category is recurring when it has been
+# seen in more than one answer — either because one of its errors came back
+# word for word, or because it has rows from two different submissions.
+RECURRING_MIN_ATTEMPTS = 2
 # Four cards fills the section without turning it into the full list, which is
 # what the review page is for.
 RECURRING_LIMIT = 4
 
 
+def group_recurring(rows: List[dict], limit: int = RECURRING_LIMIT) -> list:
+    """Categories this learner keeps getting wrong, worst first.
+
+    Pure, and separated from the query for that reason: the rule about what
+    counts as recurring is the part worth testing, and it is the part that was
+    wrong.
+
+    Each row is {category, times, ref, error, correction}. `times` is that
+    row's own repeat count and `ref` is the submission it was first seen in.
+    """
+    by_cat: Dict[str, dict] = {}
+    for r in rows:
+        cat = r.get("category")
+        if not cat:
+            continue
+        slot = by_cat.setdefault(cat, {
+            "category": cat, "times": 0, "refs": set(), "best": 0,
+            "example": None,
+        })
+        times = max(1, int(r.get("times") or 1))
+        slot["times"] += times
+        if r.get("ref"):
+            slot["refs"].add(r["ref"])
+        # The example is the error made most often, which is the one most
+        # worth showing; ties keep the first, which is the oldest.
+        if times > slot["best"]:
+            slot["best"] = times
+            slot["example"] = {"error": r.get("error") or "",
+                               "correction": r.get("correction") or ""}
+
+    out = []
+    for slot in by_cat.values():
+        seen_in = len(slot["refs"])
+        # Either the same error came back, or the category turned up in two
+        # different answers. One mistake made once is not a habit.
+        if slot["best"] < 2 and seen_in < RECURRING_MIN_ATTEMPTS:
+            continue
+        out.append({"category": slot["category"], "times": slot["times"],
+                    "example": slot["example"] or {"error": "", "correction": ""}})
+    out.sort(key=lambda c: c["times"], reverse=True)
+    return out[:limit]
+
+
 async def recurring_mistakes(db: AsyncSession, user_id: str,
                              limit: int = RECURRING_LIMIT) -> list:
-    """The categories this learner keeps getting wrong, worst first.
+    """The above, over this learner's mistakes.
 
-    Grouped by category rather than listed one error at a time: "you have made
-    four agreement mistakes" is a thing to go and practise, while four separate
-    rows about four sentences are four more things to read.
-
-    One example is carried with each so the card can show the shape of the
-    mistake rather than only naming it.
+    Mastered mistakes are left out: the review system has decided they are
+    known, and a section headed "what to work on" that lists them is arguing
+    with the rest of the app.
     """
     res = await db.execute(
         select(Mistake)
         .where(Mistake.user_id == user_id,
-               Mistake.times_repeated >= RECURRING_MIN_REPEATS,
-               Mistake.category != "improvement")
-        .order_by(Mistake.times_repeated.desc(), Mistake.last_seen_at.desc())
-        .limit(50))
-    rows = res.scalars().all()
-
-    by_cat: Dict[str, dict] = {}
-    for m in rows:
-        slot = by_cat.get(m.category)
-        if slot is None:
-            by_cat[m.category] = {
-                "category": m.category,
-                # Answers, not errors: a mistake repeated four times was made
-                # in four different answers, which is the number that means
-                # something to the person reading it.
-                "times": int(m.times_repeated or 1),
-                "example": {"error": m.error_text, "correction": m.correction},
-            }
-        else:
-            slot["times"] += int(m.times_repeated or 1)
-    out = sorted(by_cat.values(), key=lambda c: c["times"], reverse=True)
-    return out[:limit]
+               Mistake.category != "improvement",
+               Mistake.status != "mastered")
+        .order_by(Mistake.last_seen_at.desc())
+        .limit(200))
+    rows = [{"category": m.category, "times": m.times_repeated,
+             "ref": m.ref_id, "error": m.error_text,
+             "correction": m.correction}
+            for m in res.scalars().all()]
+    return group_recurring(rows, limit)
 
 
 async def attempt_progress(db: AsyncSession, user_id: str,

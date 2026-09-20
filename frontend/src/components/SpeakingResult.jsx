@@ -29,7 +29,7 @@
  *
  * Nothing that was on this page has been taken off it.
  */
-import { Fragment, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { CheckCircle, XCircle, Sparkle } from '@phosphor-icons/react';
 import { SpeakButton } from './SpeakButton';
 import { OwnVoiceButton } from './OwnVoiceButton';
@@ -38,7 +38,8 @@ import { SpeakingGrid } from './SpeakingGrid';
 import { TranscriptDiff } from './TranscriptDiff';
 import {
   ResultHero, DidWell, Priorities, Recurring, Progress, Vocabulary,
-  NextStep, PracticeCta, Panel, CAT_LABELS, KIND_TONE, KIND_LABEL,
+  NextStep, PracticeCta, Panel, ProfileCards, TOKENS, CAT_LABELS, KIND_TONE,
+  KIND_ROW, KIND_LABEL,
 } from './speakingReport';
 import { useOwnVoice } from '../lib/ownVoice';
 import { findClip } from '../lib/speechClips';
@@ -53,10 +54,15 @@ const ISSUE_KEYS = ['vowel', 'nasal', 'liaison', 'consonant', 'stress', 'rhythm'
    Absent on a correction the grader did not weigh, which is why there is no
    default entry here to fall back to. */
 const SEVERITY_TONE = {
-  major: 'bg-rose-100 text-rose-700',
-  moderate: 'bg-amber-100 text-amber-700',
-  minor: 'bg-gray-100 text-gray-500',
+  major: 'bg-[#fff1f2] text-[#b91c1c]',
+  moderate: 'bg-[#fff8e7] text-[#92400e]',
+  minor: 'bg-[#f1f5f9] text-[#64748b]',
 };
+
+/* One cell, the prototype's padding and rule. Named because it is repeated
+   five times a row and a table whose columns disagree about their padding by
+   a pixel is a table that looks slightly broken and cannot be pointed at. */
+const CELL = 'border-b border-[#e7e2f2] px-[13px] py-[14px] align-top text-[12px]';
 
 /* Where "Practice my mistakes" goes. A plain href rather than a router Link:
    this component deliberately imports no react-router — see speakingReport. */
@@ -154,8 +160,8 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
 
       {/* What went right, beside what to fix first. Side by side because they
           are one thought: these held, those did not. */}
-      <div className="grid gap-5 lg:grid-cols-2">
-        <DidWell strengths={result.strengths} />
+      <div className="grid gap-[18px] min-[900px]:grid-cols-2">
+        <DidWell result={result} />
         <Priorities errors={result.errors} practiceHref={PRACTICE_HREF} />
       </div>
 
@@ -168,61 +174,57 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
           Sized to break out of the prose column: the page is centred and the
           margin either side is empty, so from xl up the table takes it. */}
       {ranked.length > 0 && (
-        <div className="overflow-hidden rounded-3xl border border-violet-100 bg-white shadow-soft xl:-mx-32 xl:w-[calc(100%+16rem)]"
-          data-testid="corrections-table">
-          <div className="px-6 pb-3 pt-6">
-            <p className="font-heading text-base font-extrabold text-gray-900">
-              {t('report.corrections')}
-            </p>
-            <p className="mt-1 text-xs leading-relaxed text-gray-500">
-              {t('report.correctionsSub')}
-            </p>
-            {/* The legend earns its place the moment a row can be something
-                other than a mistake: without it "Upgrade" reads as a fourth
-                severity. */}
-            <div className="mt-3 flex flex-wrap items-center gap-2">
+        <section className={TOKENS.card} data-testid="corrections-table">
+          <h2 className={TOKENS.title}>{t('report.corrections')}</h2>
+          <p className={TOKENS.desc}>{t('report.correctionsSub')}</p>
+
+          {/* The legend earns its place the moment a row can be something
+              other than a mistake: without it "Upgrade" reads as a fourth
+              severity. */}
+          <div className="mb-[12px] mt-[15px] flex flex-wrap items-center justify-between gap-[12px]">
+            <div className="flex flex-wrap gap-[7px]">
               {Object.keys(KIND_TONE).map((k) => (
-                <span key={k}
-                  className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase ${KIND_TONE[k]}`}>
+                <span key={k} className={`${TOKENS.badge} ${KIND_TONE[k]}`}>
                   {t(KIND_LABEL[k])}
                 </span>
               ))}
-              <span className="ml-auto text-[11px] text-gray-400">
-                {t('report.countSummary', { shown: rows.length, total: ranked.length })}
-              </span>
             </div>
+            <span className="text-[11px] text-[#64748b]">
+              {t('report.countSummary', { shown: rows.length, total: ranked.length })}
+            </span>
           </div>
-          {/* One table, two shapes.
-              From md up "Why" and "Remember" are columns of their own, which
-              is what they want to be — the facts of a correction read across a
-              row. Below md there is not room for five columns of French
-              without each becoming a word wide, so the same text drops to
-              full-width rows underneath. Same markup, one breakpoint, no
-              second table to keep in step with this one. */}
-          <table className="w-full table-fixed text-sm">
-            <thead className="bg-gray-50 text-left text-[10.5px] uppercase tracking-wide text-gray-500">
-              <tr>
-                <th className="w-[30%] px-4 py-2.5 font-bold sm:px-6 md:w-[20%]">{t('speak.colSaid')}</th>
-                <th className="w-[30%] px-3 py-2.5 font-bold md:w-[20%]">{t('speak.colFix')}</th>
-                <th className="w-[40%] px-3 py-2.5 font-bold sm:px-4 md:w-[14%]">{t('speak.colType')}</th>
-                <th className="hidden px-3 py-2.5 font-bold sm:px-6 md:table-cell md:w-[23%]">{t('speak.colWhy')}</th>
-                {/* The new column. Last, so nothing above it moved. */}
-                <th className="hidden px-3 py-2.5 font-bold sm:px-6 md:table-cell md:w-[23%]">{t('report.colRemember')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(({ e, at }) => (
-                <Fragment key={at}>
-                  {/* The rule sits on the row rather than between the
-                      pairs, so a correction and its explanation read as one
-                      block whichever shape the table is in. */}
-                  <tr className="border-t border-violet-100 align-top">
+
+          {/* Fixed column widths and a scroll, rather than columns that fold
+              away below a breakpoint. Five columns of French do not fit a
+              phone at any size that can still be read, and the two that used
+              to fold — "Why" and "Remember" — are the two the table is for.
+              Scrolling shows all of every row; folding showed none of two. */}
+          <div className="overflow-x-auto rounded-[14px] border border-[#e7e2f2]">
+            <table className="w-full min-w-[950px] border-collapse">
+              <thead>
+                <tr>
+                  {[['speak.colSaid', 'w-[190px]'], ['speak.colFix', 'w-[190px]'],
+                    ['speak.colType', 'w-[100px]'], ['speak.colWhy', 'w-[250px]'],
+                    /* The new column, last, so nothing above it moved. Widest
+                       of the five on purpose: it is the one worth carrying out
+                       of the page. */
+                    ['report.colRemember', 'w-[260px]']].map(([key, width]) => (
+                      <th key={key}
+                        className={`${width} border-b border-[#e7e2f2] bg-[#faf8ff] px-[13px] py-[12px] text-left text-[10px] font-bold uppercase tracking-[0.06em] text-[#64748b]`}>
+                        {t(key)}
+                      </th>
+                    ))}
+                </tr>
+              </thead>
+              <tbody className="[&>tr:last-child>td]:border-b-0">
+                {rows.map(({ e, at }) => (
+                  <tr key={at} className={KIND_ROW[e.kind] || ''}>
                     {/* No wash of colour across the cell. The tint said
                         "this whole side is wrong", which is not what a
                         correction means — the wrong part is a word or two
                         inside an otherwise fine phrase, and that is what is
                         marked now. */}
-                    <td className="break-words px-4 pb-2 pt-3 sm:px-6">
+                    <td className={CELL}>
                       <span className="flex flex-wrap items-center gap-1.5">
                         <CorrectionText said={e.error} correction={e.correction} side="said" />
                         {/* Both sides are playable, not just the right one. A
@@ -241,7 +243,7 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
                           : <SpeakButton text={e.error} id={`${idPrefix}said-${at}`} {...tts} />}
                       </span>
                     </td>
-                    <td className="break-words px-3 pb-2 pt-3">
+                    <td className={CELL}>
                       <span className="flex flex-wrap items-center gap-1.5">
                         <CorrectionText said={e.error} correction={e.correction} side="fix" />
                         <SpeakButton text={e.correction} id={`${idPrefix}fix-${at}`} {...tts} />
@@ -249,69 +251,53 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
                     </td>
                     {/* Stacked, not in a row: pills side by side are what
                         forces this column wide. */}
-                    <td className="px-3 pb-2 pt-3 sm:px-4">
-                      <span className="flex flex-col items-start gap-1">
+                    <td className={CELL}>
+                      <span className="flex flex-col items-start gap-[6px]">
                         {/* What to do about it, added above what it costs.
                             Absent on an old result, which had no such field
                             and on which every row was a mistake. */}
                         {KIND_TONE[e.kind] && (
-                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${KIND_TONE[e.kind]}`}>
+                          <span className={`${TOKENS.badge} ${KIND_TONE[e.kind]}`}>
                             {t(KIND_LABEL[e.kind])}
                           </span>
                         )}
                         {SEVERITY_TONE[e.severity] && (
-                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${SEVERITY_TONE[e.severity]}`}>
+                          <span className={`${TOKENS.badge} ${SEVERITY_TONE[e.severity]}`}>
                             {t(`speak.severity.${e.severity}`)}
                           </span>
                         )}
-                        <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase text-primary">
+                        <span className="text-[10px] text-[#64748b]">
                           {CAT_LABELS[e.category] || e.category}
                         </span>
                       </span>
                     </td>
-                    <td className="hidden px-3 pb-2 pt-3 text-xs leading-relaxed text-gray-500 sm:px-6 md:table-cell">
+                    <td className={`${CELL} leading-[1.5] text-[#334155]`}>
                       {e.explanation}
                     </td>
                     {/* The rule, not the explanation again. Its own box
                         because it is the one thing on the row worth carrying
                         out of the page. */}
-                    <td className="hidden px-3 pb-2 pt-3 sm:px-6 md:table-cell">
+                    <td className={CELL}>
                       {e.remember && (
-                        <span className="block rounded-xl border border-violet-100 bg-violet-50 p-2.5 text-xs leading-relaxed text-violet-900">
-                          <span className="block font-bold">{t('report.colRemember')}</span>
+                        <span className="block rounded-[10px] border border-[#e4d8ff] bg-[#f5f0ff] p-[10px] leading-[1.45] text-[#4c1d95]">
+                          <span className="mb-[3px] block font-black">{t('report.colRemember')}</span>
                           {e.remember}
                         </span>
                       )}
                     </td>
                   </tr>
-                  {(e.explanation || e.remember) && (
-                    <tr className="md:hidden">
-                      <td colSpan={3}
-                        className="px-4 pb-3 text-xs leading-relaxed text-gray-500 sm:px-6">
-                        {e.explanation}
-                        {e.remember && (
-                          <span className="mt-2 block rounded-xl border border-violet-100 bg-violet-50 p-2.5 text-violet-900">
-                            <span className="block font-bold">{t('report.colRemember')}</span>
-                            {e.remember}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {hasMore && (
-            <div className="border-t border-violet-100 p-4">
-              <button type="button" onClick={() => setShowAll((v) => !v)}
-                data-testid="toggle-corrections"
-                className="btn-outline w-full justify-center !py-2.5 text-sm">
-                {showAll ? t('report.viewFewer') : t('report.viewAll')}
-              </button>
-            </div>
+            <button type="button" onClick={() => setShowAll((v) => !v)}
+              data-testid="toggle-corrections"
+              className={`${TOKENS.secondary} mt-[12px] w-full`}>
+              {showAll ? t('report.viewFewer') : t('report.viewAll')}
+            </button>
           )}
-        </div>
+        </section>
       )}
 
       {!showTranscript && (
@@ -399,10 +385,18 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
           is why it reads after the answer to "what should I do now". */}
       <Panel title={t('report.profile')} description={t('report.profileSub')}
         testId="speaking-profile">
-        {/* Without this the grid repeats two sections the report
-            already has: its strengths box is "What you did well"
-            and its focus box is "Your next step". */}
-        <SpeakingGrid result={result} showNarrative={false} />
+        {/* The four cards first — one glance, four criteria — and the grid
+            under them for the detail behind each: the A1→C2 ladder, the mark
+            out of 20, the CLB band, how it was delivered, and the speech-rate
+            figures. The cards say where you stand; the grid says how far the
+            next band is. */}
+        <ProfileCards criteria={result.criteria} />
+        <div className="mt-[15px]">
+          {/* Without this the grid repeats two sections the report
+              already has: its strengths box is "What you did well"
+              and its focus box is "Your next step". */}
+          <SpeakingGrid result={result} showNarrative={false} />
+        </div>
       </Panel>
 
       {Array.isArray(result.pronunciation_errors) && result.pronunciation_errors.length > 0 && (
