@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { CommunityInline } from '../components/CommunityButton';
-import { EnvelopeSimple, Lock, User, Eye, EyeSlash } from '@phosphor-icons/react';
+import { EnvelopeSimple, Lock, User, Phone, Eye, EyeSlash } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
@@ -16,7 +16,7 @@ export default function Register() {
   const { register } = useAuth();
   const t = useT();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ name: '', email: '', password: '', confirm: '' });
+  const [form, setForm] = useState({ name: '', email: '', phone: '', password: '', confirm: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -31,7 +31,7 @@ export default function Register() {
     if (form.password.length < 8) return setError(t('auth.tooShort'));
     if (form.password !== form.confirm) return setError(t('auth.mismatch'));
     setBusy(true);
-    const res = await register(form.name, form.email, form.password);
+    const res = await register(form.name, form.email, form.password, form.phone.trim());
     setBusy(false);
     /* The account exists on the server by the time this line runs, on BOTH
        success paths below: one opens a session straight away, the other waits
@@ -110,6 +110,27 @@ export default function Register() {
             <input className="input !pl-11" type="email" name="email" autoComplete="email"
               autoCapitalize="none" autoCorrect="off" spellCheck="false" required
               placeholder={t('auth.email')} value={form.email} onChange={set('email')} data-testid="email-input" />
+          </div>
+          {/* Required. The column has always existed and nothing ever asked
+              for it, so almost every account has no number and a learner
+              whose email bounces cannot be reached at all.
+
+              type="tel", so a phone offers the number pad; the pattern is the
+              server's, which refuses only what cannot be a number — people
+              write a country code, spaces or brackets, and a stricter guess
+              would reject real numbers. */}
+          <div className="relative">
+            <Phone size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+              {/* Every bracket, dot and dash escaped. Chrome compiles this
+                  attribute as a `v`-mode regex, where an unescaped ( or )
+                  inside a character class is a syntax error — and an invalid
+                  pattern is not a failing pattern, it is an IGNORED one, so
+                  the tidier-looking version accepted "call me later" in
+                  silence. Do not unescape these. */}
+            <input className="input !pl-11" type="tel" name="phone" autoComplete="tel"
+              required minLength={6} maxLength={32} pattern="[0-9+\(\)\.\-\s]{6,32}"
+              placeholder={t('auth.phone')} value={form.phone} onChange={set('phone')}
+              data-testid="phone-input" />
           </div>
           <div className="relative">
             <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />

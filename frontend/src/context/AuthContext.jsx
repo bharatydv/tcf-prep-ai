@@ -113,9 +113,9 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const register = async (name, email, password) => {
+  const register = async (name, email, password, phone) => {
     try {
-      const { data } = await api.post('/auth/register', { name, email, password });
+      const { data } = await api.post('/auth/register', { name, email, password, phone });
       // The account exists but has no session: the server no longer sets
       // cookies at registration, because confirmation is required first.
       // Calling setUser() here would render a signed-in shell on top of

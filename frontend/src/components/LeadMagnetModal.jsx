@@ -247,9 +247,12 @@ export default function LeadMagnetModal() {
                   placeholder={t('lead.email')} aria-label={t('lead.email')} />
                 {/* The pattern matches the server's: digits and the
                     punctuation people actually type, nothing normalised. */}
+                {/* Escaped for `v`-mode: see the note on the registration
+                    form. An unescaped ( here makes Chrome discard the whole
+                    pattern rather than fail it. */}
                 <input className={field} value={form.phone} onChange={set('phone')}
                   name="phone" type="tel" autoComplete="tel" required
-                  minLength={6} maxLength={32} pattern="[0-9+().\s-]{6,32}"
+                  minLength={6} maxLength={32} pattern="[0-9+\(\)\.\-\s]{6,32}"
                   placeholder={t('lead.phone')} aria-label={t('lead.phone')} />
                 {error && <p className="text-xs font-semibold text-rose-600">{error}</p>}
                 <button type="submit" disabled={busy}
