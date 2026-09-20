@@ -65,7 +65,12 @@ export default function SpeakingHome() {
                 <p className="text-xs font-semibold text-primary">{t('speakHome.practiceModeSub')}</p>
               </div>
             </div>
-            <ul className="mt-5 space-y-2.5 text-sm text-gray-600">
+            {/* flex-1: the two cards are already the same height, but
+                without this the button follows the last bullet, so the
+                card with the shorter list puts its button higher and
+                the pair reads as two unrelated choices. The list takes
+                the slack; the buttons sit on one line. */}
+            <ul className="mt-5 flex-1 space-y-2.5 text-sm text-gray-600">
               <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-primary" /> {t('speakHome.bullet1')}</li>
               <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-primary" /> {t('speakHome.bullet2')}</li>
               <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-primary" /> {t('speakHome.bullet3')}</li>
@@ -88,7 +93,12 @@ export default function SpeakingHome() {
               </div>
             </div>
             <p className="mt-5 text-xs font-bold uppercase tracking-wide text-gray-500">{t('speakHome.whatToExpect')}</p>
-            <ul className="mt-2 space-y-2.5 text-sm text-gray-600">
+            {/* flex-1: the two cards are already the same height, but
+                without this the button follows the last bullet, so the
+                card with the shorter list puts its button higher and
+                the pair reads as two unrelated choices. The list takes
+                the slack; the buttons sit on one line. */}
+            <ul className="mt-2 flex-1 space-y-2.5 text-sm text-gray-600">
               <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-pink-600" /> {t('speakHome.testBullet1')}</li>
               <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-pink-600" /> {t('speakHome.testBullet2')}</li>
               <li className="flex items-start gap-2"><CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-pink-600" /> {t('speakHome.testBullet3')}</li>
