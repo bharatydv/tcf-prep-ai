@@ -16,7 +16,7 @@
  * Jest cannot resolve, and anything that imports it becomes untestable by
  * association — the same constraint TranscriptDiff documents.
  */
-import { markOutOf20, nclcFromMark } from '../lib/tcf';
+import { markOutOf20, nclcFromMark, levelFromScore } from '../lib/tcf';
 import { useT } from '../i18n';
 
 /* ---------------------------------------------------------------------------
@@ -121,14 +121,12 @@ export function ResultHero({ result }) {
     <section
       className="rounded-[22px] bg-[image:linear-gradient(110deg,#6d28d9,#a21caf)] px-[29px] py-[27px] text-white shadow-[0_14px_35px_rgba(124,58,237,0.18)]"
       data-testid="result-hero">
-      <p className="text-[11px] font-black uppercase tracking-[0.09em] opacity-[0.78]">
-        {t('report.eyebrow')}
-      </p>
-      <h2 className="mb-[4px] mt-[5px] font-heading text-[29px] font-extrabold tracking-[-0.7px]">
-        {t('report.title')}
-      </h2>
-      <p className="text-[14px] opacity-90">{t('report.subtitle')}</p>
-      <div className="mt-[20px] grid gap-[12px] sm:grid-cols-3">
+      {/* No heading here. The prototype's hero carries one because it is a
+          whole page; this is a block inside a page that already has a title
+          above it, and a second "Your personalised feedback" under the first
+          heading is a header for a section the reader is already in.
+          The three numbers are the result, and they are what is left. */}
+      <div className="grid gap-[12px] sm:grid-cols-3">
         {stats.map(([value, label]) => (
           <div key={label} className="rounded-[15px] bg-white px-[17px] py-[15px]">
             <p className={`text-[27px] font-black leading-none text-[#7c3aed]`}>{value}</p>
@@ -359,6 +357,60 @@ export function NextStep({ focusAreas, practiceHref }) {
         </div>
       </div>
     </section>
+  );
+}
+
+/* --------------------------------------------------------------- profile ---
+   The four things an examiner marks, as four cards.
+ *
+ * The order is the prototype's — language, then task, then organisation, with
+ * pronunciation last — rather than the grid's, which opens with phonology.
+ * That matters here for a practical reason: phonology is the criterion most
+ * often missing, because it needs a model that listened to the audio rather
+ * than read the transcript, and a gap at the end of a row of four is a row of
+ * three. A gap at the front is a hole.
+ *
+ * The labels are the ones the grid below already uses. The prototype calls
+ * these "Task response" and "Pronunciation", which read more easily, but two
+ * names for one criterion on one page is worse than a stiff name — and these
+ * are the examiner's own terms, which is what a candidate will meet again.
+ */
+const PROFILE_CRITERIA = [
+  ['linguistic', 'grid.linguistic'],
+  ['adequacy', 'grid.adequacy'],
+  ['discourse', 'grid.discourse'],
+  ['phonology', 'grid.phonology'],
+];
+
+export function ProfileCards({ criteria }) {
+  const t = useT();
+  const cards = PROFILE_CRITERIA
+    .map(([key, label]) => [key, label, criteria?.[key]])
+    // Only what was actually marked. A criterion nobody judged rendered as a
+    // zero-width bar would say the candidate failed it.
+    .filter(([, , c]) => c && levelFromScore(c.score));
+  if (!cards.length) return null;
+  return (
+    <div className="grid gap-[10px] sm:grid-cols-2 min-[900px]:grid-cols-4"
+      data-testid="profile-cards">
+      {cards.map(([key, label, c]) => (
+        <div key={key} className="rounded-[13px] border border-[#e7e2f2] p-[14px]">
+          <p className="text-[11px] text-[#64748b]">{t(label)}</p>
+          <p className="mt-[4px] text-[20px] font-black text-[#171322]">
+            {levelFromScore(c.score)}
+          </p>
+          {/* A fixed floor, so four cards whose comments run to different
+              lengths still line their bars up with each other. */}
+          <p className="mt-[5px] min-h-[31px] text-[11px] leading-[1.45] text-[#334155]">
+            {c.comment}
+          </p>
+          <div className="mt-[10px] h-[6px] overflow-hidden rounded-full bg-[#eeeaf8]">
+            <div className="h-full rounded-full bg-[image:linear-gradient(90deg,#7c3aed,#c026d3)]"
+              style={{ width: `${Math.max(0, Math.min(100, Number(c.score) || 0))}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

@@ -38,8 +38,8 @@ import { SpeakingGrid } from './SpeakingGrid';
 import { TranscriptDiff } from './TranscriptDiff';
 import {
   ResultHero, DidWell, Priorities, Recurring, Progress, Vocabulary,
-  NextStep, PracticeCta, Panel, TOKENS, CAT_LABELS, KIND_TONE, KIND_ROW,
-  KIND_LABEL,
+  NextStep, PracticeCta, Panel, ProfileCards, TOKENS, CAT_LABELS, KIND_TONE,
+  KIND_ROW, KIND_LABEL,
 } from './speakingReport';
 import { useOwnVoice } from '../lib/ownVoice';
 import { findClip } from '../lib/speechClips';
@@ -385,10 +385,18 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
           is why it reads after the answer to "what should I do now". */}
       <Panel title={t('report.profile')} description={t('report.profileSub')}
         testId="speaking-profile">
-        {/* Without this the grid repeats two sections the report
-            already has: its strengths box is "What you did well"
-            and its focus box is "Your next step". */}
-        <SpeakingGrid result={result} showNarrative={false} />
+        {/* The four cards first — one glance, four criteria — and the grid
+            under them for the detail behind each: the A1→C2 ladder, the mark
+            out of 20, the CLB band, how it was delivered, and the speech-rate
+            figures. The cards say where you stand; the grid says how far the
+            next band is. */}
+        <ProfileCards criteria={result.criteria} />
+        <div className="mt-[15px]">
+          {/* Without this the grid repeats two sections the report
+              already has: its strengths box is "What you did well"
+              and its focus box is "Your next step". */}
+          <SpeakingGrid result={result} showNarrative={false} />
+        </div>
       </Panel>
 
       {Array.isArray(result.pronunciation_errors) && result.pronunciation_errors.length > 0 && (

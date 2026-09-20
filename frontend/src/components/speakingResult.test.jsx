@@ -15,7 +15,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nProvider } from '../i18n';
 import { SpeakingResult, rankErrors } from './SpeakingResult';
-import { topPriorities, strengthLines } from './speakingReport';
+import { topPriorities, strengthLines, ProfileCards } from './speakingReport';
 
 const TTS = { speak: () => {}, stop: () => {}, speakingId: null, supported: false };
 
@@ -31,7 +31,13 @@ const RESULT = {
   focus_areas: ['Subject-verb agreement', 'Common prepositions'],
   suggestions: ['Slow down at the start of each idea.'],
   vocabulary_suggestions: ['être en contact avec', 'présenter des avantages'],
-  criteria: { linguistic: { score: 45, comment: 'x' } },
+  // Three of the four, which is the normal shape: phonology needs a model
+  // that listened to the recording, and most results do not have one.
+  criteria: {
+    linguistic: { score: 45, comment: 'Understandable, with recurring errors.' },
+    adequacy: { score: 58, comment: 'You addressed the question.' },
+    discourse: { score: 48, comment: 'Ideas need stronger linking.' },
+  },
   errors: [
     {
       error: "j'habite au Toronto", correction: "j'habite à Toronto",
@@ -177,6 +183,48 @@ describe('SpeakingResult', () => {
     expect(host.querySelector('[data-testid="transcript-diff"]')).toBeNull();
     expect(host.querySelector('[data-testid="transcript-withheld"]')).not.toBeNull();
     act(() => root.unmount());
+  });
+});
+
+describe('the speaking profile cards', () => {
+  it('draws one card per criterion the grader marked', () => {
+    const page = mount(RESULT);
+    const cards = page.find('profile-cards');
+    expect(cards).not.toBeNull();
+    // Three criteria in the fixture; phonology is absent, as it is whenever
+    // no model listened to the audio.
+    expect(cards.children).toHaveLength(3);
+    expect(cards.textContent).toMatch(/Linguistic mastery/);
+    expect(cards.textContent).toMatch(/B1/);
+    page.unmount();
+  });
+
+  it('leaves out a criterion nobody assessed rather than scoring it zero', () => {
+    const page = mount({ ...RESULT, criteria: { linguistic: { score: 45, comment: 'x' } } });
+    expect(page.find('profile-cards').children).toHaveLength(1);
+    page.unmount();
+  });
+
+  it('draws nothing at all when no criterion was marked', () => {
+    const page = mount({ ...RESULT, criteria: {} });
+    expect(page.find('profile-cards')).toBeNull();
+    // and the rest of the page survives
+    expect(page.find('result-hero')).not.toBeNull();
+    page.unmount();
+  });
+
+  it('keeps the detailed grid underneath the cards', () => {
+    const page = mount(RESULT);
+    const html = page.host.innerHTML;
+    expect(html.indexOf('data-testid="profile-cards"'))
+      .toBeLessThan(html.indexOf('data-testid="speaking-grid"'));
+    page.unmount();
+  });
+
+  it('survives a criterion whose score is missing', () => {
+    const page = mount({ ...RESULT, criteria: { linguistic: { comment: 'no score' } } });
+    expect(page.find('profile-cards')).toBeNull();
+    page.unmount();
   });
 });
 

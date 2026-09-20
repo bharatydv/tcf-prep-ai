@@ -198,6 +198,31 @@ export function nextMarkBand(mark) {
 /* The five columns of the level chart. C1 and C2 share one, as the official
  * expression orale reporting does: above NCLC 10 the table stops splitting
  * them, so a chart that did would be inventing a distinction. */
+/* The CEFR band one criterion's score falls in.
+ *
+ * The same bands the graders are given in backend/server.py — A1 (5-19),
+ * A2 (20-39), B1 (40-54), B2 (55-69), C1 (70-84), C2 (85-100) — so a
+ * criterion card and the rubric that produced the number agree. Change one,
+ * change both.
+ *
+ * Nothing sits below A1, so a score under 5 reads A1 rather than blank: the
+ * candidate said something, and "no level" is not a thing the scale has.
+ */
+export function levelFromScore(score) {
+  // Before Number(), not after: Number(null) and Number('') are both 0, so a
+  // criterion the grader did not mark would have come back A1 — telling a
+  // candidate they scored the bottom band on something nobody assessed.
+  if (score === null || score === undefined || score === '') return null;
+  const n = Number(score);
+  if (!Number.isFinite(n)) return null;
+  if (n >= 85) return 'C2';
+  if (n >= 70) return 'C1';
+  if (n >= 55) return 'B2';
+  if (n >= 40) return 'B1';
+  if (n >= 20) return 'A2';
+  return 'A1';
+}
+
 export const LEVEL_COLUMNS = ['A1', 'A2', 'B1', 'B2', 'C1/C2'];
 
 export const levelColumn = (level) =>
