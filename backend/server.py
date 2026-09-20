@@ -9,6 +9,8 @@ original MongoDB version — only persistence was migrated.
 """ 
 import os
 import re
+import io
+import csv
 import time
 import json
 import uuid
@@ -572,6 +574,34 @@ class Subscriber(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     source: Mapped[str] = mapped_column(String(40), default="footer")
+
+
+class Lead(Base):
+    """Somebody who asked for a free download without opening an account.
+
+    Kept apart from `subscribers` on purpose: a newsletter row is an address
+    and a consent to be written to, while this is a name, an address and a
+    phone number given in exchange for one file. Mixing them would mean the
+    footer form and the download form had the same meaning, and they do not.
+
+    One row per (email, resource): asking for the same file twice is a second
+    download, not a second person, and the later name and number are the ones
+    worth keeping.
+    """
+    __tablename__ = "leads"
+    __table_args__ = (UniqueConstraint("email", "resource",
+                                       name="uq_leads_email_resource"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(120))
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    phone: Mapped[str] = mapped_column(String(32))
+    # Which file was asked for, and which surface asked.
+    resource: Mapped[str] = mapped_column(String(64), index=True)
+    source: Mapped[str] = mapped_column(String(40), default="exit_intent")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
 
 
 class Prompt(Base):
@@ -4484,6 +4514,26 @@ class NewsletterIn(BaseModel):
     email: EmailStr
 
 
+class LeadIn(BaseModel):
+    """The three fields the download form asks for.
+
+    The phone number is kept as typed rather than normalised: people give it
+    with a country code, spaces, brackets or none of those, and a regex that
+    guessed wrong would reject a real number to store a tidier one. The
+    pattern only refuses what cannot be a number at all.
+    """
+
+    name: str = Field(min_length=2, max_length=120)
+    email: EmailStr
+    phone: str = Field(min_length=6, max_length=32,
+                       pattern=r"^[0-9+()\-.\s]{6,32}$")
+    # Which file. Validated against DOWNLOADS by the endpoint, not here, so an
+    # unknown slug answers 404 rather than 422.
+    resource: str = Field(default="tcf-vocabulary", max_length=64)
+    # Where the form was shown. Recorded, never trusted.
+    source: str = Field(default="exit_intent", max_length=40)
+
+
 class DialogueTurn(BaseModel):
     role: str = Field(pattern="^(candidate|agent)$")
     text: str = Field(max_length=2000)
@@ -5963,6 +6013,165 @@ async def subscribe(body: NewsletterIn, db: AsyncSession = Depends(get_db),
         db.add(Subscriber(email=email, created_at=now_utc(), source="footer"))
         await db.commit()
     return {"detail": "Subscribed"}
+
+
+# ----------------------------------------------------------------------------
+# Free downloads (lead magnets)
+# ----------------------------------------------------------------------------
+# One file per slug, checked in next to the blog content so a deploy carries it
+# the same way it carries an article. Adding a resource is a line here plus the
+# PDF; nothing else in this file knows the names.
+DOWNLOADS_DIR = Path(__file__).resolve().parent / "content" / "downloads"
+DOWNLOADS = {
+    "tcf-vocabulary": {
+        "file": "tcf-canada-vocabulaire-thematique.pdf",
+        "filename": "TCF-Canada-Vocabulaire-Thematique-prepfrancais.pdf",
+        "media_type": "application/pdf",
+    },
+}
+
+# How long a download link stays good. Long enough to survive a slow phone and
+# a tab left open through a meeting; short enough that a link pasted into a
+# group chat stops working before it spreads.
+DOWNLOAD_TTL_SECONDS = 60 * 60
+
+
+def _download_token(slug: str, expires_at: int) -> str:
+    """A link nobody can mint without the server's secret.
+
+    The file is free, but it is free in exchange for a name and a number, and
+    a bare static path under /media would be the whole exchange undone the
+    first time anyone shared the URL. Signed rather than random because a
+    random token would need a table of its own to mean anything.
+    """
+    msg = f"{slug}|{expires_at}".encode()
+    sig = hmac.new(JWT_SECRET.encode(), msg, hashlib.sha256).digest()
+    raw = base64.urlsafe_b64encode(sig).decode().rstrip("=")
+    return f"{expires_at}.{raw}"
+
+
+def _download_token_ok(slug: str, token: str) -> bool:
+    try:
+        stamp, _sig = token.split(".", 1)
+        expires_at = int(stamp)
+    except (ValueError, AttributeError):
+        return False
+    if expires_at < int(time.time()):
+        return False
+    # compare_digest, not ==: a plain comparison leaks the signature one byte
+    # at a time to anyone patient enough to time the answers.
+    return hmac.compare_digest(_download_token(slug, expires_at), token)
+
+
+def _download_url(slug: str) -> str:
+    expires_at = int(time.time()) + DOWNLOAD_TTL_SECONDS
+    return f"/api/downloads/{slug}?t={_download_token(slug, expires_at)}"
+
+
+# Ten a day per caller. A lead form is not something anyone fills in twice by
+# accident, and the limit is what stops the table being used as free storage
+# for somebody else's address list.
+lead_rate_limit = rate_limit("leads", limit=10, window_seconds=86400)
+
+
+@app.post("/api/leads")
+async def capture_lead(body: LeadIn, db: AsyncSession = Depends(get_db),
+                       _rl=Depends(lead_rate_limit)):
+    """Record a download request and hand back a signed link to the file.
+
+    Answering with the link rather than the file itself keeps this endpoint
+    JSON, so the form can show an error inline instead of the browser
+    navigating away from the page on a 422.
+    """
+    if body.resource not in DOWNLOADS:
+        raise HTTPException(status_code=404, detail="Unknown download")
+
+    email = body.email.lower().strip()
+    name = body.name.strip()
+    phone = body.phone.strip()
+    now = now_utc()
+
+    existing = await db.scalar(
+        select(Lead).where(Lead.email == email, Lead.resource == body.resource))
+    if existing is None:
+        db.add(Lead(name=name, email=email, phone=phone,
+                    resource=body.resource, source=body.source,
+                    created_at=now))
+    else:
+        # Asking again is the same person with a possibly better number.
+        existing.name = name
+        existing.phone = phone
+        existing.updated_at = now
+    await db.commit()
+
+    # Server-side: an ad blocker must not be able to hide a lead, and the
+    # browser must not be able to invent one.
+    await record_event(db, "lead_capture", resource=body.resource,
+                       source=body.source, returning=existing is not None)
+
+    return {"url": _download_url(body.resource)}
+
+
+@app.get("/api/downloads/{slug}")
+async def download_resource(slug: str, t: str = "",
+                            user: Optional[User] = Depends(get_optional_user)):
+    """Serve a free resource to a signed link, or to anyone signed in.
+
+    Somebody with an account has already given us more than the form asks for,
+    so making them fill it in would be asking twice for what we have.
+    """
+    item = DOWNLOADS.get(slug)
+    if not item:
+        raise HTTPException(status_code=404, detail="Unknown download")
+    if user is None and not _download_token_ok(slug, t):
+        raise HTTPException(status_code=403,
+                            detail="This download link has expired. "
+                                   "Please request it again.")
+    path = DOWNLOADS_DIR / item["file"]
+    if not path.is_file():
+        # The row was recorded and the visitor is staring at a broken button,
+        # so this one is worth a log line rather than a silent 404.
+        log.error("Download %s is missing from %s", slug, DOWNLOADS_DIR)
+        raise HTTPException(status_code=404, detail="File not available")
+    return FileResponse(
+        path, media_type=item["media_type"],
+        headers={"Content-Disposition":
+                 f'attachment; filename="{item["filename"]}"'})
+
+
+@app.get("/api/admin/leads")
+async def admin_leads(resource: Optional[str] = None,
+                      fmt: str = Query("json", pattern="^(json|csv)$"),
+                      limit: int = Query(500, ge=1, le=5000),
+                      admin: User = Depends(get_admin_user),
+                      db: AsyncSession = Depends(get_db)):
+    """The captured names, newest first — as JSON, or as a CSV to import.
+
+    Without this the leads are only reachable with a psql session, which is
+    the same as not collecting them.
+    """
+    q = select(Lead).order_by(Lead.created_at.desc()).limit(limit)
+    if resource:
+        q = q.where(Lead.resource == resource)
+    rows = (await db.execute(q)).scalars().all()
+    if fmt == "csv":
+        out = io.StringIO()
+        w = csv.writer(out)
+        w.writerow(["name", "email", "phone", "resource", "source",
+                    "created_at"])
+        for r in rows:
+            w.writerow([r.name, r.email, r.phone, r.resource, r.source,
+                        (r.created_at or now_utc()).isoformat()])
+        stamp = now_utc().strftime("%Y-%m-%d")
+        return Response(
+            content=out.getvalue(), media_type="text/csv",
+            headers={"Content-Disposition":
+                     f'attachment; filename="prepfrancais-leads-{stamp}.csv"'})
+    return {"leads": [{"name": r.name, "email": r.email, "phone": r.phone,
+                       "resource": r.resource, "source": r.source,
+                       "created_at": (r.created_at.isoformat()
+                                      if r.created_at else None)}
+                      for r in rows]}
 
 
 # ----------------------------------------------------------------------------
@@ -8611,6 +8820,10 @@ CLIENT_EVENTS = {
 SERVER_EVENTS = {
     "sign_up", "email_verified", "logout", "ai_result", "ai_call", "ai_failure",
     "payment_success", "payment_reversed", "subscription_cancelled",
+    # A free-download form was filled in. Server-side because an ad blocker
+    # must not be able to hide a lead, and a browser must not be able to
+    # invent one.
+    "lead_capture",
 }
 
 
