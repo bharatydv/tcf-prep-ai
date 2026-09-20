@@ -5,6 +5,7 @@ import { api, errMsg, CATEGORY_META } from '../lib/api';
 import { BackLink, ErrorHighlightedText } from '../components/shared';
 import { RecordingPlayer } from '../components/RecordingPlayer';
 import { SpeakButton } from '../components/SpeakButton';
+import { CorrectionText } from '../components/CorrectionText';
 import { useSpeak } from '../lib/speak';
 import { useT } from '../i18n';
 import { displayMark } from '../lib/tcf';
@@ -148,13 +149,13 @@ export default function Feedback() {
                     been said only become a lesson when they can be heard one
                     after the other — the same reason the speaking result plays
                     both, and the same button doing it. */}
-                <p className="mt-0.5 flex items-start gap-2 text-sm text-red-600">
-                  <span className="min-w-0">{e.error}</span>
+                <p className="mt-0.5 flex items-start gap-2 text-sm">
+                  <CorrectionText said={e.error} correction={e.correction} side="said" />
                   <SpeakButton text={e.error} id={`m-${cat}-err-${i}`} {...tts} />
                 </p>
                 <p className="mt-2.5 text-xs font-semibold uppercase tracking-wide text-gray-400">{t('fb.colCorrection')}</p>
-                <p className="mt-0.5 flex items-start gap-2 text-sm font-medium text-green-700">
-                  <span className="min-w-0">{e.correction}</span>
+                <p className="mt-0.5 flex items-start gap-2 text-sm">
+                  <CorrectionText said={e.error} correction={e.correction} side="fix" />
                   <SpeakButton text={e.correction} id={`m-${cat}-fix-${i}`} {...tts} />
                 </p>
                 <p className="mt-2.5 text-xs font-semibold uppercase tracking-wide text-gray-400">{t('fb.colExplanation')}</p>
@@ -171,15 +172,18 @@ export default function Feedback() {
               <tbody>
                 {errs.map((e, i) => (
                   <tr key={i} className="border-t border-gray-100 align-top">
-                    <td className="px-6 py-3 text-red-600">
+                    {/* Only the words that changed carry colour. The whole
+                        cell in red said the whole phrase was wrong, when
+                        usually one word in it is. */}
+                    <td className="px-6 py-3">
                       <span className="flex items-start gap-2">
-                        <span className="min-w-0">{e.error}</span>
+                        <CorrectionText said={e.error} correction={e.correction} side="said" />
                         <SpeakButton text={e.error} id={`d-${cat}-err-${i}`} {...tts} />
                       </span>
                     </td>
-                    <td className="px-6 py-3 font-medium text-green-700">
+                    <td className="px-6 py-3">
                       <span className="flex items-start gap-2">
-                        <span className="min-w-0">{e.correction}</span>
+                        <CorrectionText said={e.error} correction={e.correction} side="fix" />
                         <SpeakButton text={e.correction} id={`d-${cat}-fix-${i}`} {...tts} />
                       </span>
                     </td>

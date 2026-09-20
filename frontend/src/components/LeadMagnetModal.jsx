@@ -189,37 +189,41 @@ export default function LeadMagnetModal() {
     }
   };
 
-  const field = 'w-full rounded-xl border border-violet-200 bg-white px-4 py-2.5 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-primary focus:ring-2 focus:ring-violet-200';
+  const field = 'w-full rounded-xl border border-violet-200 bg-white px-3.5 py-2 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-primary focus:ring-2 focus:ring-violet-200';
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/60 p-4 backdrop-blur-sm"
       role="dialog" aria-modal="true" aria-label={t('lead.title')}>
-      <div className="flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
-        <div className="flex items-start gap-3 bg-gradient-to-r from-primary to-fuchsia-600 px-6 py-4 text-white">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/20">
-            <FilePdf size={18} weight="fill" />
+      {/* Deliberately small. This interrupts somebody who was leaving, so it
+          has to be readable at a glance and answerable in three taps — a
+          panel that fills the screen reads as a wall to climb rather than an
+          offer to take. */}
+      <div className="flex max-h-[92vh] w-full max-w-[22rem] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center gap-2.5 bg-gradient-to-r from-primary to-fuchsia-600 px-4 py-3 text-white">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/20">
+            <FilePdf size={16} weight="fill" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="font-heading text-sm font-bold leading-snug">{t('lead.title')}</p>
-            <p className="text-[11px] text-white/80">{t('lead.badge')}</p>
+            <p className="font-heading text-[13px] font-bold leading-snug">{t('lead.title')}</p>
+            <p className="text-[10px] text-white/80">{t('lead.badge')}</p>
           </div>
           <button type="button" onClick={() => setOpen(false)} aria-label={t('lead.close')}
             data-testid="lead-close"
-            className="rounded-lg p-1.5 text-white/80 transition hover:bg-white/20 hover:text-white">
-            <X size={18} weight="bold" />
+            className="rounded-lg p-1 text-white/80 transition hover:bg-white/20 hover:text-white">
+            <X size={16} weight="bold" />
           </button>
         </div>
 
-        <div className="overflow-y-auto px-6 py-5">
+        <div className="overflow-y-auto px-4 py-4">
           {done ? (
             <div className="text-center">
-              <CheckCircle size={40} weight="fill" className="mx-auto text-emerald-500" />
-              <p className="mt-3 font-heading text-base font-bold text-gray-900">{t('lead.doneTitle')}</p>
-              <p className="mt-1.5 text-sm leading-relaxed text-gray-600">{t('lead.doneBody')}</p>
+              <CheckCircle size={34} weight="fill" className="mx-auto text-emerald-500" />
+              <p className="mt-2 font-heading text-sm font-bold text-gray-900">{t('lead.doneTitle')}</p>
+              <p className="mt-1 text-[13px] leading-snug text-gray-600">{t('lead.doneBody')}</p>
               {/* The click above can be blocked by a download setting, so the
                   link is on the page too rather than only in the code. */}
               <a href={done} download
-                className="btn-primary mt-4 inline-flex items-center gap-2 !bg-gradient-to-r !from-primary !to-fuchsia-600 !px-5 !py-2.5 text-sm">
+                className="btn-primary mt-3 inline-flex items-center gap-2 !bg-gradient-to-r !from-primary !to-fuchsia-600 !px-5 !py-2.5 text-sm">
                 <DownloadSimple size={16} weight="bold" /> {t('lead.doneCta')}
               </a>
               <button type="button" onClick={() => setOpen(false)}
@@ -229,17 +233,12 @@ export default function LeadMagnetModal() {
             </div>
           ) : (
             <>
-              <p className="text-sm leading-relaxed text-gray-700">{t('lead.body')}</p>
-              <ul className="mt-3 space-y-1.5 text-[13px] text-gray-600">
-                {['lead.point1', 'lead.point2', 'lead.point3'].map((k) => (
-                  <li key={k} className="flex items-start gap-2">
-                    <CheckCircle size={15} weight="fill" className="mt-0.5 shrink-0 text-primary" />
-                    {t(k)}
-                  </li>
-                ))}
-              </ul>
+              {/* One line, not a feature list. Whoever is reading this was on
+                  their way out; the three fields below are the ask, and
+                  everything above them is what stands between. */}
+              <p className="text-[13px] leading-snug text-gray-600">{t('lead.body')}</p>
 
-              <form onSubmit={submit} className="mt-5 space-y-3" data-testid="lead-form">
+              <form onSubmit={submit} className="mt-3 space-y-2" data-testid="lead-form">
                 <input className={field} value={form.name} onChange={set('name')}
                   name="name" autoComplete="name" required minLength={2} maxLength={120}
                   placeholder={t('lead.name')} aria-label={t('lead.name')} />
@@ -254,12 +253,12 @@ export default function LeadMagnetModal() {
                   placeholder={t('lead.phone')} aria-label={t('lead.phone')} />
                 {error && <p className="text-xs font-semibold text-rose-600">{error}</p>}
                 <button type="submit" disabled={busy}
-                  className="btn-primary w-full !bg-gradient-to-r !from-primary !to-fuchsia-600 !py-3 text-sm disabled:opacity-60">
+                  className="btn-primary w-full !bg-gradient-to-r !from-primary !to-fuchsia-600 !py-2.5 text-sm disabled:opacity-60">
                   {busy ? t('lead.sending') : t('lead.cta')}
                 </button>
               </form>
 
-              <p className="mt-3 text-center text-[11px] leading-relaxed text-gray-400">
+              <p className="mt-2.5 text-center text-[10px] leading-snug text-gray-400">
                 {t('lead.privacy')}{' '}
                 <Link to="/privacy" className="font-semibold text-gray-500 underline-offset-2 hover:text-primary hover:underline">
                   {t('consent.privacy')}

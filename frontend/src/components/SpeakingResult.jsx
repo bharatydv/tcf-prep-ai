@@ -13,11 +13,15 @@
  * screen — without it, tâche 1's "corrected" button and tâche 3's are the same
  * button as far as the synthesiser is concerned.
  */
-import { Fragment } from 'react';
+import { Fragment, useMemo } from 'react';
 import { CheckCircle, XCircle, Sparkle } from '@phosphor-icons/react';
 import { SpeakButton } from './SpeakButton';
+import { OwnVoiceButton } from './OwnVoiceButton';
+import { CorrectionText } from './CorrectionText';
 import { SpeakingGrid } from './SpeakingGrid';
 import { TranscriptDiff } from './TranscriptDiff';
+import { useOwnVoice } from '../lib/ownVoice';
+import { findClip } from '../lib/speechClips';
 import { useT } from '../i18n';
 
 // Each note names one sound in one word. The word gets a play button of its
@@ -50,6 +54,18 @@ const CAT_LABELS = {
 export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) {
   const t = useT();
   const showTranscript = taskType !== 1 && taskType !== 2;
+  /* The candidate's own voice, for the left-hand column. Needs three things
+     that are each allowed to be missing — a kept recording, word timings from
+     the transcriber, and a phrase that can be found among them — so every
+     clip below may be null and the synthesiser takes the button back when it
+     is. Hooks run before the early return; `result` being absent simply
+     means there is nothing to look for. */
+  const own = useOwnVoice(result?.submission_id, Boolean(result?.has_audio));
+  const clips = useMemo(() => {
+    const words = result?.speech_words;
+    if (!own.supported || !Array.isArray(words) || !words.length) return [];
+    return (result?.errors || []).map((e) => findClip(words, e.error));
+  }, [result, own.supported]);
   if (!result) return null;
   return (
     <div className="space-y-5">
@@ -75,28 +91,12 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
         </div>
       )}
 
-      <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            {result.answers_question ? (
-              <CheckCircle size={28} weight="fill" className="text-green-500" />
-            ) : (
-              <XCircle size={28} weight="fill" className="text-amber-500" />
-            )}
-            <div>
-              <p className="font-heading text-base font-bold text-gray-900">
-                {result.answers_question ? t('speak.relevant') : t('speak.notRelevant')}
-              </p>
-              <p className="text-sm text-gray-600">{result.relevance_comment}</p>
-            </div>
-          </div>
-          <div className="text-center">
-            <p className="text-xs uppercase tracking-wide text-gray-400">{t('speak.level')}</p>
-            <p className="font-heading text-3xl font-extrabold text-primary">{result.tcf_level}</p>
-          </div>
-        </div>
-      </div>
-
+      {/* The verdict banner that used to sit here is gone. It said the level
+          and whether the answer was on topic, and the grid immediately below
+          says both — the level as the ladder and the mark out of 20, the
+          relevance as the `adequacy` criterion with its own score and
+          comment. Two cards saying the same thing made the second one look
+          like a second opinion. */}
       <SpeakingGrid result={result} />
 
       {!showTranscript && (
@@ -188,20 +188,33 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
                       pairs, so a correction and its explanation read as one
                       block whichever shape the table is in. */}
                   <tr className="border-t border-violet-100 align-top">
-                    <td className="break-words bg-rose-50/50 px-4 pb-2 pt-3 sm:px-6">
+                    {/* No wash of colour across the cell. The tint said
+                        "this whole side is wrong", which is not what a
+                        correction means — the wrong part is a word or two
+                        inside an otherwise fine phrase, and that is what is
+                        marked now. */}
+                    <td className="break-words px-4 pb-2 pt-3 sm:px-6">
                       <span className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-red-600 line-through">{e.error}</span>
+                        <CorrectionText said={e.error} correction={e.correction} side="said" />
                         {/* Both sides are playable, not just the right one. A
                             speaker who cannot hear the difference between what
                             they said and what they should have said cannot fix
                             it, and the correction alone leaves them comparing a
-                            sound to a spelling. */}
-                        <SpeakButton text={e.error} id={`${idPrefix}said-${i}`} {...tts} />
+                            sound to a spelling.
+
+                            The left one plays the candidate's own recording
+                            where it can be found, and only falls back to the
+                            synthesiser where it cannot — a machine reading
+                            your mistake back to you in a clean accent is the
+                            least useful way to hear it. */}
+                        {clips[i]
+                          ? <OwnVoiceButton clip={clips[i]} id={`${idPrefix}said-${i}`} {...own} />
+                          : <SpeakButton text={e.error} id={`${idPrefix}said-${i}`} {...tts} />}
                       </span>
                     </td>
-                    <td className="break-words bg-green-50/50 px-3 pb-2 pt-3">
+                    <td className="break-words px-3 pb-2 pt-3">
                       <span className="flex flex-wrap items-center gap-1.5">
-                        <span className="font-semibold text-green-700">{e.correction}</span>
+                        <CorrectionText said={e.error} correction={e.correction} side="fix" />
                         <SpeakButton text={e.correction} id={`${idPrefix}fix-${i}`} {...tts} />
                       </span>
                     </td>
