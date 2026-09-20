@@ -15,7 +15,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nProvider } from '../i18n';
 import { SpeakingResult, rankErrors } from './SpeakingResult';
-import { topPriorities } from './speakingReport';
+import { topPriorities, strengthLines } from './speakingReport';
 
 const TTS = { speak: () => {}, stop: () => {}, speakingId: null, supported: false };
 
@@ -177,6 +177,36 @@ describe('SpeakingResult', () => {
     expect(host.querySelector('[data-testid="transcript-diff"]')).toBeNull();
     expect(host.querySelector('[data-testid="transcript-withheld"]')).not.toBeNull();
     act(() => root.unmount());
+  });
+});
+
+describe('strengthLines', () => {
+  it('uses what the grader listed', () => {
+    expect(strengthLines(RESULT)).toEqual(RESULT.strengths);
+  });
+
+  it('falls back to the relevance verdict rather than vanishing', () => {
+    // The model is terse sometimes. A page built around "what went right
+    // first" must not lose that section when it is.
+    expect(strengthLines({
+      strengths: [], answers_question: true,
+      relevance_comment: 'The answer addresses the task directly.',
+    })).toEqual(['The answer addresses the task directly.']);
+  });
+
+  it('says nothing rather than praising an off-topic answer', () => {
+    expect(strengthLines({
+      strengths: [], answers_question: false,
+      relevance_comment: 'The answer does not address the task.',
+    })).toEqual([]);
+  });
+
+  it('drops blank entries the grader padded the list with', () => {
+    expect(strengthLines({ strengths: ['  ', ''] })).toEqual([]);
+  });
+
+  it('survives no result at all', () => {
+    expect(strengthLines(undefined)).toEqual([]);
   });
 });
 

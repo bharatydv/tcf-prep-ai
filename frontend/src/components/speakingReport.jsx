@@ -107,9 +107,29 @@ export function ResultHero({ result }) {
    ------------------------------------------------------- top priorities ---
    Side by side, and in that order. What went right comes first because a page
    that opens with a list of faults is one most people stop reading. */
-export function DidWell({ strengths }) {
+/* What the grader said went well, and a true fallback when it said nothing.
+ *
+ * The model is asked for strengths and usually returns them, but not always —
+ * and a page whose whole premise is "what did I do right, first" must not
+ * quietly lose that section on the results where the model was terse. When
+ * there is no list, the relevance verdict stands in: the grader judged the
+ * answer on topic, which is a real thing the candidate did and is not
+ * invented here. When even that is missing the section stays out, because the
+ * alternative is praise nobody earned. */
+export function strengthLines(result) {
+  const listed = Array.isArray(result?.strengths)
+    ? result.strengths.filter((s) => String(s || '').trim())
+    : [];
+  if (listed.length) return listed;
+  const relevance = String(result?.relevance_comment || '').trim();
+  if (result?.answers_question && relevance) return [relevance];
+  return [];
+}
+
+export function DidWell({ result, strengths: given }) {
   const t = useT();
-  if (!Array.isArray(strengths) || !strengths.length) return null;
+  const strengths = given || strengthLines(result);
+  if (!strengths.length) return null;
   return (
     <Panel title={t('report.didWell')} description={t('report.didWellSub')}
       tone="border-emerald-100 bg-emerald-50/50" testId="did-well">

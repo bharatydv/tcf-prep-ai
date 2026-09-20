@@ -155,7 +155,7 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
       {/* What went right, beside what to fix first. Side by side because they
           are one thought: these held, those did not. */}
       <div className="grid gap-5 lg:grid-cols-2">
-        <DidWell strengths={result.strengths} />
+        <DidWell result={result} />
         <Priorities errors={result.errors} practiceHref={PRACTICE_HREF} />
       </div>
 
