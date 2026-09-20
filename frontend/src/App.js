@@ -11,6 +11,10 @@ import Paywall from "./components/Paywall";
    it has to be able to answer before the first pageview is measured. It is a
    few hundred bytes and renders nothing once a choice has been stored. */
 import ConsentBanner from "./components/ConsentBanner";
+/* Static as well: it has to be listening for the pointer leaving the window
+   from the first page onwards, and a lazy chunk would miss exactly the
+   visitors who leave quickly. It renders nothing until it is triggered. */
+import LeadMagnetModal from "./components/LeadMagnetModal";
 /* Static for the same reason: it has to be watching the location from the
    first navigation onwards, and a lazy chunk would miss the ones that happen
    while it loads. It renders nothing. */
@@ -92,6 +96,10 @@ export default function App() {
         {/* Mounted once, above the routes: a spent allowance must be able to
             interrupt any page without that page knowing about billing. */}
         <Paywall />
+        {/* Also above the routes, and for the same reason: a visitor leaving
+            the blog is the same visitor leaving the pricing page, and no page
+            should have to know about the download offer to make it. */}
+        <LeadMagnetModal />
         {/* One boundary around the routes: a per-route spinner would flash the
             header's own layout twice on every navigation. */}
         <Suspense fallback={<RouteFallback />}>
