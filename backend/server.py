@@ -8124,6 +8124,25 @@ async def speaking_analyze(question: str = Form(...),
     analysis = merge_speech_audio(analysis, speech_metrics_from_words(heard["words"]))
     analysis = merge_speech_audio(analysis, audio_marks)
     analysis["transcript"] = transcript
+    # Where each word falls in the recording.
+    #
+    # The corrections used to be read back in a synthetic voice, which is the
+    # one voice that cannot teach pronunciation: hearing a machine say the
+    # sentence correctly does not tell a candidate what THEY said. These let
+    # the result page play the exact half-second of their own recording that a
+    # correction is about.
+    #
+    # Only AssemblyAI reports them, so this is often empty and the page falls
+    # back to the synthesiser — the same thing it did before.
+    #
+    # Short keys because this rides inside the submission's JSON column and a
+    # minute of speech is a couple of hundred words.
+    analysis["speech_words"] = [
+        {"t": str(w.get("text") or ""), "s": int(w["start"]), "e": int(w["end"])}
+        for w in (heard.get("words") or [])
+        if isinstance(w, dict) and str(w.get("text") or "").strip()
+        and w.get("start") is not None and w.get("end") is not None
+    ]
     sub = await persist_submission(
         db, user, transcript, None, analysis,
         source="speaking", consume=False, theme_id=theme_id,

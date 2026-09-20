@@ -15,6 +15,7 @@ import { SPEAKING_TASKS, displayMark } from '../lib/tcf';
 import { useAuth } from '../context/AuthContext';
 import { BackLink } from '../components/shared';
 import { SpeakingGrid } from '../components/SpeakingGrid';
+import { CorrectionText } from '../components/CorrectionText';
 import ConversationModal from '../components/ConversationModal';
 import { useT } from '../i18n';
 import { useSeo } from '../lib/seo';
@@ -606,9 +607,12 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
                 {result.errors.map((e, i) => (
                   <div key={i} className="rounded-xl border border-violet-50 bg-violet-50/40 p-3">
                     <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className="text-red-500 line-through">{e.error}</span>
+                      {/* Only the changed words, the same as the full result
+                          table: striking the whole phrase marks the six words
+                          that were right along with the one that was not. */}
+                      <CorrectionText said={e.error} correction={e.correction} side="said" />
                       <span className="text-gray-400">→</span>
-                      <span className="font-semibold text-green-600">{e.correction}</span>
+                      <CorrectionText said={e.error} correction={e.correction} side="fix" />
                       <span className="ml-auto rounded-full bg-violet-100 px-2 py-0.5 text-[9px] font-bold uppercase text-primary">{t(catKey(e.category))}</span>
                     </div>
                     <p className="mt-1 text-[11px] text-gray-500">{e.explanation}</p>
