@@ -12,14 +12,34 @@
  * `idPrefix` keeps the play buttons apart when more than one result is on
  * screen — without it, tâche 1's "corrected" button and tâche 3's are the same
  * button as far as the synthesiser is concerned.
+ *
+ * ---------------------------------------------------------------------------
+ * THE ORDER OF THIS PAGE
+ * ---------------------------------------------------------------------------
+ * It used to be an error report: level, then grid, then everything that was
+ * wrong. That describes one answer accurately and teaches badly, because it
+ * answers none of the questions the person reading it has — what did I do
+ * right, what should I fix first, have I done this before, am I improving.
+ *
+ * So: the result, then what went well, then the three things to fix, then the
+ * corrections, then the mistakes that are not new, then the stronger version,
+ * then what to practise, then the examiner's grid. The grid did not move
+ * because it stopped mattering; it moved because it is the detail, and detail
+ * belongs after the answer to "what now".
+ *
+ * Nothing that was on this page has been taken off it.
  */
-import { Fragment, useMemo } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { CheckCircle, XCircle, Sparkle } from '@phosphor-icons/react';
 import { SpeakButton } from './SpeakButton';
 import { OwnVoiceButton } from './OwnVoiceButton';
 import { CorrectionText } from './CorrectionText';
 import { SpeakingGrid } from './SpeakingGrid';
 import { TranscriptDiff } from './TranscriptDiff';
+import {
+  ResultHero, DidWell, Priorities, Recurring, Progress, Vocabulary,
+  NextStep, PracticeCta, Panel, CAT_LABELS, KIND_TONE, KIND_LABEL,
+} from './speakingReport';
 import { useOwnVoice } from '../lib/ownVoice';
 import { findClip } from '../lib/speechClips';
 import { useT } from '../i18n';
@@ -38,10 +58,40 @@ const SEVERITY_TONE = {
   minor: 'bg-gray-100 text-gray-500',
 };
 
-const CAT_LABELS = {
-  prepositions: 'Prépositions', spelling: 'Orthographe', conjugation: 'Conjugaison',
-  gender_number: 'Accord', anglicism: 'Anglicismes', improvement: 'Améliorations C1',
-};
+/* Where "Practice my mistakes" goes. A plain href rather than a router Link:
+   this component deliberately imports no react-router — see speakingReport. */
+const PRACTICE_HREF = '/review';
+
+/* How many corrections are shown before "View all". Enough to be worth
+   reading, few enough that the page does not open with twenty rows. */
+const IMPORTANT_COUNT = 5;
+
+/* Highest-impact first.
+ *
+ * The grader returns its errors in the order they were said, which is the one
+ * order that carries no information about which of them matters. A real
+ * mistake outranks a stylistic suggestion, and a major outranks a minor —
+ * both are stated per row now, so the page can sort by them instead of
+ * hoping the reader works it out.
+ *
+ * A row the grader did not label sits with the errors rather than below the
+ * upgrades: an unlabelled row is an old result, and every row on an old
+ * result was a mistake.
+ */
+const KIND_RANK = { error: 0, better: 1, upgrade: 2 };
+const SEVERITY_RANK = { major: 0, moderate: 1, minor: 2 };
+
+export function rankErrors(errors) {
+  return (errors || [])
+    .map((e, at) => ({ e, at }))
+    .sort((a, b) => {
+      const kind = (KIND_RANK[a.e.kind] ?? 0) - (KIND_RANK[b.e.kind] ?? 0);
+      if (kind) return kind;
+      const sev = (SEVERITY_RANK[a.e.severity] ?? 1) - (SEVERITY_RANK[b.e.severity] ?? 1);
+      if (sev) return sev;
+      return a.at - b.at;   // stable: the order they were said decides the rest
+    });
+}
 
 /* Tâches 1 and 2 are practised without words on screen, so their results are
    read the same way. Hiding the transcript during the conversation and then
@@ -54,6 +104,7 @@ const CAT_LABELS = {
 export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) {
   const t = useT();
   const showTranscript = taskType !== 1 && taskType !== 2;
+  const [showAll, setShowAll] = useState(false);
   /* The candidate's own voice, for the left-hand column. Needs three things
      that are each allowed to be missing — a kept recording, word timings from
      the transcriber, and a phrase that can be found among them — so every
@@ -66,9 +117,19 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
     if (!own.supported || !Array.isArray(words) || !words.length) return [];
     return (result?.errors || []).map((e) => findClip(words, e.error));
   }, [result, own.supported]);
+  /* Ranked once, each row carrying its original position so the clip and the
+     play-button ids still belong to the right correction after sorting. */
+  const ranked = useMemo(() => rankErrors(result?.errors), [result]);
   if (!result) return null;
+
+  const history = result.history || {};
+  const rows = showAll ? ranked : ranked.slice(0, IMPORTANT_COUNT);
+  const hasMore = ranked.length > IMPORTANT_COUNT;
+
   return (
     <div className="space-y-5">
+      <ResultHero result={result} />
+
       {result.language_mix?.detected && (
         <div className="flex items-start gap-3 rounded-3xl border border-amber-200 bg-amber-50 p-4"
           data-testid="language-mix">
@@ -91,99 +152,67 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
         </div>
       )}
 
-      {/* The verdict banner that used to sit here is gone. It said the level
-          and whether the answer was on topic, and the grid immediately below
-          says both — the level as the ladder and the mark out of 20, the
-          relevance as the `adequacy` criterion with its own score and
-          comment. Two cards saying the same thing made the second one look
-          like a second opinion. */}
-      <SpeakingGrid result={result} />
-
-      {!showTranscript && (
-        <div className="rounded-3xl border border-violet-100 bg-violet-50/40 p-5"
-          data-testid="transcript-withheld">
-          <p className="text-xs leading-relaxed text-gray-600">{t('speak.transcriptHidden')}</p>
-        </div>
-      )}
-
-      {/* The answer, twice, side by side.
-          Stacking the transcript above the corrected version meant comparing
-          two paragraphs by scrolling between them, and the whole value of
-          having both is reading one against the other: every difference is a
-          mistake that was made. Marked in place too — red on what was said,
-          green on what replaced it — so a correction can be found in its own
-          sentence rather than only in the table below. */}
-      {showTranscript && (
-      <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft"
-        data-testid="transcript-diff">
-        <p className="font-heading text-sm font-bold text-gray-900">{t('speak.transcript')}</p>
-        <div className="mt-3">
-          <TranscriptDiff
-            transcript={result.transcript}
-            corrected={result.corrected_version}
-            errors={result.errors || []}
-            action={(result.corrected_version || '').trim()
-              ? <SpeakButton text={result.corrected_version} id={`${idPrefix}corrected`} {...tts} />
-              : null} />
-        </div>
-        {(result.corrected_version || '').trim() && (
-          <p className="mt-3 text-xs leading-relaxed text-gray-400">
-            {t('speak.correctedNote')}
-          </p>
-        )}
+      {/* What went right, beside what to fix first. Side by side because they
+          are one thought: these held, those did not. */}
+      <div className="grid gap-5 lg:grid-cols-2">
+        <DidWell strengths={result.strengths} />
+        <Priorities errors={result.errors} practiceHref={PRACTICE_HREF} />
       </div>
-      )}
 
       {/* A table, because these are rows.
-          Every correction is the same four facts — what was said, what it
-          should have been, what kind of mistake it is, and why — and as
-          stacked cards those four landed in a different place on every one,
-          so nothing could be read down a column. Ten corrections are a list
-          to scan, not ten paragraphs to read.
+          Every correction is the same handful of facts — what was said, what
+          it should have been, what kind of mistake it is, why, and the rule to
+          take away — and as stacked cards those landed in a different place on
+          every one, so nothing could be read down a column.
 
-          Colour carries the wrong/right split, and it is deliberately not the
-          ONLY thing that does: the strike-through, the column headings and the
-          order of the two columns all say it as well, so the table still works
-          for a reader who cannot separate red from green. */}
-      {/* Wider than the page it sits in, once there is room for it.
-          The sitting is laid out at max-w-3xl because that is a comfortable
-          measure for reading a tâche brief, and four columns of table inside
-          it are four cramped columns. From xl up this breaks out by 8rem a
-          side — the page is centred, so that space is empty margin and taking
-          it costs nothing. Below xl it stays in the column and the last
-          column folds away instead. */}
-      {Array.isArray(result.errors) && result.errors.length > 0 && (
-        <div className="overflow-hidden rounded-3xl border border-violet-100 bg-white shadow-soft xl:-mx-32 xl:w-[calc(100%+16rem)]">
-          <p className="px-6 pb-3 pt-6 font-heading text-sm font-bold text-gray-900">
-            {t('speak.corrections')}
-          </p>
-          {/* Three columns, and the explanation on a row of its own.
-              As four columns this needed 44rem before the text stopped
-              collapsing, which put a sideways scrollbar under every result and
-              pushed the page wider than the window. "Why" is the only column
-              holding a sentence rather than a phrase, so moving it to a full
-              width row underneath takes the pressure off all three of the
-              others — and it reads better there anyway, directly beneath the
-              pair it explains rather than in a column beside it. */}
+          Sized to break out of the prose column: the page is centred and the
+          margin either side is empty, so from xl up the table takes it. */}
+      {ranked.length > 0 && (
+        <div className="overflow-hidden rounded-3xl border border-violet-100 bg-white shadow-soft xl:-mx-32 xl:w-[calc(100%+16rem)]"
+          data-testid="corrections-table">
+          <div className="px-6 pb-3 pt-6">
+            <p className="font-heading text-base font-extrabold text-gray-900">
+              {t('report.corrections')}
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-gray-500">
+              {t('report.correctionsSub')}
+            </p>
+            {/* The legend earns its place the moment a row can be something
+                other than a mistake: without it "Upgrade" reads as a fourth
+                severity. */}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {Object.keys(KIND_TONE).map((k) => (
+                <span key={k}
+                  className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase ${KIND_TONE[k]}`}>
+                  {t(KIND_LABEL[k])}
+                </span>
+              ))}
+              <span className="ml-auto text-[11px] text-gray-400">
+                {t('report.countSummary', { shown: rows.length, total: ranked.length })}
+              </span>
+            </div>
+          </div>
           {/* One table, two shapes.
-              From md up "Why" is a fourth column, which is what it wants to be
-              — the four facts of a correction read across a row. Below md
-              there is not room for four columns of French without each one
-              becoming a word wide, so the same text drops to a full-width row
-              underneath. Same markup, one breakpoint, no second table to keep
-              in step with this one. */}
+              From md up "Why" and "Remember" are columns of their own, which
+              is what they want to be — the facts of a correction read across a
+              row. Below md there is not room for five columns of French
+              without each becoming a word wide, so the same text drops to
+              full-width rows underneath. Same markup, one breakpoint, no
+              second table to keep in step with this one. */}
           <table className="w-full table-fixed text-sm">
             <thead className="bg-gray-50 text-left text-[10.5px] uppercase tracking-wide text-gray-500">
               <tr>
-                <th className="w-[30%] px-4 py-2.5 font-bold sm:px-6 md:w-[24%]">{t('speak.colSaid')}</th>
-                <th className="w-[30%] px-3 py-2.5 font-bold md:w-[24%]">{t('speak.colFix')}</th>
-                <th className="w-[40%] px-3 py-2.5 font-bold sm:px-4 md:w-[16%]">{t('speak.colType')}</th>
-                <th className="hidden px-3 py-2.5 font-bold sm:px-6 md:table-cell">{t('speak.colWhy')}</th>
+                <th className="w-[30%] px-4 py-2.5 font-bold sm:px-6 md:w-[20%]">{t('speak.colSaid')}</th>
+                <th className="w-[30%] px-3 py-2.5 font-bold md:w-[20%]">{t('speak.colFix')}</th>
+                <th className="w-[40%] px-3 py-2.5 font-bold sm:px-4 md:w-[14%]">{t('speak.colType')}</th>
+                <th className="hidden px-3 py-2.5 font-bold sm:px-6 md:table-cell md:w-[23%]">{t('speak.colWhy')}</th>
+                {/* The new column. Last, so nothing above it moved. */}
+                <th className="hidden px-3 py-2.5 font-bold sm:px-6 md:table-cell md:w-[23%]">{t('report.colRemember')}</th>
               </tr>
             </thead>
             <tbody>
-              {result.errors.map((e, i) => (
-                <Fragment key={i}>
+              {rows.map(({ e, at }) => (
+                <Fragment key={at}>
                   {/* The rule sits on the row rather than between the
                       pairs, so a correction and its explanation read as one
                       block whichever shape the table is in. */}
@@ -207,21 +236,29 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
                             synthesiser where it cannot — a machine reading
                             your mistake back to you in a clean accent is the
                             least useful way to hear it. */}
-                        {clips[i]
-                          ? <OwnVoiceButton clip={clips[i]} id={`${idPrefix}said-${i}`} {...own} />
-                          : <SpeakButton text={e.error} id={`${idPrefix}said-${i}`} {...tts} />}
+                        {clips[at]
+                          ? <OwnVoiceButton clip={clips[at]} id={`${idPrefix}said-${at}`} {...own} />
+                          : <SpeakButton text={e.error} id={`${idPrefix}said-${at}`} {...tts} />}
                       </span>
                     </td>
                     <td className="break-words px-3 pb-2 pt-3">
                       <span className="flex flex-wrap items-center gap-1.5">
                         <CorrectionText said={e.error} correction={e.correction} side="fix" />
-                        <SpeakButton text={e.correction} id={`${idPrefix}fix-${i}`} {...tts} />
+                        <SpeakButton text={e.correction} id={`${idPrefix}fix-${at}`} {...tts} />
                       </span>
                     </td>
-                    {/* Stacked, not in a row: two pills side by side is the
-                        pair that forces this column wide. */}
+                    {/* Stacked, not in a row: pills side by side are what
+                        forces this column wide. */}
                     <td className="px-3 pb-2 pt-3 sm:px-4">
                       <span className="flex flex-col items-start gap-1">
+                        {/* What to do about it, added above what it costs.
+                            Absent on an old result, which had no such field
+                            and on which every row was a mistake. */}
+                        {KIND_TONE[e.kind] && (
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${KIND_TONE[e.kind]}`}>
+                            {t(KIND_LABEL[e.kind])}
+                          </span>
+                        )}
                         {SEVERITY_TONE[e.severity] && (
                           <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${SEVERITY_TONE[e.severity]}`}>
                             {t(`speak.severity.${e.severity}`)}
@@ -235,12 +272,29 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
                     <td className="hidden px-3 pb-2 pt-3 text-xs leading-relaxed text-gray-500 sm:px-6 md:table-cell">
                       {e.explanation}
                     </td>
+                    {/* The rule, not the explanation again. Its own box
+                        because it is the one thing on the row worth carrying
+                        out of the page. */}
+                    <td className="hidden px-3 pb-2 pt-3 sm:px-6 md:table-cell">
+                      {e.remember && (
+                        <span className="block rounded-xl border border-violet-100 bg-violet-50 p-2.5 text-xs leading-relaxed text-violet-900">
+                          <span className="block font-bold">{t('report.colRemember')}</span>
+                          {e.remember}
+                        </span>
+                      )}
+                    </td>
                   </tr>
-                  {e.explanation && (
+                  {(e.explanation || e.remember) && (
                     <tr className="md:hidden">
                       <td colSpan={3}
                         className="px-4 pb-3 text-xs leading-relaxed text-gray-500 sm:px-6">
                         {e.explanation}
+                        {e.remember && (
+                          <span className="mt-2 block rounded-xl border border-violet-100 bg-violet-50 p-2.5 text-violet-900">
+                            <span className="block font-bold">{t('report.colRemember')}</span>
+                            {e.remember}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   )}
@@ -248,8 +302,108 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
               ))}
             </tbody>
           </table>
+          {hasMore && (
+            <div className="border-t border-violet-100 p-4">
+              <button type="button" onClick={() => setShowAll((v) => !v)}
+                data-testid="toggle-corrections"
+                className="btn-outline w-full justify-center !py-2.5 text-sm">
+                {showAll ? t('report.viewFewer') : t('report.viewAll')}
+              </button>
+            </div>
+          )}
         </div>
       )}
+
+      {!showTranscript && (
+        <div className="rounded-3xl border border-violet-100 bg-violet-50/40 p-5"
+          data-testid="transcript-withheld">
+          <p className="text-xs leading-relaxed text-gray-600">{t('speak.transcriptHidden')}</p>
+        </div>
+      )}
+
+      {/* The answer, twice, side by side.
+          Stacking the transcript above the corrected version meant comparing
+          two paragraphs by scrolling between them, and the whole value of
+          having both is reading one against the other: every difference is a
+          mistake that was made. Marked in place too — red on what was said,
+          green on what replaced it — so a correction can be found in its own
+          sentence rather than only in the table above. */}
+      {showTranscript && (
+      <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft"
+        data-testid="transcript-diff">
+        <p className="font-heading text-sm font-bold text-gray-900">{t('speak.transcript')}</p>
+        <div className="mt-3">
+          <TranscriptDiff
+            transcript={result.transcript}
+            corrected={result.corrected_version}
+            errors={result.errors || []}
+            action={(result.corrected_version || '').trim()
+              ? <SpeakButton text={result.corrected_version} id={`${idPrefix}corrected`} {...tts} />
+              : null} />
+        </div>
+        {(result.corrected_version || '').trim() && (
+          <p className="mt-3 text-xs leading-relaxed text-gray-400">
+            {t('speak.correctedNote')}
+          </p>
+        )}
+      </div>
+      )}
+
+      {/* The mistakes that are not new. Worth more than any single row above,
+          and the only section on this page that knows about yesterday. */}
+      <Recurring items={history.recurring} practiceHref={PRACTICE_HREF} />
+
+      {/* The candidate's own answer, rewritten well. Deliberately after
+          the corrections: the errors say what went wrong one line at a
+          time, and this is the same answer as a whole, which is the thing
+          worth listening to twice. Beside the original now, because an
+          upgrade you cannot compare with what you said is just a better
+          paragraph by somebody else. */}
+      {(result.enhanced_version || '').trim() && (
+        <Panel title={t('report.stronger')} description={t('report.strongerSub')}
+          tone="border-emerald-100 bg-emerald-50/40" testId="enhanced-version"
+          aside={<SpeakButton text={result.enhanced_version} id={`${idPrefix}enhanced`} {...tts} />}>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {showTranscript && (result.transcript || '').trim() && (
+              <div className="rounded-2xl border border-emerald-100 bg-white p-4">
+                <p className="text-[10px] font-black uppercase tracking-wider text-gray-400">
+                  {t('report.yourAnswer')}
+                </p>
+                <p className="mt-2 text-sm leading-relaxed text-gray-600">{result.transcript}</p>
+              </div>
+            )}
+            <div className="rounded-2xl border border-emerald-100 bg-white p-4">
+              <p className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-emerald-700">
+                <Sparkle size={12} weight="fill" /> {t('report.strongerVersion')}
+              </p>
+              <p className="mt-2 text-sm leading-relaxed text-gray-800">
+                {result.enhanced_version}
+              </p>
+            </div>
+          </div>
+          <p className="mt-3 text-xs leading-relaxed text-emerald-800/80">
+            {t('speak.enhancedNote')}
+          </p>
+        </Panel>
+      )}
+
+      <Vocabulary items={result.vocabulary_suggestions} />
+
+      <PracticeCta practiceHref={PRACTICE_HREF} />
+
+      <Progress previous={history.previous} result={result} />
+
+      <NextStep focusAreas={result.focus_areas} practiceHref={PRACTICE_HREF} />
+
+      {/* The examiner's grid. The detail behind the number at the top, which
+          is why it reads after the answer to "what should I do now". */}
+      <Panel title={t('report.profile')} description={t('report.profileSub')}
+        testId="speaking-profile">
+        {/* Without this the grid repeats two sections the report
+            already has: its strengths box is "What you did well"
+            and its focus box is "Your next step". */}
+        <SpeakingGrid result={result} showNarrative={false} />
+      </Panel>
 
       {Array.isArray(result.pronunciation_errors) && result.pronunciation_errors.length > 0 && (
         <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft"
@@ -272,29 +426,6 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
         </div>
       )}
 
-      {/* The candidate's own answer, rewritten well. Deliberately after
-          the corrections: the errors say what went wrong one line at a
-          time, and this is the same answer as a whole, which is the thing
-          worth listening to twice. */}
-      {(result.enhanced_version || '').trim() && (
-        <div className="rounded-3xl border border-emerald-100 bg-emerald-50/40 p-6 shadow-soft"
-          data-testid="enhanced-version">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="flex items-center gap-2 font-heading text-sm font-bold text-emerald-900">
-              <Sparkle size={16} weight="fill" className="text-emerald-600" />
-              {t('speak.enhancedTitle')}
-            </p>
-            <SpeakButton text={result.enhanced_version} id={`${idPrefix}enhanced`} {...tts} />
-          </div>
-          <p className="mt-3 text-sm leading-relaxed text-gray-800">
-            {result.enhanced_version}
-          </p>
-          <p className="mt-3 text-xs leading-relaxed text-emerald-800/80">
-            {t('speak.enhancedNote')}
-          </p>
-        </div>
-      )}
-
       {Array.isArray(result.suggestions) && result.suggestions.length > 0 && (
         <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft">
           <p className="font-heading text-sm font-bold text-gray-900">{t('speak.suggestions')}</p>
@@ -305,17 +436,6 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
               </li>
             ))}
           </ul>
-        </div>
-      )}
-
-      {Array.isArray(result.vocabulary_suggestions) && result.vocabulary_suggestions.length > 0 && (
-        <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft">
-          <p className="font-heading text-sm font-bold text-gray-900">{t('speak.vocabulary')}</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {result.vocabulary_suggestions.map((v, i) => (
-              <span key={i} className="rounded-full bg-fuchsia-50 px-3 py-1 text-xs font-medium text-fuchsia-700">{v}</span>
-            ))}
-          </div>
         </div>
       )}
     </div>

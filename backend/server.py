@@ -2006,6 +2006,20 @@ VALID_CATEGORIES = {"prepositions", "spelling", "conjugation",
 # a precision nobody has.
 VALID_SEVERITIES = ("major", "moderate", "minor")
 
+# What the candidate should DO about a row, which is not the same question as
+# how bad it is. A page where every line is flagged red teaches somebody that
+# everything they said was wrong; most of a good answer's rows are a nicer way
+# of saying something that was already fine.
+#   error    the French is wrong
+#   better   understandable, but a more natural formulation exists
+#   upgrade  the original is correct; this is style
+VALID_ERROR_KINDS = ("error", "better", "upgrade")
+
+# A "Remember" line is a rule to carry into the next exam, not a second
+# explanation. Capped because the grader is asked for one short line and a
+# paragraph in that column would defeat the point of the column.
+MAX_REMEMBER_CHARS = 200
+
 # The official TCF Canada expression orale grid, in the order an examiner reads
 # it. Phonology is first on the real grid and is deliberately in this tuple
 # even though nothing fills it yet: we transcribe and then grade the text, so
@@ -2496,6 +2510,17 @@ def _validate_analysis(data: dict) -> dict:
         severity = str(e.get("severity", "")).strip().lower()
         if severity in VALID_SEVERITIES:
             entry["severity"] = severity
+        # Both optional and both absent rather than guessed, for the same
+        # reason as severity: defaulting `kind` to "error" would relabel
+        # every stylistic suggestion as a mistake, which is precisely what
+        # the field exists to prevent, and an invented rule is worse than no
+        # rule at all.
+        kind = str(e.get("kind", "")).strip().lower()
+        if kind in VALID_ERROR_KINDS:
+            entry["kind"] = kind
+        remember = str(e.get("remember", "")).strip()
+        if remember:
+            entry["remember"] = remember[:MAX_REMEMBER_CHARS]
         errors.append(entry)
     # A missing score or level means the model did not really grade the text.
     # Defaulting to 0/A1 would tell a learner they are a beginner because of a
@@ -2830,6 +2855,117 @@ async def record_mistakes(db: AsyncSession, user_id: str, source: str,
     await db.commit()
 
 
+# ----------------------------------------------------------------------------
+# The two things a result cannot know about itself
+# ----------------------------------------------------------------------------
+# A grade describes one answer. What a candidate actually needs to know is
+# which of their mistakes is not new, and whether they are getting better —
+# and neither question can be answered from the attempt in front of them.
+# Both are read from rows the app already writes: the mistakes table has
+# counted repeats since review was built, and every graded answer is a
+# submission with a score on it.
+
+# Twice is a coincidence; three times is a habit. Two is the honest threshold
+# for "you keep doing this" — the mistakes table counts a repeat only when the
+# same normalised error comes back, so two already means two separate answers.
+RECURRING_MIN_REPEATS = 2
+# Four cards fills the section without turning it into the full list, which is
+# what the review page is for.
+RECURRING_LIMIT = 4
+
+
+async def recurring_mistakes(db: AsyncSession, user_id: str,
+                             limit: int = RECURRING_LIMIT) -> list:
+    """The categories this learner keeps getting wrong, worst first.
+
+    Grouped by category rather than listed one error at a time: "you have made
+    four agreement mistakes" is a thing to go and practise, while four separate
+    rows about four sentences are four more things to read.
+
+    One example is carried with each so the card can show the shape of the
+    mistake rather than only naming it.
+    """
+    res = await db.execute(
+        select(Mistake)
+        .where(Mistake.user_id == user_id,
+               Mistake.times_repeated >= RECURRING_MIN_REPEATS,
+               Mistake.category != "improvement")
+        .order_by(Mistake.times_repeated.desc(), Mistake.last_seen_at.desc())
+        .limit(50))
+    rows = res.scalars().all()
+
+    by_cat: Dict[str, dict] = {}
+    for m in rows:
+        slot = by_cat.get(m.category)
+        if slot is None:
+            by_cat[m.category] = {
+                "category": m.category,
+                # Answers, not errors: a mistake repeated four times was made
+                # in four different answers, which is the number that means
+                # something to the person reading it.
+                "times": int(m.times_repeated or 1),
+                "example": {"error": m.error_text, "correction": m.correction},
+            }
+        else:
+            slot["times"] += int(m.times_repeated or 1)
+    out = sorted(by_cat.values(), key=lambda c: c["times"], reverse=True)
+    return out[:limit]
+
+
+async def attempt_progress(db: AsyncSession, user_id: str,
+                           sources: Tuple[str, ...],
+                           current_submission_id: str) -> Optional[dict]:
+    """This attempt against the one before it, or None on a first attempt.
+
+    Compared within the same skill: a speaking score set beside a writing one
+    would be a comparison of two different exams, and the arrow would mean
+    nothing. Returns None rather than a zero when there is no previous
+    attempt, so the page can leave the section out instead of announcing that
+    somebody has improved by their entire score.
+    """
+    res = await db.execute(
+        select(Submission)
+        .where(Submission.user_id == user_id,
+               Submission.source.in_(sources),
+               Submission.submission_id != current_submission_id)
+        .order_by(Submission.created_at.desc())
+        .limit(1))
+    previous = res.scalar_one_or_none()
+    if previous is None:
+        return None
+    return {
+        "score": int(previous.overall_score or 0),
+        "level": previous.tcf_level or "",
+        "errors": len(previous.errors or []),
+        "at": previous.created_at.isoformat() if previous.created_at else None,
+    }
+
+
+# Which submission rows count as "the same kind of practice" for the arrow
+# above. Speaking is practised loose and in a full sitting, and both are the
+# same skill being measured.
+SPEAKING_SOURCES = ("speaking", "speaking_exam")
+
+
+async def learning_history(db: AsyncSession, user_id: str,
+                           submission_id: str,
+                           sources: Tuple[str, ...] = SPEAKING_SOURCES) -> dict:
+    """Both of the above, for one result page. Never raises.
+
+    A failed history query must not cost somebody the grade they paid for, so
+    this answers with empty sections and lets the page leave them out.
+    """
+    try:
+        return {
+            "recurring": await recurring_mistakes(db, user_id),
+            "previous": await attempt_progress(db, user_id, sources,
+                                               submission_id),
+        }
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not build learning history: %s", exc)
+        return {"recurring": [], "previous": None}
+
+
 async def persist_submission(db: AsyncSession, user: User, text: str,
                              prompt_id: Optional[str], analysis: dict,
                              source: str = "practice",
@@ -2878,7 +3014,7 @@ SPEAKING_GRADER_SYSTEM = """You are a certified TEF/TCF Canada examiner evaluati
 You receive the QUESTION (the task) and the TRANSCRIPT of what the candidate said. The transcript may contain small transcription errors; judge the language charitably where a word is clearly a transcription artifact, not a learner error.
 
 Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
-{"answers_question": true, "relevance_comment": "one sentence (English) on whether and how well the answer addresses the task", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement","severity":"major|moderate|minor"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "corrected_version":"what they said, with the mistakes fixed and nothing else changed", "language_mix":{"detected":false,"languages":[],"sample":""}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French"}
+{"answers_question": true, "relevance_comment": "one sentence (English) on whether and how well the answer addresses the task", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement","severity":"major|moderate|minor","kind":"error|better|upgrade","remember":"one short reusable rule (English)"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "corrected_version":"what they said, with the mistakes fixed and nothing else changed", "language_mix":{"detected":false,"languages":[],"sample":""}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French"}
 
 Evaluate TWO things:
 1. RELEVANCE - does the spoken answer actually address the question/task? Set answers_question true/false and explain in relevance_comment. An off-topic or incomplete answer should lower the score even if the French is correct.
@@ -2896,6 +3032,14 @@ enhanced_version - THE CANDIDATE'S OWN ANSWER, rewritten as a strong version of 
 - Keep it the length someone actually speaks in this task. Do not return three times what they said.
 - It is read aloud by a speech synthesiser, so punctuate it the way it should be spoken and never use brackets, asterisks, or notes to the reader.
 - French only, and nothing but the answer itself.
+
+kind - WHAT THE CANDIDATE SHOULD DO ABOUT IT. A page on which every line is flagged teaches a candidate that everything they said was wrong, which is untrue and is the fastest way to stop somebody speaking. Three values, and be honest about which:
+- "error": the French is wrong. A native speaker would not say it. Fix it.
+- "better": the French is understandable and not wrong, but a more natural formulation exists. Worth knowing; not worth worrying about.
+- "upgrade": the original is correct. This is a more advanced or more precise way of saying the same thing, offered as style. NEVER mark something an upgrade if it is actually wrong.
+Most rows on a weak answer are "error"; most rows on a strong one are "better" or "upgrade". A row whose category is "improvement" is never an "error".
+
+remember - THE RULE, NOT THE EXPLANATION AGAIN. One short line the candidate can carry into the next exam, about the PATTERN rather than about this sentence. "assez de + nom, jamais assez des" is a rule. "You should have said assez d'espaces here" is the explanation repeated, and is worth nothing the moment the sentence changes. Keep it under about 90 characters. French examples inside it are welcome; the framing around them is English.
 
 criteria - THE EXAMINER'S GRID. The official TCF Canada expression orale result is not one number, it is a criterion-by-criterion profile, and a candidate who is told only "B1" learns nothing about which part of B1 to work on. Score each 0-100 on the same CEFR scale as overall_score, and write a 2-4 sentence English comment that refers to what the candidate ACTUALLY said rather than to the level in general:
 - linguistic (Maîtrise linguistique): range and control of grammar and vocabulary. How varied is the language, and does the accuracy hold across tenses, agreement, and sentence types?
@@ -2958,7 +3102,7 @@ INTERACTION_GRADER_SYSTEM = """You are a certified TCF Canada examiner grading T
 You receive the CONSIGNE (the scenario) and the full DIALOGUE. Grade ONLY the candidate's turns. The transcript comes from speech recognition, so judge charitably where a word is clearly a transcription artifact rather than a learner error.
 
 Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
-{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate obtained the information the consigne asked for", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement","severity":"major|moderate|minor"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "corrected_version":"what they said, with the mistakes fixed and nothing else changed", "language_mix":{"detected":false,"languages":[],"sample":""}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French", "missed_questions":[{"question":"question in French the candidate should have asked","why":"what it would have obtained (English)"}]}
+{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate obtained the information the consigne asked for", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement","severity":"major|moderate|minor","kind":"error|better|upgrade","remember":"one short reusable rule (English)"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "corrected_version":"what they said, with the mistakes fixed and nothing else changed", "language_mix":{"detected":false,"languages":[],"sample":""}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French", "missed_questions":[{"question":"question in French the candidate should have asked","why":"what it would have obtained (English)"}]}
 
 Because this task is INTERACTION, weigh these alongside grammar and vocabulary:
 1. QUESTION QUALITY - did the candidate actually ask questions, and were they well formed? Flat statements, or questions built only by raising intonation ("vous avez des places ?") where inversion or est-ce que is expected, are the single most common Tâche 2 weakness. Report them as errors.
@@ -2982,6 +3126,14 @@ enhanced_version - THE CANDIDATE'S OWN ANSWER, rewritten as a strong version of 
 - Keep it the length someone actually speaks in this task. Do not return three times what they said.
 - It is read aloud by a speech synthesiser, so punctuate it the way it should be spoken and never use brackets, asterisks, or notes to the reader.
 - French only, and nothing but the answer itself.
+
+kind - WHAT THE CANDIDATE SHOULD DO ABOUT IT. A page on which every line is flagged teaches a candidate that everything they said was wrong, which is untrue and is the fastest way to stop somebody speaking. Three values, and be honest about which:
+- "error": the French is wrong. A native speaker would not say it. Fix it.
+- "better": the French is understandable and not wrong, but a more natural formulation exists. Worth knowing; not worth worrying about.
+- "upgrade": the original is correct. This is a more advanced or more precise way of saying the same thing, offered as style. NEVER mark something an upgrade if it is actually wrong.
+Most rows on a weak answer are "error"; most rows on a strong one are "better" or "upgrade". A row whose category is "improvement" is never an "error".
+
+remember - THE RULE, NOT THE EXPLANATION AGAIN. One short line the candidate can carry into the next exam, about the PATTERN rather than about this sentence. "assez de + nom, jamais assez des" is a rule. "You should have said assez d'espaces here" is the explanation repeated, and is worth nothing the moment the sentence changes. Keep it under about 90 characters. French examples inside it are welcome; the framing around them is English.
 
 criteria - THE EXAMINER'S GRID. The official TCF Canada expression orale result is not one number, it is a criterion-by-criterion profile, and a candidate who is told only "B1" learns nothing about which part of B1 to work on. Score each 0-100 on the same CEFR scale as overall_score, and write a 2-4 sentence English comment that refers to what the candidate ACTUALLY said rather than to the level in general:
 - linguistic (Maîtrise linguistique): range and control of grammar and vocabulary. How varied is the language, and does the accuracy hold across tenses, agreement, and sentence types?
@@ -3007,7 +3159,7 @@ INTERVIEW_GRADER_SYSTEM = """You are a certified TCF Canada examiner grading Tâ
 You receive the BRIEF and the full DIALOGUE. Grade ONLY the candidate's turns. The transcript comes from speech recognition, so judge charitably where a word is clearly a transcription artifact rather than a learner error.
 
 Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
-{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate answered what was asked", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement","severity":"major|moderate|minor"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "corrected_version":"what they said, with the mistakes fixed and nothing else changed", "language_mix":{"detected":false,"languages":[],"sample":""}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French"}
+{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate answered what was asked", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement","severity":"major|moderate|minor","kind":"error|better|upgrade","remember":"one short reusable rule (English)"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "corrected_version":"what they said, with the mistakes fixed and nothing else changed", "language_mix":{"detected":false,"languages":[],"sample":""}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French"}
 
 This task is a PRESENTATION, not an interaction. The candidate is NOT expected to ask questions, and must never be penalised for not asking any. Weigh instead:
 1. ANSWERING - did the candidate actually answer each question, rather than talking past it?
@@ -3027,6 +3179,14 @@ enhanced_version - THE CANDIDATE'S OWN ANSWER, rewritten as a strong version of 
 - Keep it the length someone actually speaks in this task. Do not return three times what they said.
 - It is read aloud by a speech synthesiser, so punctuate it the way it should be spoken and never use brackets, asterisks, or notes to the reader.
 - French only, and nothing but the answer itself.
+
+kind - WHAT THE CANDIDATE SHOULD DO ABOUT IT. A page on which every line is flagged teaches a candidate that everything they said was wrong, which is untrue and is the fastest way to stop somebody speaking. Three values, and be honest about which:
+- "error": the French is wrong. A native speaker would not say it. Fix it.
+- "better": the French is understandable and not wrong, but a more natural formulation exists. Worth knowing; not worth worrying about.
+- "upgrade": the original is correct. This is a more advanced or more precise way of saying the same thing, offered as style. NEVER mark something an upgrade if it is actually wrong.
+Most rows on a weak answer are "error"; most rows on a strong one are "better" or "upgrade". A row whose category is "improvement" is never an "error".
+
+remember - THE RULE, NOT THE EXPLANATION AGAIN. One short line the candidate can carry into the next exam, about the PATTERN rather than about this sentence. "assez de + nom, jamais assez des" is a rule. "You should have said assez d'espaces here" is the explanation repeated, and is worth nothing the moment the sentence changes. Keep it under about 90 characters. French examples inside it are welcome; the framing around them is English.
 
 criteria - THE EXAMINER'S GRID. The official TCF Canada expression orale result is not one number, it is a criterion-by-criterion profile, and a candidate who is told only "B1" learns nothing about which part of B1 to work on. Score each 0-100 on the same CEFR scale as overall_score, and write a 2-4 sentence English comment that refers to what the candidate ACTUALLY said rather than to the level in general:
 - linguistic (Maîtrise linguistique): range and control of grammar and vocabulary. How varied is the language, and does the accuracy hold across tenses, agreement, and sentence types?
@@ -8169,6 +8329,12 @@ async def speaking_analyze(question: str = Form(...),
         db, sub["submission_id"], user.user_id, audio_bytes, mime))
     analysis["submission_id"] = sub.get("submission_id")
     analysis["streak"] = sub.get("streak")
+    # Read after the submission is saved, because saving it is also what
+    # counts this attempt's errors into the mistakes table — so a mistake made
+    # again today is already at two by the time it is asked about. Excludes
+    # the attempt being graded, or "your previous attempt" would be this one.
+    analysis["history"] = await learning_history(
+        db, user.user_id, sub.get("submission_id") or "")
     # What this grade cost, in the same shape the writing flow already uses.
     #
     # Speaking is the most expensive thing the product does - a transcription,
@@ -8286,6 +8452,13 @@ async def speaking_converse_grade(body: ConverseGradeIn,
         task_type=None if free_mode else task_type)
     analysis["submission_id"] = sub.get("submission_id")
     analysis["streak"] = sub.get("streak")
+    # Read after the submission is saved, because saving it is also what
+    # counts this attempt's errors into the mistakes table — so a mistake made
+    # again today is already at two by the time it is asked about. Excludes
+    # the attempt being graded, or "your previous attempt" would be this one.
+    analysis["history"] = await learning_history(
+        db, user.user_id, sub.get("submission_id") or "",
+        sources=("conversation",) if free_mode else SPEAKING_SOURCES)
     return public_analysis(analysis)
 
 

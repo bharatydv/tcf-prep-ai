@@ -75,6 +75,45 @@ class TestValidateAnalysis:
             "overall_score": 50, "tcf_level": "B1"})
         assert out["errors"][0]["category"] in m.VALID_CATEGORIES
 
+    # -- kind and remember, the two fields the speaking result page adds --
+    #
+    # Both are optional and both must be ABSENT rather than guessed. A `kind`
+    # defaulted to "error" would relabel every stylistic suggestion as a
+    # mistake, which is the thing the field exists to prevent; an invented
+    # rule in "Remember" is worse than an empty column.
+
+    def _one(self, **extra):
+        out = m._validate_analysis({
+            "errors": [{"error": "x", "correction": "y", "explanation": "z",
+                        "category": "spelling", **extra}],
+            "overall_score": 50, "tcf_level": "B1"})
+        return out["errors"][0]
+
+    def test_kind_and_remember_survive_validation(self):
+        got = self._one(kind="upgrade", remember="assez de + nom")
+        assert got["kind"] == "upgrade"
+        assert got["remember"] == "assez de + nom"
+
+    def test_kind_is_lowercased_like_severity(self):
+        assert self._one(kind="  Better ")["kind"] == "better"
+
+    def test_an_invented_kind_is_dropped_not_defaulted(self):
+        assert "kind" not in self._one(kind="stylistic")
+
+    def test_a_missing_kind_stays_missing(self):
+        assert "kind" not in self._one()
+
+    def test_an_empty_remember_is_not_stored_as_a_blank(self):
+        assert "remember" not in self._one(remember="   ")
+
+    def test_a_rambling_remember_is_capped(self):
+        got = self._one(remember="r" * 500)
+        assert len(got["remember"]) == m.MAX_REMEMBER_CHARS
+
+    def test_every_documented_kind_is_accepted(self):
+        for kind in m.VALID_ERROR_KINDS:
+            assert self._one(kind=kind)["kind"] == kind
+
 
 class TestLevelCaps:
     def _analysis(self, n_errors, level="C1", score=90):

@@ -53,7 +53,13 @@ function barTone(score) {
   return 'bg-emerald-600';
 }
 
-export function SpeakingGrid({ result }) {
+/* `showNarrative` is false where the page already says these things.
+   The report now opens with "What you did well" and closes with "Your next
+   step", which are this component's strengths and focus boxes under different
+   headings — printing them twice made the second copy read as a second,
+   quieter opinion. Defaults to true so every other caller is unchanged: the
+   boxes are still here, they are simply not drawn twice on one page. */
+export function SpeakingGrid({ result, showNarrative = true }) {
   const t = useT();
   if (!result) return null;
 
@@ -82,8 +88,8 @@ export function SpeakingGrid({ result }) {
   const measured = result.delivery_metrics && typeof result.delivery_metrics === 'object'
     ? result.delivery_metrics : null;
 
-  const strengths = Array.isArray(result.strengths) ? result.strengths : [];
-  const focus = Array.isArray(result.focus_areas) ? result.focus_areas : [];
+  const strengths = showNarrative && Array.isArray(result.strengths) ? result.strengths : [];
+  const focus = showNarrative && Array.isArray(result.focus_areas) ? result.focus_areas : [];
 
   // Nothing of the grid came back — an older graded attempt, or a grader that
   // dropped the fields. The headline level is shown by the caller either way,
