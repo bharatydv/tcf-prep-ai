@@ -19,6 +19,37 @@
 import { markOutOf20, nclcFromMark } from '../lib/tcf';
 import { useT } from '../i18n';
 
+/* ---------------------------------------------------------------------------
+ * THE DESIGN TOKENS
+ * ---------------------------------------------------------------------------
+ * Taken literally from the agreed prototype rather than approximated with the
+ * nearest Tailwind step: #e7e2f2 is not gray-200, #effcf3 is not green-50, and
+ * a page assembled out of near-misses does not look like the thing that was
+ * signed off. They are named here once so a colour has one home, and the
+ * correction table imports the same ones.
+ *
+ * Written out literally every time, never interpolated: Tailwind's JIT scans
+ * this file for whole class names, so a class assembled from a variable is a
+ * class whose CSS is never generated and whose colour silently does not
+ * apply. `border-[#e7e2f2]` is the only form that works here.
+ *
+ * The three gradients are classes rather than inline styles for a related
+ * reason: an inline background is set through the CSSOM, and jsdom drops a
+ * `linear-gradient()` it cannot parse, so the hero rendered as white text on
+ * white in every test and preview while looking fine in a browser. As a class
+ * it is ordinary CSS and behaves the same everywhere.
+ */
+
+export const TOKENS = {
+  card: `rounded-[18px] border border-[#e7e2f2] bg-white p-[22px] shadow-[0_6px_22px_rgba(35,20,70,0.05)]`,
+  title: 'font-heading text-[18px] font-extrabold tracking-[-0.25px] text-[#171322]',
+  desc: `mt-[4px] text-[12px] text-[#64748b]`,
+  primary: `rounded-[10px] bg-[#7c3aed] px-[14px] py-[10px] text-center text-[12px] font-extrabold text-white transition hover:bg-[#6d28d9]`,
+  secondary: `rounded-[10px] bg-[#f2edff] px-[14px] py-[10px] text-center text-[12px] font-extrabold text-[#7c3aed] transition hover:bg-[#e9e0ff]`,
+  /* Badges: 9px, 900, uppercase, wide-tracked pills. */
+  badge: 'inline-flex items-center rounded-full px-[8px] py-[5px] text-[9px] font-black uppercase leading-none tracking-[0.05em]',
+};
+
 /* French names for the grader's categories, as the correction table uses. */
 export const CAT_LABELS = {
   prepositions: 'Prépositions', spelling: 'Orthographe', conjugation: 'Conjugaison',
@@ -30,9 +61,17 @@ export const CAT_LABELS = {
    is why nothing here falls back to 'error': calling a stylistic suggestion a
    mistake is the thing the field exists to prevent. */
 export const KIND_TONE = {
-  error: 'bg-rose-50 text-rose-700',
-  better: 'bg-amber-50 text-amber-800',
-  upgrade: 'bg-blue-50 text-blue-700',
+  error: 'bg-[#fff1f2] text-[#b91c1c]',
+  better: 'bg-[#fff8e7] text-[#92400e]',
+  upgrade: 'bg-[#eff6ff] text-[#1d4ed8]',
+};
+
+/* The row tint that goes with each, straight from the prototype. Almost
+   white on purpose — enough to group a row, not enough to shout. */
+export const KIND_ROW = {
+  error: 'bg-[#fffdfd]',
+  better: 'bg-[#fffefa]',
+  upgrade: 'bg-[#fcfdff]',
 };
 
 export const KIND_LABEL = {
@@ -51,18 +90,15 @@ function countLabel(t, n, one, many) {
 /* A section shell, so eleven sections do not each invent their own heading. */
 export function Panel({ title, description, aside, tone = '', children, testId }) {
   return (
-    <section className={`rounded-3xl border p-6 shadow-soft ${tone || 'border-violet-100 bg-white'}`}
-      data-testid={testId}>
-      <div className="flex flex-wrap items-start justify-between gap-4">
+    <section className={`${TOKENS.card} ${tone}`} data-testid={testId}>
+      <div className="flex flex-wrap items-start justify-between gap-[18px]">
         <div className="min-w-0">
-          <h2 className="font-heading text-base font-extrabold text-gray-900">{title}</h2>
-          {description && (
-            <p className="mt-1 text-xs leading-relaxed text-gray-500">{description}</p>
-          )}
+          <h2 className={TOKENS.title}>{title}</h2>
+          {description && <p className={TOKENS.desc}>{description}</p>}
         </div>
         {aside}
       </div>
-      <div className="mt-4">{children}</div>
+      <div className="mt-[15px]">{children}</div>
     </section>
   );
 }
@@ -82,20 +118,21 @@ export function ResultHero({ result }) {
     [nclc ? `CLB ${nclc}` : '—', t('report.clbLabel')],
   ];
   return (
-    <section className="rounded-3xl bg-gradient-to-br from-primary to-fuchsia-600 p-6 text-white shadow-lg shadow-violet-200/50"
+    <section
+      className="rounded-[22px] bg-[image:linear-gradient(110deg,#6d28d9,#a21caf)] px-[29px] py-[27px] text-white shadow-[0_14px_35px_rgba(124,58,237,0.18)]"
       data-testid="result-hero">
-      <p className="text-[11px] font-black uppercase tracking-wider text-white/75">
+      <p className="text-[11px] font-black uppercase tracking-[0.09em] opacity-[0.78]">
         {t('report.eyebrow')}
       </p>
-      <h2 className="mt-1 font-heading text-2xl font-extrabold tracking-tight">
+      <h2 className="mb-[4px] mt-[5px] font-heading text-[29px] font-extrabold tracking-[-0.7px]">
         {t('report.title')}
       </h2>
-      <p className="mt-1 text-sm text-white/85">{t('report.subtitle')}</p>
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+      <p className="text-[14px] opacity-90">{t('report.subtitle')}</p>
+      <div className="mt-[20px] grid gap-[12px] sm:grid-cols-3">
         {stats.map(([value, label]) => (
-          <div key={label} className="rounded-2xl bg-white p-4">
-            <p className="font-heading text-2xl font-extrabold leading-none text-primary">{value}</p>
-            <p className="mt-1.5 text-[11px] text-gray-500">{label}</p>
+          <div key={label} className="rounded-[15px] bg-white px-[17px] py-[15px]">
+            <p className={`text-[27px] font-black leading-none text-[#7c3aed]`}>{value}</p>
+            <p className={`mt-[6px] text-[11px] text-[#64748b]`}>{label}</p>
           </div>
         ))}
       </div>
@@ -107,6 +144,7 @@ export function ResultHero({ result }) {
    ------------------------------------------------------- top priorities ---
    Side by side, and in that order. What went right comes first because a page
    that opens with a list of faults is one most people stop reading. */
+
 /* What the grader said went well, and a true fallback when it said nothing.
  *
  * The model is asked for strengths and usually returns them, but not always —
@@ -132,13 +170,10 @@ export function DidWell({ result, strengths: given }) {
   if (!strengths.length) return null;
   return (
     <Panel title={t('report.didWell')} description={t('report.didWellSub')}
-      tone="border-emerald-100 bg-emerald-50/50" testId="did-well">
-      <ul className="space-y-2">
+      tone="!border-[#ccefd6] !bg-[#effcf3] [&_h2]:!text-[#166534]" testId="did-well">
+      <ul className="list-disc pl-[20px]">
         {strengths.map((s, i) => (
-          <li key={i} className="flex items-start gap-2 text-sm leading-relaxed text-emerald-900">
-            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
-            {s}
-          </li>
+          <li key={i} className="my-[7px] text-[13px] leading-[1.45] text-[#334155]">{s}</li>
         ))}
       </ul>
     </Panel>
@@ -163,7 +198,7 @@ export function topPriorities(errors) {
     .map(([category, count]) => ({ category, count }));
 }
 
-const PRIORITY_DOT = ['bg-rose-500', 'bg-amber-500', 'bg-blue-500'];
+const PRIORITY_DOT = ['bg-[#ef4444]', 'bg-[#f59e0b]', 'bg-[#3b82f6]'];
 
 export function Priorities({ errors, practiceHref }) {
   const t = useT();
@@ -172,20 +207,19 @@ export function Priorities({ errors, practiceHref }) {
   return (
     <Panel title={t('report.priorities')} description={t('report.prioritiesSub')}
       testId="top-priorities">
-      <div className="space-y-2">
-        {rows.map((r, i) => (
-          <div key={r.category}
-            className="flex items-center gap-3 rounded-2xl border border-violet-100 px-4 py-3">
-            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${PRIORITY_DOT[i]}`} />
-            <span className="flex-1 text-sm font-bold text-gray-900">
-              {CAT_LABELS[r.category] || r.category}
-            </span>
-            <span className="text-xs text-gray-500">{countLabel(t, r.count, 'report.oneError', 'report.nErrors')}</span>
-          </div>
-        ))}
-      </div>
-      <a href={practiceHref}
-        className="btn-outline mt-4 flex w-full justify-center !py-2.5 text-sm"
+      {rows.map((r, i) => (
+        <div key={r.category}
+          className={`mt-[8px] flex items-center gap-[11px] rounded-[12px] border border-[#e7e2f2] px-[13px] py-[11px] first:mt-0`}>
+          <span className={`h-[10px] w-[10px] flex-none rounded-full ${PRIORITY_DOT[i]}`} />
+          <span className="flex-1 text-[13px] font-extrabold text-[#171322]">
+            {CAT_LABELS[r.category] || r.category}
+          </span>
+          <span className={`text-[11px] text-[#64748b]`}>
+            {countLabel(t, r.count, 'report.oneError', 'report.nErrors')}
+          </span>
+        </div>
+      ))}
+      <a href={practiceHref} className={`${TOKENS.secondary} mt-[12px] block w-full`}
         data-testid="practice-priorities">
         {t('report.practicePriorities')}
       </a>
@@ -202,35 +236,34 @@ export function Recurring({ items, practiceHref }) {
   if (!Array.isArray(items) || !items.length) return null;
   return (
     <Panel title={t('report.recurring')} description={t('report.recurringSub')}
-      tone="border-amber-100 bg-amber-50/40" testId="recurring-mistakes"
+      tone="!border-[#f4dfae] !bg-[#fffaf0]" testId="recurring-mistakes"
       aside={(
-        <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase text-amber-800">
+        <span className={`${TOKENS.badge} ${KIND_TONE.better}`}>
           {t('report.acrossAttempts')}
         </span>
       )}>
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-[13px] sm:grid-cols-2">
         {items.map((r) => (
-          <div key={r.category} className="rounded-2xl border border-amber-100 bg-white p-4">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-bold text-gray-900">
+          <div key={r.category} className="rounded-[13px] border border-[#f0e2bf] bg-white p-[14px]">
+            <div className="flex items-center justify-between gap-[10px]">
+              <p className="text-[13px] font-black text-[#171322]">
                 {CAT_LABELS[r.category] || r.category}
               </p>
-              <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+              <span className="shrink-0 rounded-full bg-[#fff8e7] px-[7px] py-[5px] text-[10px] font-black text-[#92400e]">
                 {countLabel(t, r.times, 'report.oneTime', 'report.nTimes')}
               </span>
             </div>
             {r.example?.error && (
-              <p className="mt-2.5 rounded-xl bg-amber-50/60 px-3 py-2 text-xs">
-                <span className="text-rose-700">{r.example.error}</span>
-                <span className="mx-1.5 text-gray-400">→</span>
-                <span className="font-semibold text-emerald-700">{r.example.correction}</span>
+              <p className="mt-[9px] rounded-[9px] bg-[#fffaf0] px-[10px] py-[8px] text-[11px]">
+                <span className="text-[#b91c1c]">{r.example.error}</span>
+                <span className="mx-[6px] text-[#94a3b8]">→</span>
+                <span className="font-extrabold text-[#15803d]">{r.example.correction}</span>
               </p>
             )}
           </div>
         ))}
       </div>
-      <a href={practiceHref}
-        className="btn-outline mt-4 flex w-full justify-center !py-2.5 text-sm"
+      <a href={practiceHref} className={`${TOKENS.secondary} mt-[12px] inline-block`}
         data-testid="practice-recurring">
         {t('report.practiceRecurring')}
       </a>
@@ -249,30 +282,32 @@ export function Progress({ previous, result }) {
   if (now === null || then === null) return null;
   const delta = now - then;
   const verdict = delta > 0
-    ? ['text-emerald-600', t('report.improvedBy', { n: delta })]
+    ? ['text-[#15803d]', `↑ ${t('report.improvedBy', { n: delta })}`]
     : delta < 0
-      ? ['text-rose-600', t('report.downBy', { n: Math.abs(delta) })]
-      : ['text-gray-500', t('report.sameAsLast')];
+      ? ['text-[#b91c1c]', `↓ ${t('report.downBy', { n: Math.abs(delta) })}`]
+      : [`text-[#64748b]`, t('report.sameAsLast')];
   return (
     <Panel title={t('report.progress')} description={t('report.progressSub')}
       testId="attempt-progress">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="rounded-2xl border border-violet-100 p-4">
-          <p className="text-[11px] text-gray-500">{t('report.previousAttempt')}</p>
-          <p className="mt-1 font-heading text-2xl font-extrabold text-gray-400">{then}/20</p>
-          <p className="text-[11px] text-gray-500">{countLabel(t, previous.errors, 'report.oneError', 'report.nErrors')}</p>
+      <div className="grid gap-[12px] sm:grid-cols-2">
+        <div className={`rounded-[13px] border border-[#e7e2f2] p-[15px]`}>
+          <p className={`text-[11px] text-[#64748b]`}>{t('report.previousAttempt')}</p>
+          <p className="my-[3px] text-[24px] font-black text-[#94a3b8]">{then}/20</p>
+          <p className={`text-[11px] text-[#64748b]`}>
+            {countLabel(t, previous.errors, 'report.oneError', 'report.nErrors')}
+          </p>
         </div>
-        <div className="rounded-2xl border border-violet-100 p-4">
-          <p className="text-[11px] text-gray-500">{t('report.currentAttempt')}</p>
-          <p className="mt-1 font-heading text-2xl font-extrabold text-primary">{now}/20</p>
-          <p className={`text-[11px] font-bold ${verdict[0]}`}>{verdict[1]}</p>
+        <div className={`rounded-[13px] border border-[#e7e2f2] p-[15px]`}>
+          <p className={`text-[11px] text-[#64748b]`}>{t('report.currentAttempt')}</p>
+          <p className={`my-[3px] text-[24px] font-black text-[#7c3aed]`}>{now}/20</p>
+          <p className={`text-[11px] font-extrabold ${verdict[0]}`}>{verdict[1]}</p>
         </div>
       </div>
     </Panel>
   );
 }
 
-/* -------------------------------------------------------------- vocabulary -
+/* ------------------------------------------------------------- vocabulary --
    A short list, deliberately. A page that hands somebody forty expressions
    has handed them none. */
 export function Vocabulary({ items }) {
@@ -280,10 +315,10 @@ export function Vocabulary({ items }) {
   if (!Array.isArray(items) || !items.length) return null;
   return (
     <Panel title={t('report.vocab')} description={t('report.vocabSub')} testId="vocabulary">
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid gap-[9px] sm:grid-cols-2">
         {items.map((v, i) => (
-          <div key={i} className="rounded-2xl border border-violet-100 px-4 py-3">
-            <p className="text-sm font-bold text-primary">{v}</p>
+          <div key={i} className={`rounded-[11px] border border-[#e7e2f2] px-[12px] py-[11px]`}>
+            <p className="text-[13px] font-extrabold text-[#6d28d9]">{v}</p>
           </div>
         ))}
       </div>
@@ -299,25 +334,31 @@ export function NextStep({ focusAreas, practiceHref }) {
   const areas = Array.isArray(focusAreas) ? focusAreas.filter(Boolean) : [];
   if (!areas.length) return null;
   return (
-    <Panel title={t('report.nextStep')} description={t('report.nextStepSub')}
-      tone="border-violet-200 bg-violet-50/40" testId="next-step">
-      <div className="grid gap-4 sm:grid-cols-[1.1fr_.9fr]">
+    <section
+      className="rounded-[18px] border border-[#ddd2ff] bg-[image:linear-gradient(120deg,#f8f5ff,#fff)] p-[22px] shadow-[0_6px_22px_rgba(35,20,70,0.05)]"
+      data-testid="next-step">
+      <div className="grid gap-[18px] min-[900px]:grid-cols-[1.2fr_.8fr]">
         <div>
-          <p className="text-sm leading-relaxed text-gray-700">{t('report.nextStepBody')}</p>
-          <a href={practiceHref}
-            className="btn-primary mt-4 inline-flex !bg-gradient-to-r !from-primary !to-fuchsia-600 !px-5 !py-2.5 text-sm">
+          <h3 className="font-heading text-[16px] font-extrabold text-[#171322]">
+            {t('report.nextStep')}
+          </h3>
+          <p className={`mt-[8px] text-[12px] leading-[1.6] text-[#64748b]`}>
+            {t('report.nextStepBody')}
+          </p>
+          <a href={practiceHref} className={`${TOKENS.primary} mt-[14px] inline-block`}>
             {t('report.startPractice')}
           </a>
         </div>
-        <div className="grid gap-2">
+        <div className="grid content-start gap-[8px]">
           {areas.slice(0, 4).map((a, i) => (
-            <div key={i} className="rounded-2xl border border-violet-100 bg-white px-4 py-3 text-xs leading-relaxed text-gray-700">
-              <span className="font-bold text-primary">{i + 1}.</span> {a}
+            <div key={i}
+              className={`rounded-[11px] border border-[#e7e2f2] bg-white px-[12px] py-[10px] text-[12px] leading-[1.45] text-[#334155]`}>
+              <b className={`text-[#7c3aed]`}>{i + 1}.</b> {a}
             </div>
           ))}
         </div>
       </div>
-    </Panel>
+    </section>
   );
 }
 
@@ -327,16 +368,16 @@ export function NextStep({ focusAreas, practiceHref }) {
 export function PracticeCta({ practiceHref }) {
   const t = useT();
   return (
-    <section className="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-violet-200 bg-gradient-to-r from-violet-50 to-fuchsia-50 p-6"
+    <section
+      className="flex flex-wrap items-center justify-between gap-[20px] rounded-[18px] border border-[#e8d5ff] bg-[image:linear-gradient(115deg,#faf5ff,#fdf2f8)] p-[22px] shadow-[0_6px_22px_rgba(35,20,70,0.05)]"
       data-testid="practice-cta">
       <div className="min-w-0">
-        <h2 className="font-heading text-base font-extrabold text-gray-900">
+        <h2 className="font-heading text-[18px] font-extrabold tracking-[-0.25px] text-[#581c87]">
           {t('report.practiceTitle')}
         </h2>
-        <p className="mt-1 text-xs leading-relaxed text-gray-600">{t('report.practiceBody')}</p>
+        <p className={`mt-[5px] text-[12px] text-[#64748b]`}>{t('report.practiceBody')}</p>
       </div>
-      <a href={practiceHref}
-        className="btn-primary shrink-0 !bg-gradient-to-r !from-primary !to-fuchsia-600 !px-5 !py-2.5 text-sm">
+      <a href={practiceHref} className={`${TOKENS.primary} shrink-0`}>
         {t('report.practiceCta')}
       </a>
     </section>
