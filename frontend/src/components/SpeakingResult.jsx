@@ -75,28 +75,12 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
         </div>
       )}
 
-      <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            {result.answers_question ? (
-              <CheckCircle size={28} weight="fill" className="text-green-500" />
-            ) : (
-              <XCircle size={28} weight="fill" className="text-amber-500" />
-            )}
-            <div>
-              <p className="font-heading text-base font-bold text-gray-900">
-                {result.answers_question ? t('speak.relevant') : t('speak.notRelevant')}
-              </p>
-              <p className="text-sm text-gray-600">{result.relevance_comment}</p>
-            </div>
-          </div>
-          <div className="text-center">
-            <p className="text-xs uppercase tracking-wide text-gray-400">{t('speak.level')}</p>
-            <p className="font-heading text-3xl font-extrabold text-primary">{result.tcf_level}</p>
-          </div>
-        </div>
-      </div>
-
+      {/* The verdict banner that used to sit here is gone. It said the level
+          and whether the answer was on topic, and the grid immediately below
+          says both — the level as the ladder and the mark out of 20, the
+          relevance as the `adequacy` criterion with its own score and
+          comment. Two cards saying the same thing made the second one look
+          like a second opinion. */}
       <SpeakingGrid result={result} />
 
       {!showTranscript && (

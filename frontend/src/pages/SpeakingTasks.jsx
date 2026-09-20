@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   ChatText, Handshake, Scales, ClockCountdown, ArrowLeft,
   Lock, CaretRight, BookOpen, Microphone, Star, Clock,
-  Stop, ArrowClockwise, UploadSimple, Lightning, CheckCircle, XCircle, X, ChatsCircle,
+  Stop, ArrowClockwise, UploadSimple, Lightning, CheckCircle, X, ChatsCircle,
   Question,
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
@@ -576,26 +576,9 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
 
       {result && (
         <div className="mt-4 space-y-3">
-          <div className="rounded-2xl border border-violet-100 bg-white p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                {result.answers_question
-                  ? <CheckCircle size={22} weight="fill" className="text-green-500" />
-                  : <XCircle size={22} weight="fill" className="text-amber-500" />}
-                <div>
-                  <p className="text-sm font-bold text-gray-900">
-                    {result.answers_question ? t('st.answerRelevant') : t('st.answerOffTopic')}
-                  </p>
-                  <p className="text-xs text-gray-600">{result.relevance_comment}</p>
-                </div>
-              </div>
-              <div className="text-center">
-                <p className="text-[10px] uppercase tracking-wide text-gray-400">{t('st.level')}</p>
-                <p className="font-heading text-2xl font-extrabold text-primary">{result.tcf_level}</p>
-              </div>
-            </div>
-          </div>
-
+          {/* Removed with the one in SpeakingResult, for the same reason:
+              the grid below carries the level, the mark and the relevance
+              score, so this card only repeated them. */}
           <SpeakingGrid result={result} />
 
           {/* Same rule as the exam: tâches 1 and 2 are heard, not read.
