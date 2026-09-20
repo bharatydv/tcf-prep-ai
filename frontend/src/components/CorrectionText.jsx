@@ -7,14 +7,22 @@
  * one verb. Colour every word and you have coloured none of them.
  *
  * Now the unchanged words are ordinary text on both sides and only the change
- * is marked — struck through on the left, highlighted on the right. The
- * strikethrough is what "you did not say this" looks like, so it belongs on
- * the wrong words and nowhere else.
+ * is marked: the wrong words highlighted in red, the repair in green.
+ *
+ * No strikethrough. A line drawn through a word is a line drawn through the
+ * letters the reader is being asked to look at — and the wrong word is small,
+ * often a single word like « au » or an ending like « -iens », so the cross
+ * covers most of what there is to see. The red says it was wrong; the green
+ * beside it says what to say instead. The pair reads without anything being
+ * crossed out.
  */
 import { diffWords } from '../lib/wordDiff';
 
+/* Matched pair: the same shape and weight on both sides, so the eye reads
+   them as one correction with two halves rather than as a punishment and a
+   reward. */
 const TONE = {
-  said: 'text-red-600 line-through decoration-red-400 decoration-2',
+  said: 'rounded bg-rose-100 px-0.5 font-semibold text-red-700',
   fix: 'rounded bg-green-100 px-0.5 font-semibold text-green-800',
 };
 
