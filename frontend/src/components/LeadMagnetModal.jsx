@@ -401,15 +401,6 @@ export default function LeadMagnetModal() {
                 </button>
               </form>
 
-              {/* Why the number is being asked for, next to the box asking
-                  for it — not in the small print underneath, where a request
-                  for a phone number reads as a request with no reason. */}
-              {HAS_COMMUNITY && (
-                <p className="mt-2 rounded-lg bg-violet-50 px-3 py-2 text-[11px] font-semibold leading-snug text-violet-900">
-                  {t('lead.community')}
-                </p>
-              )}
-
               <p className="mt-2 text-[10px] leading-snug text-gray-400">
                 {t('lead.privacy')}{' '}
                 <Link to="/privacy" className="font-semibold text-gray-500 underline-offset-2 hover:text-primary hover:underline">
