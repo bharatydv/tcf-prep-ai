@@ -27,12 +27,23 @@
  * touch screen, which has no pointer to leave — so phones get a dwell timer
  * instead, which is the closest honest equivalent: somebody who has been
  * reading a while, rather than somebody who is leaving.
+ *
+ * On the shape of it: two columns, and never a scrollbar. Whoever is reading
+ * this was already leaving, so anything below the fold of the dialog is
+ * something they will not see — a form they have to scroll to reach is a form
+ * they do not fill in. The preview and the ask therefore sit side by side on
+ * a desktop and stack short on a phone, and the whole panel is sized to fit
+ * inside the viewport rather than to scroll inside it.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { X, DownloadSimple, CheckCircle, FilePdf } from '@phosphor-icons/react';
+import {
+  X, DownloadSimple, CheckCircle, FilePdf, CaretLeft, CaretRight, Lock, Check,
+} from '@phosphor-icons/react';
 import { api, errMsg } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
+import { CommunityInline } from './CommunityButton';
+import { HAS_COMMUNITY } from '../lib/community';
 import { useT } from '../i18n';
 
 /* The resource this offer is for. One slug, matching backend DOWNLOADS. */
@@ -48,6 +59,31 @@ const SOURCE_KEY = 'prepfrancais.leadSource';
 /* How long a phone visitor reads before the offer appears. Long enough that
    it never lands on somebody still deciding whether to stay. */
 const TOUCH_DELAY_MS = 45000;
+
+/* The pages of the real file, as pictures — see backend/tools/lead_pdf_preview.py.
+ *
+ * It starts at page 2 because page 1 is the cover, and a cover proves nothing:
+ * anybody can put a title on a page. Pages 2 to 4 are the tables of French
+ * with English beside it, which is the entire argument for handing over a
+ * phone number.
+ *
+ * The last one is page 5 with the blur baked into the file rather than
+ * applied in CSS, so "the rest is locked" is true of what was sent and not
+ * just of what is displayed. Everything from there to page 25 is behind the
+ * form. */
+const TOTAL_PAGES = 25;
+const FIRST_LOCKED = 5;
+const SLIDES = [
+  { page: 2, src: '/lead-preview/page-2.webp' },
+  { page: 3, src: '/lead-preview/page-3.webp' },
+  { page: 4, src: '/lead-preview/page-4.webp' },
+  { locked: true, src: '/lead-preview/locked.webp' },
+];
+
+/* Split out so the number can be dialled from one field and the country from
+   another: a single box collects a national number from most people, and a
+   national number is not something anyone can send a WhatsApp invite to. */
+const DEFAULT_CODE = '+1';
 
 function stored(key) {
   try { return window.localStorage.getItem(key); } catch { return null; }
@@ -95,10 +131,13 @@ export default function LeadMagnetModal() {
   const t = useT();
   const { user, loading } = useAuth();
   const [open, setOpen] = useState(false);
-  const [done, setDone] = useState(null);      // the signed link, once given
+  const [done, setDone] = useState(null);      // { url, community }, once given
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [form, setForm] = useState({ name: '', email: '', phone: '' });
+  const [slide, setSlide] = useState(0);
+  const [form, setForm] = useState({
+    name: '', email: '', code: DEFAULT_CODE, phone: '',
+  });
   /* Read by the listeners, which are registered once and must not be torn
      down and rebuilt every time a field is typed into. */
   const openRef = useRef(false);
@@ -153,12 +192,30 @@ export default function LeadMagnetModal() {
     };
   }, [loading, user, show]);
 
+  const step = useCallback((by) => {
+    setSlide((i) => (i + by + SLIDES.length) % SLIDES.length);
+  }, []);
+
   useEffect(() => {
     if (!open) return undefined;
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    /* The arrow keys move the preview, because a carousel that can only be
+       driven with the mouse is one most people never turn past the first
+       page — and the first page is the least convincing one. */
+    const onKey = (e) => {
+      if (e.key === 'Escape') setOpen(false);
+      else if (e.key === 'ArrowLeft') step(-1);
+      else if (e.key === 'ArrowRight') step(1);
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open]);
+  }, [open, step]);
+
+  const current = SLIDES[slide];
+  const caption = useMemo(() => (
+    current.locked
+      ? t('lead.locked', { from: FIRST_LOCKED, to: TOTAL_PAGES })
+      : t('lead.page', { n: current.page, total: TOTAL_PAGES })
+  ), [current, t]);
 
   if (!open) return null;
 
@@ -170,15 +227,19 @@ export default function LeadMagnetModal() {
     setBusy(true);
     setError('');
     try {
+      /* The two boxes are joined here rather than on the server, so what is
+         stored is what somebody would read back to you off their phone. */
+      const code = form.code.trim().startsWith('+')
+        ? form.code.trim() : `+${form.code.trim()}`;
       const { data } = await api.post('/leads', {
         name: form.name.trim(),
         email: form.email.trim(),
-        phone: form.phone.trim(),
+        phone: `${code} ${form.phone.trim()}`.trim(),
         resource: LEAD_RESOURCE,
         source: lastSource(),
       });
       remember(CAPTURED_KEY);
-      setDone(data.url);
+      setDone({ url: data.url, community: data.community !== false });
       startDownload(data.url);
     } catch (err) {
       /* The dialog stays open with the values still in it. A lead form that
@@ -189,71 +250,150 @@ export default function LeadMagnetModal() {
     }
   };
 
-  const field = 'w-full rounded-xl border border-violet-200 bg-white px-3.5 py-2 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-primary focus:ring-2 focus:ring-violet-200';
+  const field = 'w-full rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-primary focus:ring-2 focus:ring-violet-200';
+  const arrow = 'absolute top-1/2 z-10 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full border border-violet-100 bg-white/95 text-primary shadow-md transition hover:bg-white disabled:opacity-40';
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/60 p-4 backdrop-blur-sm"
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/70 p-3 backdrop-blur-sm sm:p-4"
       role="dialog" aria-modal="true" aria-label={t('lead.title')}>
-      {/* Deliberately small. This interrupts somebody who was leaving, so it
-          has to be readable at a glance and answerable in three taps — a
-          panel that fills the screen reads as a wall to climb rather than an
-          offer to take. */}
-      <div className="flex max-h-[92vh] w-full max-w-[22rem] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center gap-2.5 bg-gradient-to-r from-primary to-fuchsia-600 px-4 py-3 text-white">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/20">
-            <FilePdf size={16} weight="fill" />
+      {/* max-h with the body laid out inside it, and no overflow-y anywhere:
+          if something ever does not fit, the fix is to cut it rather than to
+          hand the visitor a scrollbar. */}
+      <div className="flex max-h-[96vh] w-full max-w-[44rem] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center gap-3 bg-gradient-to-r from-primary to-fuchsia-600 px-4 py-3 text-white sm:px-5">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white/20">
+            <FilePdf size={19} weight="fill" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="font-heading text-[13px] font-bold leading-snug">{t('lead.title')}</p>
-            <p className="text-[10px] text-white/80">{t('lead.badge')}</p>
+            <p className="text-[9px] font-black uppercase tracking-[0.08em] text-white/80">
+              {t('lead.eyebrow')}
+            </p>
+            <p className="font-heading text-[15px] font-bold leading-tight sm:text-lg">{t('lead.title')}</p>
+            <p className="text-[11px] text-white/85">{t('lead.badge')}</p>
           </div>
           <button type="button" onClick={() => setOpen(false)} aria-label={t('lead.close')}
             data-testid="lead-close"
-            className="rounded-lg p-1 text-white/80 transition hover:bg-white/20 hover:text-white">
-            <X size={16} weight="bold" />
+            className="shrink-0 rounded-lg p-1 text-white/80 transition hover:bg-white/20 hover:text-white">
+            <X size={18} weight="bold" />
           </button>
         </div>
 
-        <div className="overflow-y-auto px-4 py-4">
-          {done ? (
-            <div className="text-center">
-              <CheckCircle size={34} weight="fill" className="mx-auto text-emerald-500" />
-              <p className="mt-2 font-heading text-sm font-bold text-gray-900">{t('lead.doneTitle')}</p>
-              <p className="mt-1 text-[13px] leading-snug text-gray-600">{t('lead.doneBody')}</p>
-              {/* The click above can be blocked by a download setting, so the
-                  link is on the page too rather than only in the code. */}
-              <a href={done} download
-                className="btn-primary mt-3 inline-flex items-center gap-2 !bg-gradient-to-r !from-primary !to-fuchsia-600 !px-5 !py-2.5 text-sm">
-                <DownloadSimple size={16} weight="bold" /> {t('lead.doneCta')}
-              </a>
-              <button type="button" onClick={() => setOpen(false)}
-                className="mt-3 block w-full text-xs font-semibold text-gray-500 hover:text-primary">
-                {t('lead.doneClose')}
-              </button>
+        {done ? (
+          <div className="px-5 py-6 text-center">
+            <CheckCircle size={36} weight="fill" className="mx-auto text-emerald-500" />
+            <p className="mt-2 font-heading text-base font-bold text-gray-900">{t('lead.doneTitle')}</p>
+            <p className="mt-1 text-[13px] leading-snug text-gray-600">{t('lead.doneBody')}</p>
+            {/* The click above can be blocked by a download setting, so the
+                link is on the page too rather than only in the code. */}
+            <a href={done.url} download
+              className="btn-primary mt-3 inline-flex items-center gap-2 !bg-gradient-to-r !from-primary !to-fuchsia-600 !px-5 !py-2.5 text-sm">
+              <DownloadSimple size={16} weight="bold" /> {t('lead.doneCta')}
+            </a>
+            {/* Offered once per number. Somebody whose phone is already in the
+                group is told so and left alone, rather than handed a second
+                invitation to a room they are standing in. */}
+            {HAS_COMMUNITY && (done.community ? (
+              <CommunityInline from="lead" className="mx-auto mt-5 max-w-sm" />
+            ) : (
+              <p className="mt-5 text-xs font-semibold text-gray-500">{t('lead.doneMember')}</p>
+            ))}
+            <button type="button" onClick={() => setOpen(false)}
+              className="mt-4 block w-full text-xs font-semibold text-gray-500 hover:text-primary">
+              {t('lead.doneClose')}
+            </button>
+          </div>
+        ) : (
+          <div className="grid gap-3 overflow-y-auto px-4 py-3 sm:grid-cols-[17rem_1fr] sm:gap-5 sm:overflow-visible sm:px-5 sm:py-5">
+
+            {/* ---- what is in the file ---------------------------------- */}
+            <div>
+              <div className="relative">
+                <button type="button" onClick={() => step(-1)} aria-label={t('lead.prev')}
+                  data-testid="lead-prev" className={`${arrow} left-2`}>
+                  <CaretLeft size={15} weight="bold" />
+                </button>
+
+                {/* Every page is in the DOM at once so an arrow press is
+                    instant rather than a spinner over a blank rectangle.
+                    They are four small pictures, not the 3 MB file. */}
+                <div className="relative aspect-[857/1109] max-h-[27vh] w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm sm:max-h-none">
+                  {SLIDES.map((s, i) => (
+                    <img key={s.src} src={s.src} alt=""
+                      aria-hidden={i !== slide}
+                      className={`absolute inset-0 h-full w-full object-cover object-top transition-opacity duration-200 ${i === slide ? 'opacity-100' : 'opacity-0'}`} />
+                  ))}
+                  {current.locked && (
+                    <div className="absolute inset-0 grid place-items-center bg-white/45 px-4 text-center">
+                      <div>
+                        <span className="mx-auto grid h-9 w-9 place-items-center rounded-full bg-primary text-white shadow-lg">
+                          <Lock size={17} weight="fill" />
+                        </span>
+                        <p className="mt-2 font-heading text-[13px] font-black leading-snug text-gray-900">
+                          {t('lead.lockedBody')}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <button type="button" onClick={() => step(1)} aria-label={t('lead.next')}
+                  data-testid="lead-next" className={`${arrow} right-2`}>
+                  <CaretRight size={15} weight="bold" />
+                </button>
+              </div>
+
+              <div className="mt-2 flex items-center justify-center gap-2">
+                <span className="text-[11px] font-semibold text-gray-500" data-testid="lead-caption">
+                  {caption}
+                </span>
+                <span className="flex gap-1">
+                  {SLIDES.map((s, i) => (
+                    <i key={s.src}
+                      className={`h-1.5 rounded-full transition-all ${i === slide ? 'w-3.5 bg-primary' : 'w-1.5 bg-violet-200'}`} />
+                  ))}
+                </span>
+              </div>
             </div>
-          ) : (
-            <>
-              {/* One line, not a feature list. Whoever is reading this was on
-                  their way out; the three fields below are the ask, and
-                  everything above them is what stands between. */}
-              <p className="text-[13px] leading-snug text-gray-600">{t('lead.body')}</p>
+
+            {/* ---- the ask ---------------------------------------------- */}
+            <div className="flex flex-col">
+              <p className="font-heading text-sm font-black text-gray-900">{t('lead.formTitle')}</p>
+
+              {/* Hidden on a phone, where the space it would take is the
+                  space the form needs to stay above the fold. The preview
+                  makes the same argument, and makes it better. */}
+              <ul className="mt-2 hidden space-y-1 sm:block">
+                {['lead.b1', 'lead.b2', 'lead.b3'].map((k) => (
+                  <li key={k} className="flex items-start gap-1.5 text-[12px] leading-snug text-gray-600">
+                    <Check size={13} weight="bold" className="mt-0.5 shrink-0 text-primary" />
+                    {t(k)}
+                  </li>
+                ))}
+              </ul>
 
               <form onSubmit={submit} className="mt-3 space-y-2" data-testid="lead-form">
                 <input className={field} value={form.name} onChange={set('name')}
-                  name="name" autoComplete="name" required minLength={2} maxLength={120}
+                  name="name" autoComplete="given-name" required minLength={2} maxLength={120}
                   placeholder={t('lead.name')} aria-label={t('lead.name')} />
                 <input className={field} value={form.email} onChange={set('email')}
                   name="email" type="email" autoComplete="email" required maxLength={255}
                   placeholder={t('lead.email')} aria-label={t('lead.email')} />
-                {/* The pattern matches the server's: digits and the
-                    punctuation people actually type, nothing normalised. */}
-                {/* Escaped for `v`-mode: see the note on the registration
-                    form. An unescaped ( here makes Chrome discard the whole
-                    pattern rather than fail it. */}
-                <input className={field} value={form.phone} onChange={set('phone')}
-                  name="phone" type="tel" autoComplete="tel" required
-                  minLength={6} maxLength={32} pattern="[0-9+\(\)\.\-\s]{6,32}"
-                  placeholder={t('lead.phone')} aria-label={t('lead.phone')} />
+                {/* The country code has its own box because without one the
+                    number cannot be written to: most people type the national
+                    number they say out loud, and a WhatsApp invite needs the
+                    international one. Two boxes ask for it without anybody
+                    having to be told. */}
+                <div className="grid grid-cols-[4.5rem_1fr] gap-2">
+                  {/* Escaped for `v`-mode: see the note on the registration
+                      form. An unescaped ( makes Chrome discard the pattern. */}
+                  <input className={`${field} text-center`} value={form.code} onChange={set('code')}
+                    name="code" inputMode="tel" required maxLength={5} pattern="\+?[0-9]{1,4}"
+                    aria-label={t('lead.code')} />
+                  <input className={field} value={form.phone} onChange={set('phone')}
+                    name="phone" type="tel" autoComplete="tel-national" required
+                    minLength={6} maxLength={20} pattern="[0-9\(\)\.\-\s]{6,20}"
+                    placeholder={t('lead.phone')} aria-label={t('lead.phone')} />
+                </div>
                 {error && <p className="text-xs font-semibold text-rose-600">{error}</p>}
                 <button type="submit" disabled={busy}
                   className="btn-primary w-full !bg-gradient-to-r !from-primary !to-fuchsia-600 !py-2.5 text-sm disabled:opacity-60">
@@ -261,15 +401,24 @@ export default function LeadMagnetModal() {
                 </button>
               </form>
 
-              <p className="mt-2.5 text-center text-[10px] leading-snug text-gray-400">
+              {/* Why the number is being asked for, next to the box asking
+                  for it — not in the small print underneath, where a request
+                  for a phone number reads as a request with no reason. */}
+              {HAS_COMMUNITY && (
+                <p className="mt-2 rounded-lg bg-violet-50 px-3 py-2 text-[11px] font-semibold leading-snug text-violet-900">
+                  {t('lead.community')}
+                </p>
+              )}
+
+              <p className="mt-2 text-[10px] leading-snug text-gray-400">
                 {t('lead.privacy')}{' '}
                 <Link to="/privacy" className="font-semibold text-gray-500 underline-offset-2 hover:text-primary hover:underline">
                   {t('consent.privacy')}
                 </Link>
               </p>
-            </>
-          )}
-        </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

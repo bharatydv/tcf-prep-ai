@@ -1009,7 +1009,8 @@ function Leads() {
               <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
                 <tr>
                   {['admin.thName', 'admin.thEmail', 'admin.thPhone',
-                    'admin.thResource', 'admin.thSource', 'admin.thJoined'].map((k) => (
+                    'admin.thResource', 'admin.thSource', 'admin.thPdf',
+                    'admin.thCommunity', 'admin.thJoined'].map((k) => (
                       <th key={k} className="px-4 py-3">{t(k)}</th>
                     ))}
                 </tr>
@@ -1024,8 +1025,18 @@ function Leads() {
                     <td className="px-4 py-3">
                       <a href={`mailto:${r.email}`} className="text-primary hover:underline">{r.email}</a>
                     </td>
+                    {/* Straight into WhatsApp when the number normalised,
+                        because that is the channel this number was given
+                        for. A number too broken to normalise still dials. */}
                     <td className="px-4 py-3">
-                      <a href={`tel:${r.phone}`} className="text-primary hover:underline">{r.phone}</a>
+                      <a className="text-primary hover:underline"
+                        href={r.whatsapp
+                          ? `https://wa.me/${r.whatsapp.replace('+', '')}`
+                          : `tel:${r.phone}`}
+                        target={r.whatsapp ? '_blank' : undefined}
+                        rel={r.whatsapp ? 'noopener noreferrer' : undefined}>
+                        {r.phone}
+                      </a>
                     </td>
                     <td className="px-4 py-3 text-gray-500">{r.resource}</td>
                     {/* A source this build has no name for still prints
@@ -1034,6 +1045,23 @@ function Leads() {
                       <Pill tone={LEAD_SOURCES[r.source]?.[0] || 'bg-gray-100 text-gray-500'}>
                         {LEAD_SOURCES[r.source] ? t(LEAD_SOURCES[r.source][1]) : r.source}
                       </Pill>
+                    </td>
+                    {/* The two promises, kept apart. The file goes out on
+                        every ask; the group invitation goes out once per
+                        number, so a dash here means this person was already
+                        in the group under another row — not that they were
+                        missed. */}
+                    <td className="px-4 py-3 text-gray-500">
+                      {r.pdf_sent_at ? fmtDate(r.pdf_sent_at) : '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      {r.community_invited_at ? (
+                        <Pill tone="bg-emerald-50 text-emerald-700">
+                          {fmtDate(r.community_invited_at)}
+                        </Pill>
+                      ) : (
+                        <Pill tone="bg-gray-100 text-gray-500">{t('admin.leadAlready')}</Pill>
+                      )}
                     </td>
                     <td className="px-4 py-3">{fmtDate(r.created_at)}</td>
                   </tr>

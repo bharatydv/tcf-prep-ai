@@ -587,6 +587,13 @@ class Lead(Base):
     One row per (email, resource): asking for the same file twice is a second
     download, not a second person, and the later name and number are the ones
     worth keeping.
+
+    The file and the community group are tracked apart, because they are two
+    different promises. Handing over the PDF again costs nothing and is the
+    whole point of the form. Sending a second invitation to somebody already
+    in the group is spam, and the number is what says whether they are: an
+    address can be typed differently twice, a WhatsApp number cannot be in the
+    group twice.
     """
     __tablename__ = "leads"
     __table_args__ = (UniqueConstraint("email", "resource",
@@ -595,10 +602,21 @@ class Lead(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(120))
     email: Mapped[str] = mapped_column(String(255), index=True)
+    # As typed, so the admin list shows what somebody actually gave us.
     phone: Mapped[str] = mapped_column(String(32))
+    # The same number reduced to one comparable string. This, not `phone`, is
+    # what two entries of one number are matched on.
+    phone_key: Mapped[str] = mapped_column(String(32), default="", index=True)
     # Which file was asked for, and which surface asked.
     resource: Mapped[str] = mapped_column(String(64), index=True)
     source: Mapped[str] = mapped_column(String(40), default="exit_intent")
+    # Null until we first handed over the file / first offered the group. Two
+    # timestamps rather than two flags: "when" answers "whether" as well, and
+    # is what makes the admin list worth reading.
+    pdf_sent_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    community_invited_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True)
@@ -1279,6 +1297,27 @@ def normalize_phone(raw: str) -> str:
             detail=("Indiquez le numéro au format international, indicatif "
                     "compris — par exemple +33 6 12 34 56 78."))
     return cleaned
+
+
+def whatsapp_key(raw: str) -> str:
+    """One number, one string — whichever way somebody typed it.
+
+    Unlike normalize_phone this never raises. That one guards an SMS, where a
+    number that cannot be read must stop the request rather than send a code
+    into the dark. This guards a lead, where the worst outcome is failing to
+    recognise a returning visitor — refusing the download over the shape of a
+    number would throw away the thing the form exists to collect.
+
+    It assumes the country code is present, which the form guarantees by
+    asking for it in its own field. A bare national number therefore does not
+    match the same person's international one, and that is the honest answer:
+    "555 0123" belongs to as many people as there are countries.
+    """
+    digits = re.sub(r"\D", "", raw or "")
+    # 00 is how most of the world dials out; + is how it is written down.
+    if digits.startswith("00"):
+        digits = digits[2:]
+    return f"+{digits}" if digits else ""
 
 
 def _send_sms_sync(to: str, body: str):
@@ -5647,6 +5686,24 @@ MIGRATIONS = [
     "ON analytics_identities (anon_id, user_id)",
     "CREATE INDEX IF NOT EXISTS ix_identity_user ON analytics_identities (user_id)",
     "CREATE INDEX IF NOT EXISTS ix_identity_anon ON analytics_identities (anon_id)",
+
+    # ---- leads: the number as an identity, and what we have sent ----------
+    # phone_key is backfilled from the numbers already on file, using the same
+    # rule the endpoint applies, so a returning visitor is recognised by a
+    # number given before this column existed.
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS phone_key VARCHAR(32) DEFAULT ''",
+    "UPDATE leads SET phone_key = '+' || regexp_replace("
+    r"regexp_replace(phone, '\D', '', 'g'), '^00', '') "
+    "WHERE COALESCE(phone_key, '') = '' AND COALESCE(phone, '') <> ''",
+    "CREATE INDEX IF NOT EXISTS ix_leads_phone_key ON leads (phone_key)",
+    # Every existing row was given the file — that is the only way a lead got
+    # written — so pdf_sent_at is backfilled to when the row appeared.
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS pdf_sent_at TIMESTAMPTZ",
+    "UPDATE leads SET pdf_sent_at = created_at WHERE pdf_sent_at IS NULL",
+    # The invitation is NOT backfilled. Nobody was ever offered the group by
+    # this form before now, and stamping the old rows as invited would quietly
+    # withhold the invitation from the people who asked first.
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS community_invited_at TIMESTAMPTZ",
 ]
 
 
@@ -6299,27 +6356,68 @@ async def capture_lead(body: LeadIn, db: AsyncSession = Depends(get_db),
     email = body.email.lower().strip()
     name = body.name.strip()
     phone = body.phone.strip()
+    key = whatsapp_key(phone)
     now = now_utc()
 
+    # Two questions, asked separately on purpose.
+    #
+    # Which row is this? The address, because the table is keyed on it and a
+    # person who comes back with the same address is that row, whatever number
+    # they type today. The number is the fallback for somebody who gives a
+    # second address — a work one, a typo fixed — with the same phone.
     existing = await db.scalar(
         select(Lead).where(Lead.email == email, Lead.resource == body.resource))
+    if existing is None and key:
+        existing = await db.scalar(
+            select(Lead).where(Lead.phone_key == key,
+                               Lead.resource == body.resource))
+
+    # Is this number already in the group? The number alone, across every row
+    # and every resource: the group is one group, and being in it is a fact
+    # about a phone, not about which file was downloaded to get there.
+    invited_before = False
+    if key:
+        invited_before = bool(await db.scalar(
+            select(Lead.id).where(Lead.phone_key == key,
+                                  Lead.community_invited_at.isnot(None))
+            .limit(1)))
+
     if existing is None:
-        db.add(Lead(name=name, email=email, phone=phone,
-                    resource=body.resource, source=body.source,
-                    created_at=now))
+        existing_before = False
+        existing = Lead(name=name, email=email, phone=phone, phone_key=key,
+                        resource=body.resource, source=body.source,
+                        created_at=now)
+        db.add(existing)
     else:
+        existing_before = True
         # Asking again is the same person with a possibly better number.
         existing.name = name
+        existing.email = email
         existing.phone = phone
+        existing.phone_key = key
         existing.updated_at = now
+
+    # The file goes out every time. That is what was asked for, and what was
+    # paid for with the details; re-downloading is not a second favour.
+    existing.pdf_sent_at = now
+
+    # The invitation goes out once per number, ever. `invite` is what the
+    # answer tells the browser to show — the join button, or the line saying
+    # they are already in — and the timestamp is what makes the second ask
+    # different from the first.
+    invite = not invited_before
+    if invite and existing.community_invited_at is None:
+        existing.community_invited_at = now
+
     await db.commit()
 
     # Server-side: an ad blocker must not be able to hide a lead, and the
     # browser must not be able to invent one.
     await record_event(db, "lead_capture", resource=body.resource,
-                       source=body.source, returning=existing is not None)
+                       source=body.source, returning=existing_before,
+                       invited=invite)
 
-    return {"url": _download_url(body.resource)}
+    return {"url": _download_url(body.resource), "community": invite}
 
 
 @app.get("/api/downloads/{slug}")
@@ -6368,11 +6466,19 @@ async def admin_leads(resource: Optional[str] = None,
     if resource:
         where.append(Lead.resource == resource)
     if q:
-        # One box over the three fields somebody would actually search by.
+        # One box over the fields somebody would actually search by.
         term = f"%{q.strip().lower()}%"
-        where.append(or_(func.lower(Lead.name).like(term),
-                         func.lower(Lead.email).like(term),
-                         Lead.phone.like(term)))
+        fields = [func.lower(Lead.name).like(term),
+                  func.lower(Lead.email).like(term),
+                  Lead.phone.like(term)]
+        # The normalised number as well, so a number pasted out of WhatsApp
+        # with its spaces and brackets finds the row it was typed into
+        # without them. The + is dropped: it anchors the stored key, so
+        # keeping it would stop a search for the last six digits matching.
+        digits = whatsapp_key(q).lstrip("+")
+        if digits:
+            fields.append(Lead.phone_key.like(f"%{digits}%"))
+        where.append(or_(*fields))
 
     base = select(Lead)
     if where:
@@ -6383,10 +6489,15 @@ async def admin_leads(resource: Optional[str] = None,
             base.order_by(Lead.created_at.desc()))).scalars().all()
         out = io.StringIO()
         w = csv.writer(out)
-        w.writerow(["name", "email", "phone", "resource", "source",
+        w.writerow(["name", "email", "phone", "whatsapp", "resource",
+                    "source", "pdf_sent_at", "community_invited_at",
                     "created_at"])
         for r in rows:
-            w.writerow([r.name, r.email, r.phone, r.resource, r.source,
+            w.writerow([r.name, r.email, r.phone, r.phone_key or "",
+                        r.resource, r.source,
+                        r.pdf_sent_at.isoformat() if r.pdf_sent_at else "",
+                        (r.community_invited_at.isoformat()
+                         if r.community_invited_at else ""),
                         (r.created_at or now_utc()).isoformat()])
         stamp = now_utc().strftime("%Y-%m-%d")
         return Response(
@@ -6401,7 +6512,13 @@ async def admin_leads(resource: Optional[str] = None,
         .limit(limit).offset(offset))).scalars().all()
     return {"total": total,
             "leads": [{"name": r.name, "email": r.email, "phone": r.phone,
+                       "whatsapp": r.phone_key or "",
                        "resource": r.resource, "source": r.source,
+                       "pdf_sent_at": (r.pdf_sent_at.isoformat()
+                                       if r.pdf_sent_at else None),
+                       "community_invited_at": (
+                           r.community_invited_at.isoformat()
+                           if r.community_invited_at else None),
                        "created_at": (r.created_at.isoformat()
                                       if r.created_at else None)}
                       for r in rows]}
