@@ -123,6 +123,55 @@ describe('SpeakingResult', () => {
     page.unmount();
   });
 
+  it('leaves the Remember column out when no correction carries a rule', () => {
+    // What every result graded before the field existed looks like. The
+    // column used to appear anyway, headed and empty down its whole length.
+    const noRules = {
+      ...RESULT,
+      errors: RESULT.errors.map(({ remember, ...rest }) => rest),
+    };
+    const page = mount(noRules);
+    const table = page.find('corrections-table');
+    expect(table.querySelectorAll('thead th')).toHaveLength(4);
+    expect(table.textContent).not.toMatch(/Remember/);
+    // and the corrections themselves are all still there
+    expect(table.textContent).toMatch(/j'habite à Toronto/);
+    page.unmount();
+  });
+
+  it('never makes the corrections table wider than the page', () => {
+    // A min-width forced a horizontal scrollbar, and the two columns past
+    // the edge — Why and Remember — are the two the table is for.
+    const page = mount(RESULT);
+    const table = page.find('corrections-table').querySelector('table');
+    expect(table.className).not.toMatch(/min-w-/);
+    expect(table.className).toMatch(/table-fixed/);
+    expect(table.parentElement.className).not.toMatch(/overflow-x/);
+    page.unmount();
+  });
+
+  it('opens the mistakes behind a priority when it is pressed', () => {
+    const page = mount(RESULT);
+    expect(page.find('priority-errors-conjugation')).toBeNull();
+    act(() => {
+      page.find('priority-conjugation')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    const list = page.find('priority-errors-conjugation');
+    expect(list).not.toBeNull();
+    expect(list.textContent).toMatch(/je réponds/);
+    expect(list.textContent).toMatch(/Habit -> présent/);
+    // One at a time: opening a second closes the first.
+    act(() => {
+      page.find('priority-prepositions')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(page.find('priority-errors-conjugation')).toBeNull();
+    expect(page.find('priority-errors-prepositions').textContent)
+      .toMatch(/j'habite à Toronto/);
+    page.unmount();
+  });
+
   it('shows the three row states', () => {
     const page = mount(RESULT);
     const text = page.text();

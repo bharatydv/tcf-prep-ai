@@ -20,13 +20,18 @@
  *    HTML of every page — read by crawlers as page content, and shown for a
  *    frame to everyone.
  *
- * On the trigger itself: a browser cannot show its own dialog during
- * `beforeunload`, so "about to close the window" has to be read from the
- * pointer leaving through the top edge of the viewport, where the tab bar,
- * the address bar and the close button are. That signal does not exist on a
- * touch screen, which has no pointer to leave — so phones get a dwell timer
- * instead, which is the closest honest equivalent: somebody who has been
- * reading a while, rather than somebody who is leaving.
+ * On the trigger, which is the only one: the pointer leaving through the top
+ * edge of the viewport, where the tab bar, the address bar and the close
+ * button are. A browser cannot show its own dialog during `beforeunload`, so
+ * "about to change tab or close the window" has to be read from the pointer
+ * on its way there.
+ *
+ * There used to be a second trigger — a dwell timer, on touch screens, which
+ * have no pointer to leave. It is gone. Somebody who has been reading for
+ * forty-five seconds is not leaving, they are reading, and a dialog over what
+ * they are reading is an interruption rather than an offer. The consequence
+ * is deliberate and worth stating: on a phone this never appears at all. The
+ * guide has its own page now, which is where somebody who wants it goes.
  *
  * On the shape of it: two columns, and never a scrollbar. Whoever is reading
  * this was already leaving, so anything below the fold of the dialog is
@@ -49,16 +54,9 @@ import { useT } from '../i18n';
 /* The resource this offer is for. One slug, matching backend DOWNLOADS. */
 export const LEAD_RESOURCE = 'tcf-vocabulary';
 
-/* Opens the form from anywhere. The Resources card uses it. */
-export const LEAD_OPEN_EVENT = 'prepfrancais:lead-open';
-
 const CAPTURED_KEY = 'prepfrancais.leadCaptured';
 const DISMISSED_KEY = 'prepfrancais.leadDismissed';
 const SOURCE_KEY = 'prepfrancais.leadSource';
-
-/* How long a phone visitor reads before the offer appears. Long enough that
-   it never lands on somebody still deciding whether to stay. */
-const TOUCH_DELAY_MS = 45000;
 
 /* The pages of the real file, as pictures — see backend/tools/lead_pdf_preview.py.
  *
@@ -74,10 +72,10 @@ const TOUCH_DELAY_MS = 45000;
 const TOTAL_PAGES = 25;
 const FIRST_LOCKED = 5;
 const SLIDES = [
-  { page: 2, src: '/lead-preview/page-2.webp' },
-  { page: 3, src: '/lead-preview/page-3.webp' },
-  { page: 4, src: '/lead-preview/page-4.webp' },
-  { locked: true, src: '/lead-preview/locked.webp' },
+  { page: 2, src: '/tcf-vocabulary/page-2.webp' },
+  { page: 3, src: '/tcf-vocabulary/page-3.webp' },
+  { page: 4, src: '/tcf-vocabulary/page-4.webp' },
+  { locked: true, src: '/tcf-vocabulary/blur-5.webp' },
 ];
 
 /* Split out so the number can be dialled from one field and the country from
@@ -102,14 +100,13 @@ function lastSource() {
   catch { return 'exit_intent'; }
 }
 
-/* Whether the file has already been handed to this browser. Exported so the
-   Resources page can offer the direct link instead of the form. */
+/* Whether the file has already been handed to this browser. */
 export function alreadyCaptured() {
   return stored(CAPTURED_KEY) === '1';
 }
 
 /* The unsigned path. Serves anybody signed in; refuses everybody else, which
-   is why the form exists at all. */
+   is why the form exists at all. Used by the guide page's download button. */
 export function downloadPath(resource = LEAD_RESOURCE) {
   return `/api/downloads/${resource}`;
 }
@@ -157,17 +154,10 @@ export default function LeadMagnetModal() {
     if (typeof window === 'undefined') return undefined;
     if (/ReactSnap/i.test(window.navigator.userAgent)) return undefined;
 
-    /* Asked for by name — the Resources card — which overrides every rule
-       below. Those rules are about not interrupting somebody; a button
-       somebody pressed is not an interruption. */
-    const onAsk = () => show('resources');
-    window.addEventListener(LEAD_OPEN_EVENT, onAsk);
-    const stop = () => window.removeEventListener(LEAD_OPEN_EVENT, onAsk);
-
     // `loading` is the session still settling: without it a signed-in visitor
     // is offered the form for the second /auth/me takes to answer.
     if (loading || user || alreadyCaptured() || stored(DISMISSED_KEY) === '1') {
-      return stop;
+      return undefined;
     }
 
     // `relatedTarget` is null only when the pointer has left the document
@@ -178,18 +168,7 @@ export default function LeadMagnetModal() {
       show('exit_intent');
     };
     document.addEventListener('mouseout', onOut);
-
-    const isTouch = typeof window.matchMedia === 'function'
-      && window.matchMedia('(hover: none)').matches;
-    const timer = isTouch
-      ? window.setTimeout(() => show('dwell'), TOUCH_DELAY_MS)
-      : null;
-
-    return () => {
-      stop();
-      document.removeEventListener('mouseout', onOut);
-      if (timer) window.clearTimeout(timer);
-    };
+    return () => document.removeEventListener('mouseout', onOut);
   }, [loading, user, show]);
 
   const step = useCallback((by) => {

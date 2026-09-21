@@ -16,6 +16,7 @@
  * Jest cannot resolve, and anything that imports it becomes untestable by
  * association — the same constraint TranscriptDiff documents.
  */
+import { useState } from 'react';
 import { markOutOf20, nclcFromMark, levelFromScore } from '../lib/tcf';
 import { useT } from '../i18n';
 
@@ -198,25 +199,80 @@ export function topPriorities(errors) {
 
 const PRIORITY_DOT = ['bg-[#ef4444]', 'bg-[#f59e0b]', 'bg-[#3b82f6]'];
 
+/* The corrections behind one priority, in the order they were said.
+   Same filter as topPriorities, or the count on the row would not match the
+   number of lines that open underneath it. */
+function errorsIn(errors, category) {
+  return (errors || []).filter((e) => (
+    e.category === category && e.category !== 'improvement' && e.kind !== 'upgrade'
+  ));
+}
+
 export function Priorities({ errors, practiceHref }) {
   const t = useT();
   const rows = topPriorities(errors);
+  /* Which one is open, by category. One at a time: three lists open at once
+     is the correction table again, and the table is already below. */
+  const [open, setOpen] = useState(null);
   if (!rows.length) return null;
   return (
     <Panel title={t('report.priorities')} description={t('report.prioritiesSub')}
       testId="top-priorities">
-      {rows.map((r, i) => (
-        <div key={r.category}
-          className={`mt-[8px] flex items-center gap-[11px] rounded-[12px] border border-[#e7e2f2] px-[13px] py-[11px] first:mt-0`}>
-          <span className={`h-[10px] w-[10px] flex-none rounded-full ${PRIORITY_DOT[i]}`} />
-          <span className="flex-1 text-[13px] font-extrabold text-[#171322]">
-            {CAT_LABELS[r.category] || r.category}
-          </span>
-          <span className={`text-[11px] text-[#64748b]`}>
-            {countLabel(t, r.count, 'report.oneError', 'report.nErrors')}
-          </span>
-        </div>
-      ))}
+      {rows.map((r, i) => {
+        const isOpen = open === r.category;
+        const found = errorsIn(errors, r.category);
+        return (
+          <div key={r.category}
+            className="mt-[8px] overflow-hidden rounded-[12px] border border-[#e7e2f2] first:mt-0">
+            {/* A row somebody can press. "Prépositions — 4 errors" names the
+                habit; which four sentences it was said in is the thing that
+                makes it fixable, and it was only ever findable by reading
+                down the table below looking for the word. */}
+            <button type="button"
+              onClick={() => setOpen(isOpen ? null : r.category)}
+              aria-expanded={isOpen}
+              data-testid={`priority-${r.category}`}
+              title={t(isOpen ? 'report.prioritiesClose' : 'report.prioritiesOpen')}
+              className={`flex w-full items-center gap-[11px] px-[13px] py-[11px] text-left transition hover:bg-[#faf8ff] ${isOpen ? 'bg-[#faf8ff]' : ''}`}>
+              <span className={`h-[10px] w-[10px] flex-none rounded-full ${PRIORITY_DOT[i]}`} />
+              <span className="flex-1 text-[13px] font-extrabold text-[#171322]">
+                {CAT_LABELS[r.category] || r.category}
+              </span>
+              <span className="text-[11px] text-[#64748b]">
+                {countLabel(t, r.count, 'report.oneError', 'report.nErrors')}
+              </span>
+              {/* A caret drawn in CSS rather than an icon import: this file
+                  deliberately depends on nothing but i18n and lib/tcf. */}
+              <span aria-hidden="true"
+                className={`flex-none text-[10px] text-[#7c3aed] transition-transform ${isOpen ? 'rotate-90' : ''}`}>
+                &#9654;
+              </span>
+            </button>
+            {isOpen && (
+              <ul className="border-t border-[#e7e2f2] bg-[#fcfbff] px-[13px] py-[10px]"
+                data-testid={`priority-errors-${r.category}`}>
+                {found.map((e, n) => (
+                  <li key={n} className="border-b border-[#efeaf9] py-[8px] last:border-b-0">
+                    {/* Said, then said correctly. Nothing struck through:
+                        the wrong version is what they will recognise, and
+                        crossing it out makes it the hardest line to read. */}
+                    <p className="text-[12px] leading-[1.45] text-[#334155]">
+                      <span className="text-[#b91c1c]">{e.error}</span>
+                      <span className="px-[6px] text-[#94a3b8]">&rarr;</span>
+                      <span className="font-extrabold text-[#166534]">{e.correction}</span>
+                    </p>
+                    {e.remember && (
+                      <p className="mt-[3px] text-[11px] leading-[1.4] text-[#4c1d95]">
+                        {e.remember}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      })}
       <a href={practiceHref} className={`${TOKENS.secondary} mt-[12px] block w-full`}
         data-testid="practice-priorities">
         {t('report.practicePriorities')}

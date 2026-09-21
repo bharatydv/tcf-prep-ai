@@ -954,6 +954,10 @@ function SimPrompts() {
    tab that showed only the numbers could not tell those apart. */
 const LEAD_SOURCES = {
   exit_intent: ['bg-violet-50 text-violet-700', 'admin.leadSourceExit'],
+  /* Historical. The dialog had two other triggers — a dwell timer on touch
+     screens and a button on the Resources card — and has neither now: it only
+     opens on somebody leaving. Nothing new arrives under these two, and the
+     rows that already carry them still deserve their names. */
   resources: ['bg-emerald-50 text-emerald-700', 'admin.leadSourceResources'],
   dwell: ['bg-amber-50 text-amber-700', 'admin.leadSourceDwell'],
 };

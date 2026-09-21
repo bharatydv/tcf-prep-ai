@@ -66,6 +66,7 @@ const Blog = lazy(() => import("./pages/Blog"));
 const BlogPost = lazy(() => import("./pages/BlogPost"));
 const BlogAdmin = lazy(() => import("./pages/BlogAdmin"));
 const Resources = lazy(() => import("./pages/Resources"));
+const VocabularyGuide = lazy(() => import("./pages/VocabularyGuide"));
 const TefTcfWritingGuide = lazy(() => import("./pages/TefTcfWritingGuide"));
 const SpeakingHome = lazy(() => import("./pages/SpeakingHome"));
 const SpeakingTasks = lazy(() => import("./pages/SpeakingTasks"));
@@ -129,6 +130,10 @@ export default function App() {
             element={<ProtectedRoute><CheckWriting /></ProtectedRoute>}
           />
           <Route path="/resources" element={<Resources />} />
+          {/* The free vocabulary guide, as a readable page. The slug is
+              the exam and the thing, because that is what it is searched
+              for — see pages/VocabularyGuide. */}
+          <Route path="/tcf-canada-vocabulary" element={<VocabularyGuide />} />
           <Route path="/reading" element={<ReadingHome />} />
           {/* Practice and test read the same papers; the mode decides whether a
               question is marked as it is answered or only at hand-in. */}

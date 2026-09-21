@@ -33,6 +33,7 @@ const STATIC = [
   ['/reading', 0.7, 'monthly'],
   ['/listening', 0.7, 'monthly'],
   ['/resources', 0.7, 'monthly'],
+  ['/tcf-canada-vocabulary', 0.8, 'monthly'],
   ['/combinations', 0.6, 'monthly'],
   ['/pricing', 0.8, 'monthly'],
   /* The TCF Canada landing family. Source of truth for the routes is
