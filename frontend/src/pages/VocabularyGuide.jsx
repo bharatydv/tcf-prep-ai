@@ -1,45 +1,42 @@
-/* The free vocabulary guide, as a page rather than as a download button.
+/* The free vocabulary guide, as an article.
  *
  * It used to be a card on /resources with a link on it, which is the whole
  * resource reduced to its file name: nothing about it could be read without
  * first handing over a phone number, and nothing about it could be found,
  * because a PDF behind a form is a PDF no search engine has ever seen.
  *
- * So this page shows the guide three ways at once, and they are not the same
- * thing repeated:
- *
- * 1. As text. The two-column tables of the free pages are real HTML tables,
- *    extracted from the PDF by backend/tools/lead_pdf_preview.py rather than
- *    retyped beside it — so they cannot drift from the file, and so they are
- *    readable by a search engine, a screen reader and anybody on a slow
- *    connection. This is the part that makes the page worth indexing.
- *
- * 2. As pages. A reader of all 25 pages as pictures, which is what somebody
- *    deciding whether to download it actually wants to see. The cover is not
- *    among them: page 1 is branding, and a cover is evidence of nothing.
- *
- * 3. As the file. The download, for somebody with an account.
+ * So this page IS the guide — headings, paragraphs and tables, in the PDF's
+ * order and the PDF's words, read out of the file by
+ * backend/tools/lead_pdf_preview.py rather than retyped beside it. Nothing
+ * here chooses what to say; the shapes are the shapes the generator found,
+ * and this decides only what each one looks like. It reads the way a blog
+ * post reads, because that is what a search engine, a screen reader and a
+ * phone on a slow connection can all use — and a stack of page pictures is
+ * what none of them can.
  *
  * WHAT IS BEHIND THE ACCOUNT, AND WHERE THE GATE IS
  * -------------------------------------------------
- * Pages 2, 3 and 4 are public files under frontend/public. Pages 5 to 25 are
- * public only as blurred copies, with the blur baked into the file rather
- * than applied in CSS — a CSS blur is a filter over a picture that was still
- * sent, and one line in the inspector takes it off. The sharp copies of those
- * pages are served by the API, which checks for an account.
+ * Pages 2 to 4 ship in the bundle, and are the part anybody may read. Pages
+ * 5 to 24 are not in the bundle at all: they come from an API call that
+ * answers 403 to somebody signed out, and this page never makes that call
+ * for them. What a signed-out visitor sees past page 4 is a blurred picture
+ * of the pages, blurred in the file rather than in CSS, and an invitation.
  *
  * That means the gate is not in this file. Nothing here decides what somebody
- * is allowed to see; it decides which address to ask for, and the server
- * decides the rest. A signed-out visitor who edits this component still gets
- * a 403.
+ * is allowed to see; it decides whether to ask, and the server decides the
+ * rest. A signed-out visitor who edits this component still gets a 403.
+ *
+ * The cover, page 1, is not shown to anybody: it is branding, and a cover is
+ * evidence of nothing. Page 25 is the copyright notice, and is not content.
  */
-import { useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import {
-  FilePdf, DownloadSimple, Lock, ArrowRight, BookOpen, Sparkle,
+  DownloadSimple, Lock, ArrowRight, BookOpen, Sparkle, CircleNotch,
 } from '@phosphor-icons/react';
 import { useT } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
+import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { downloadPath } from '../components/LeadMagnetModal';
 import GUIDE from '../content/vocabularyGuide.json';
@@ -47,32 +44,37 @@ import GUIDE from '../content/vocabularyGuide.json';
 export const VOCAB_PATH = '/tcf-canada-vocabulary';
 
 /* The file, as it is — read out of the PDF by the generator rather than typed
-   here, so a guide that gains a page does not leave the reader ending on a
-   404 and the contents list naming a page that moved. */
+   here, so a guide that gains a page does not leave the contents list naming
+   a page that moved. */
 const TOTAL_PAGES = GUIDE.totalPages;
 const FREE_PAGES = GUIDE.freePages;
+const [, LAST_CONTENT] = GUIDE.contentPages;
 const FIRST_GATED = Math.max(...FREE_PAGES) + 1;
+
+/* How many blurred pages stand in for the locked part. Three is enough to
+   say "there is a lot more of this"; twenty is a wall to scroll past. */
+const TEASER_PAGES = [FIRST_GATED, FIRST_GATED + 1, FIRST_GATED + 2];
 
 const FAQ = [1, 2, 3, 4, 5].map((n) => ({ q: `vocab.faq${n}q`, a: `vocab.faq${n}a` }));
 
-const PAGES = Array.from({ length: TOTAL_PAGES - 1 }, (_, i) => i + 2);
-
-/* Which picture a page is, for this visitor.
-   Free pages are the same file for everybody. The rest are the blurred copy,
-   or — with an account — the API's sharp one. */
-function pageSrc(number, signedIn) {
-  if (FREE_PAGES.includes(number)) return `/tcf-vocabulary/page-${number}.webp`;
-  return signedIn
-    ? `/api/downloads/tcf-vocabulary/pages/${number}`
-    : `/tcf-vocabulary/blur-${number}.webp`;
+/* The two halves put back together for somebody who may see both.
+   A table that starts on page 4 and ends on page 5 was split by the
+   generator along that line and its second half marked `continues`; here it
+   goes back under the heading it belongs to, so the reader never sees a
+   table start again with the same header six rows in. */
+function joinContinuations(free, gated) {
+  const all = free.map((block) => ({ ...block }));
+  gated.forEach((block) => {
+    const last = all[all.length - 1];
+    if (block.continues && last && last.type === 'table') {
+      last.rows = [...last.rows, ...block.rows];
+    } else {
+      all.push(block);
+    }
+  });
+  return all;
 }
 
-/* One table of the guide, as a table.
-   Not a grid of divs: these are rows of related values under a header, which
-   is what a table is, and what lets a screen reader read "un métier — an
-   occupation" as one thing rather than as two stray words. The first column
-   is the French one in every table the guide has, so it is the one marked as
-   French for a screen reader and for a translator. */
 /* What turns a wide table into a stack of labelled lines on a phone.
    Four columns of French at 390px is four columns of about sixty pixels, in
    which "rapidement." is broken across two lines — legible in the sense that
@@ -82,6 +84,12 @@ const STACK_TABLE = 'max-sm:block';
 const STACK_ROW = 'max-sm:mb-[10px] max-sm:block max-sm:rounded-xl max-sm:border max-sm:border-violet-100 max-sm:last:mb-0';
 const STACK_CELL = 'max-sm:block max-sm:w-full max-sm:px-3 max-sm:pb-0 max-sm:pt-2 max-sm:before:mb-0.5 max-sm:before:block max-sm:before:text-[9px] max-sm:before:font-bold max-sm:before:uppercase max-sm:before:tracking-wider max-sm:before:text-gray-500 max-sm:before:content-[attr(data-label)]';
 
+/* One table of the guide, as a table.
+   Not a grid of divs: these are rows of related values under a header, which
+   is what a table is, and what lets a screen reader read "un métier — an
+   occupation" as one thing rather than as two stray words. The first column
+   is the French one in every table the guide has, so it is the one marked as
+   French for a screen reader and for a translator. */
 function GuideTable({ head, rows }) {
   /* Two columns fit a phone; more do not. Read off the table rather than
      configured, because the guide sets its own tables at two, three and four
@@ -118,9 +126,7 @@ function GuideTable({ head, rows }) {
   );
 }
 
-/* The guide's free pages, block by block, in its own order and its own words.
-   Nothing here chooses what to say — the shapes are the shapes the generator
-   found in the PDF, and this only decides what each one looks like. */
+/* The guide, block by block, in its own order and its own words. */
 function GuideBlock({ block }) {
   if (block.type === 'table') return <GuideTable head={block.head} rows={block.rows} />;
   if (block.type === 'paragraph') {
@@ -139,10 +145,28 @@ function GuideBlock({ block }) {
   );
 }
 
+/* Pages 5 to 24, for somebody signed in. Fetched rather than bundled — see
+   the note at the top — and fetched once, when there is an account to fetch
+   them for. */
+function useGatedBlocks(signedIn) {
+  const [state, setState] = useState({ blocks: null, error: false });
+  useEffect(() => {
+    if (!signedIn) return undefined;
+    let alive = true;
+    api.get('/downloads/tcf-vocabulary/content')
+      .then((r) => { if (alive) setState({ blocks: r.data.blocks || [], error: false }); })
+      .catch(() => { if (alive) setState({ blocks: null, error: true }); });
+    return () => { alive = false; };
+  }, [signedIn]);
+  return state;
+}
+
 export default function VocabularyGuide() {
   const t = useT();
+  const location = useLocation();
   const { user } = useAuth();
   const signedIn = Boolean(user);
+  const gated = useGatedBlocks(signedIn);
 
   /* Article, FAQ and a breadcrumb. Handed to <Seo> rather than appended by an
      effect, so `npm run build:prerender` bakes it into the static HTML and
@@ -166,7 +190,7 @@ export default function VocabularyGuide() {
       dateModified: '2026-09-21',
       mainEntityOfPage: SITE_URL + VOCAB_PATH,
       /* The file itself, declared as what it is. `isAccessibleForFree` is
-         true because it is: the form asks for a name, not for money. */
+         true because it is: an account costs nothing. */
       isAccessibleForFree: true,
       image: `${SITE_URL}/tcf-vocabulary/page-2.webp`,
     },
@@ -190,12 +214,28 @@ export default function VocabularyGuide() {
     },
   ]), [t]);
 
-  const download = (
-    <a href={downloadPath()} download data-testid="vocab-download"
-      className="btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600">
+  /* The same button for everybody. Signed in, it is the file. Signed out, it
+     is the door to an account, with a word underneath saying so, and the
+     page remembered so that somebody who makes the account lands back here
+     rather than on the practice page wondering where the download went. */
+  const primary = 'btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600';
+  const back = { from: location };
+  const download = signedIn ? (
+    <a href={downloadPath()} download data-testid="vocab-download" className={primary}>
       <DownloadSimple size={18} weight="bold" /> {t('vocab.download')}
     </a>
+  ) : (
+    <span className="inline-flex flex-col items-center gap-1">
+      <Link to="/register" state={back} data-testid="vocab-download-locked" className={primary}>
+        <DownloadSimple size={18} weight="bold" /> {t('vocab.download')}
+      </Link>
+      <span className="text-[11px] font-semibold text-gray-500">{t('vocab.downloadNote')}</span>
+    </span>
   );
+
+  const blocks = signedIn && gated.blocks
+    ? joinContinuations(GUIDE.blocks, gated.blocks)
+    : GUIDE.blocks;
 
   return (
     <main className="overflow-x-clip bg-white">
@@ -227,13 +267,9 @@ export default function VocabularyGuide() {
           <p className="mx-auto mt-4 max-w-2xl text-[15px] leading-relaxed text-gray-700">
             {t('vocab.heroSub')}
           </p>
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-            {signedIn ? download : (
-              <Link to="/register" className="btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600">
-                <FilePdf size={18} weight="fill" /> {t('vocab.getFree')}
-              </Link>
-            )}
-            <a href="#pages" className="btn-outline">{t('vocab.jumpPages')}</a>
+          <div className="mt-6 flex flex-wrap items-start justify-center gap-3">
+            {download}
+            <a href="#guide" className="btn-outline">{t('vocab.jump')}</a>
           </div>
           {/* What it is, in the three numbers somebody scans for. */}
           <dl className="mx-auto mt-7 grid max-w-lg grid-cols-3 gap-3 text-center">
@@ -256,8 +292,7 @@ export default function VocabularyGuide() {
         <p className="mt-2 text-[15px] leading-relaxed text-gray-700">{t('vocab.themesNote')}</p>
         {/* The guide's own theme headings, spelled as it spells them, with
             the page each one opens on. "Does it cover housing?" is the
-            question somebody asks before downloading anything, and a picture
-            of a page cannot answer it. */}
+            question somebody asks before downloading anything. */}
         <ol className="mt-4 divide-y divide-violet-100 rounded-2xl border border-violet-100">
           {GUIDE.themes.map((theme) => (
             <li key={theme.title} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-4 py-2.5">
@@ -269,82 +304,74 @@ export default function VocabularyGuide() {
           ))}
         </ol>
 
-        {/* THE FREE PAGES, AS TEXT ---------------------------------------- */}
-        <h2 className="mt-12 font-heading text-2xl font-extrabold text-gray-900">
-          {t('vocab.textTitle', { from: FREE_PAGES[0], to: FREE_PAGES[FREE_PAGES.length - 1] })}
-        </h2>
-        <p className="mt-2 text-[15px] leading-relaxed text-gray-700">{t('vocab.textIntro')}</p>
-        {/* Every heading, sentence and cell below is the guide's, in its
-            order and its wording — see backend/tools/lead_pdf_preview.py.
-            Nothing is summarised and nothing is added. */}
-        <div data-testid="vocab-text">
-          {GUIDE.blocks.map((block, i) => (
-            <GuideBlock key={i} block={block} />
-          ))}
-        </div>
-        <p className="mt-6 rounded-2xl border border-violet-100 bg-violet-50/50 px-4 py-3 text-[13px] leading-relaxed text-gray-700">
-          {t('vocab.textEnds', { page: FREE_PAGES[FREE_PAGES.length - 1] })}
-        </p>
-
-        {/* THE READER ------------------------------------------------------ */}
-        <h2 id="pages" className="mt-12 scroll-mt-20 font-heading text-2xl font-extrabold text-gray-900">
-          {t('vocab.readTitle')}
+        {/* THE GUIDE ------------------------------------------------------- */}
+        <h2 id="guide" className="mt-12 scroll-mt-20 font-heading text-2xl font-extrabold text-gray-900">
+          {t('vocab.guideTitle')}
         </h2>
         <p className="mt-2 text-[15px] leading-relaxed text-gray-700">
-          {signedIn ? t('vocab.readIntroIn') : t('vocab.readIntroOut')}
+          {signedIn
+            ? t('vocab.guideIntroIn')
+            : t('vocab.guideIntroOut', { from: FREE_PAGES[0], to: FREE_PAGES[FREE_PAGES.length - 1] })}
         </p>
-        {signedIn && <div className="mt-4">{download}</div>}
+        {/* Every heading, sentence and cell below is the guide's, in its
+            order and its wording. Nothing is summarised and nothing is added. */}
+        <article data-testid="vocab-text">
+          {blocks.map((block, i) => (
+            <GuideBlock key={i} block={block} />
+          ))}
+        </article>
 
-        <div className="mt-6 space-y-4" data-testid="vocab-reader">
-          {PAGES.map((number) => {
-            const locked = !signedIn && number >= FIRST_GATED;
-            return (
-              <figure key={number} className="relative overflow-hidden rounded-2xl border border-gray-200 shadow-sm">
-                <img
-                  src={pageSrc(number, signedIn)}
-                  /* The alt text names the page and what is on it rather than
-                     repeating the title 24 times, which is what an image
-                     carrying no information should say. */
-                  alt={t('vocab.pageAlt', { n: number, total: TOTAL_PAGES })}
-                  width="900" height="1165"
-                  /* Only the first is worth fetching before it is scrolled
-                     to; the rest are 24 more pictures on a page somebody may
-                     never scroll. */
-                  loading={number === 2 ? 'eager' : 'lazy'}
-                  decoding="async"
-                  className="block w-full"
-                />
-                <figcaption className="border-t border-gray-100 bg-white px-4 py-2 text-[11px] font-semibold text-gray-500">
-                  {t('vocab.pageCaption', { n: number, total: TOTAL_PAGES })}
-                </figcaption>
-                {/* The offer, over the first page nobody can read, and only
-                    there: the same panel over all twenty-one would be a wall
-                    rather than an invitation. */}
-                {locked && number === FIRST_GATED && (
-                  <div className="absolute inset-0 grid place-items-center bg-white/70 px-6 text-center backdrop-blur-[2px]">
-                    <div>
-                      <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-primary text-white shadow-lg">
-                        <Lock size={22} weight="fill" />
-                      </span>
-                      <p className="mt-3 font-heading text-lg font-extrabold text-gray-900">
-                        {t('vocab.lockedTitle', { from: FIRST_GATED, to: TOTAL_PAGES })}
-                      </p>
-                      <p className="mx-auto mt-1 max-w-sm text-[13px] leading-snug text-gray-700">
-                        {t('vocab.lockedBody')}
-                      </p>
-                      <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                        <Link to="/register" className="btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600 !py-2.5 text-sm">
-                          {t('vocab.lockedCta')} <ArrowRight size={15} weight="bold" />
-                        </Link>
-                        <Link to="/login" className="btn-outline !py-2.5 text-sm">{t('vocab.lockedLogin')}</Link>
-                      </div>
-                    </div>
+        {/* Signed in and still waiting, or signed in and the call failed. A
+            page that silently stopped at page 4 for somebody with an account
+            would look exactly like the page for somebody without one. */}
+        {signedIn && !gated.blocks && (
+          <p className="mt-6 flex items-center gap-2 text-[13px] font-semibold text-gray-500"
+            data-testid="vocab-gated-state">
+            {gated.error ? t('vocab.loadFail') : (
+              <><CircleNotch size={16} className="animate-spin" /> {t('vocab.loading')}</>
+            )}
+          </p>
+        )}
+
+        {/* THE LOCKED PART, for everybody else ----------------------------- */}
+        {!signedIn && (
+          <div className="relative mt-8" data-testid="vocab-locked">
+            {/* Three real pages, blurred in the file, laid one over the next so
+                the depth of what follows is visible without twenty pictures.
+                Never the text: the text past page 4 is not on this page for
+                somebody signed out, and no CSS could make it so. */}
+            <div className="relative h-[26rem] overflow-hidden rounded-2xl border border-gray-200">
+              {TEASER_PAGES.map((n, i) => (
+                <img key={n} src={`/tcf-vocabulary/blur-${n}.webp`}
+                  alt={t('vocab.pageAlt', { n, total: TOTAL_PAGES })}
+                  width="380" height="492" loading="lazy" decoding="async"
+                  className="absolute left-1/2 w-[80%] -translate-x-1/2 rounded-lg border border-gray-200 bg-white shadow-md"
+                  style={{ top: `${i * 2.5}rem`, zIndex: 3 - i, opacity: 1 - i * 0.18 }} />
+              ))}
+              <div className="absolute inset-0 z-10 grid place-items-center bg-gradient-to-b from-white/30 via-white/75 to-white px-6 text-center">
+                <div>
+                  <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-primary text-white shadow-lg">
+                    <Lock size={22} weight="fill" />
+                  </span>
+                  <p className="mt-3 font-heading text-lg font-extrabold text-gray-900">
+                    {t('vocab.lockedTitle', { from: FIRST_GATED, to: LAST_CONTENT })}
+                  </p>
+                  <p className="mx-auto mt-1 max-w-md text-[13px] leading-snug text-gray-700">
+                    {t('vocab.lockedBody', GUIDE.gated)}
+                  </p>
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                    <Link to="/register" state={back} className={`${primary} !py-2.5 text-sm`}>
+                      {t('vocab.lockedCta')} <ArrowRight size={15} weight="bold" />
+                    </Link>
+                    <Link to="/login" state={back} className="btn-outline !py-2.5 text-sm">
+                      {t('vocab.lockedLogin')}
+                    </Link>
                   </div>
-                )}
-              </figure>
-            );
-          })}
-        </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* FAQ -------------------------------------------------------------- */}
         <h2 id="faq" className="mt-12 scroll-mt-20 font-heading text-2xl font-extrabold text-gray-900">
@@ -366,7 +393,7 @@ export default function VocabularyGuide() {
           <h2 className="font-heading text-xl font-extrabold text-gray-900">{t('vocab.nextTitle')}</h2>
           <p className="mx-auto mt-2 max-w-md text-[14px] leading-relaxed text-gray-700">{t('vocab.nextBody')}</p>
           <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
-            <Link to="/speaking" className="btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600">
+            <Link to="/speaking" className={primary}>
               {t('vocab.nextSpeaking')} <ArrowRight size={16} weight="bold" />
             </Link>
             <Link to="/tef-tcf-writing-guide" className="btn-outline">

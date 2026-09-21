@@ -4,30 +4,32 @@
     pip install pypdfium2 pillow pdfplumber
     python tools/lead_pdf_preview.py
 
-Three kinds of output, because the guide is shown three ways:
+The guide is read on the website as text — an article, not a stack of page
+pictures — so the main output is the guide as text, in two files that differ
+only in who may have them:
 
-1. `frontend/public/tcf-vocabulary/page-N.webp` — the free pages, sharp, as
-   public files. Page 1 is not among them: it is the cover, and a cover proves
-   nothing. The sample starts at page 2, where the content starts.
+1. `frontend/src/content/vocabularyGuide.json` — pages 2 to 4, block by block:
+   headings, paragraphs and tables, in the order the PDF puts them and in the
+   PDF's own words. Public, bundled, indexed. Page 1 is not among them: it is
+   the cover, and a cover proves nothing. Page 25 is a copyright notice set in
+   the brand font, and is not content either.
 
-2. `frontend/public/tcf-vocabulary/blur-N.webp` — every page behind the
-   sign-in, blurred. The blur is baked into the file rather than applied with
-   CSS: a CSS blur is a filter over a picture that was still sent, and one
-   line in the inspector removes it. A page nobody has an account for should
-   not be sitting in the browser's cache in the clear.
+2. `backend/content/downloads/vocab-guide-gated.json` — pages 5 to 24, the
+   same way, served by the API to somebody signed in. Not under `frontend/`,
+   because anything the bundle holds is public whatever the page says.
 
-3. `backend/content/downloads/vocab-pages/page-N.webp` — the same pages
-   sharp, served by the API to somebody signed in. Not in `public/`, because
-   anything under `public/` is public whatever the page says.
+Nothing in either file is written here. Every heading, every sentence and
+every cell is read out of the PDF, so the page cannot drift from the guide
+and a correction to the guide arrives on the page by re-running this.
 
-And `frontend/src/content/vocabularyGuide.json`: pages 2 to 4 as text, block
-by block — headings, paragraphs and tables, in the order the PDF puts them and
-in the PDF's own words. The reader above is pictures, and a picture of a table
-is worth nothing to a search engine or to a screen reader.
+Two kinds of picture as well, for the popup and the locked teaser:
 
-Nothing in that file is written here. Every heading, every sentence and every
-cell is read out of the PDF, so the page cannot drift from the guide and a
-correction to the guide arrives on the page by re-running this.
+* `frontend/public/tcf-vocabulary/page-N.webp` — the free pages, sharp.
+* `frontend/public/tcf-vocabulary/blur-N.webp` — the gated pages, blurred,
+  with the blur baked into the file rather than applied with CSS. A CSS blur
+  is a filter over a picture that was still sent, and one line in the
+  inspector removes it. A page nobody has an account for should not be
+  sitting in the browser's cache in the clear.
 
 HOW THE TEXT IS READ
 --------------------
@@ -66,14 +68,16 @@ except ImportError:  # pragma: no cover - a build-time script, not the app
 ROOT = Path(__file__).resolve().parent.parent.parent
 PDF = ROOT / "backend" / "content" / "downloads" / "tcf-canada-vocabulaire-thematique.pdf"
 PUBLIC = ROOT / "frontend" / "public" / "tcf-vocabulary"
-GATED = ROOT / "backend" / "content" / "downloads" / "vocab-pages"
 CONTENT = ROOT / "frontend" / "src" / "content" / "vocabularyGuide.json"
+GATED = ROOT / "backend" / "content" / "downloads" / "vocab-guide-gated.json"
 
 TOTAL_PAGES = 25
 # The pages anybody may read, 1-based as the PDF numbers itself in its footer.
 FREE = (2, 3, 4)
-# Everything from here on is behind an account.
+# Everything from here on is behind an account, up to and including the last
+# page that carries content. Page 25 is the copyright notice.
 FIRST_GATED = 5
+LAST_CONTENT = 24
 
 # Wide enough to stay sharp on a retina screen at the ~560px the reader gives
 # it, and no wider: this is a picture of a page, not the page.
@@ -169,8 +173,13 @@ def read_table(page, chars, table):
     return {"rows": [cells for cells, _ in out]}
 
 
-def read_page(page):
-    """Everything on one page, as blocks, top to bottom."""
+def read_page(page, number):
+    """Everything on one page, as blocks, top to bottom.
+
+    Every block carries the page it came from, and a table carries it per
+    row, because a table that runs over a page break has rows on both sides
+    of the line between what is free and what is not.
+    """
     chars = body_chars(page)
     tables = page.find_tables()
     blocks = []
@@ -178,7 +187,9 @@ def read_page(page):
     for table in tables:
         found = read_table(page, chars, table)
         if found:
-            blocks.append((table.bbox[1], dict(found, type="table")))
+            found.update(type="table", _page=number,
+                         _row_pages=[number] * len(found["rows"]))
+            blocks.append((table.bbox[1], found))
 
     def in_a_table(c):
         return any(b[0] - 1 <= c["x0"] and c["x1"] <= b[2] + 1
@@ -192,19 +203,24 @@ def read_page(page):
     for top, text, group in lines_of([c for c in chars if not in_a_table(c)]):
         first = group[0]
         size = first.get("size") or 0
-        bold = "Bold" in (first.get("fontname") or "")
+        # Bold by majority, not by first letter: the closing tip on page 24
+        # is a paragraph with bold words scattered through it, and a line of
+        # it that happens to open on one is still a line of the paragraph.
+        letters = [c for c in group if c["text"].strip()]
+        bold = sum("Bold" in (c.get("fontname") or "") for c in letters) \
+            >= 0.8 * len(letters)
         if bold and size >= SIZE_SECTION:
             run = None
             kind = "title" if size >= SIZE_TITLE else "section"
-            blocks.append((top, {"type": kind, "text": text}))
+            blocks.append((top, {"type": kind, "text": text, "_page": number}))
         elif bold:
             run = None
-            blocks.append((top, {"type": "heading", "text": text}))
+            blocks.append((top, {"type": "heading", "text": text, "_page": number}))
         elif run is not None and top - run[0] <= 16:
             run[1]["text"] += " " + text
             run[0] = top
         else:
-            run = [top, {"type": "paragraph", "text": text}]
+            run = [top, {"type": "paragraph", "text": text, "_page": number}]
             blocks.append((top, run[1]))
 
     blocks.sort(key=lambda b: b[0])
@@ -223,7 +239,17 @@ def merge(document, page_blocks):
         last = document[-1] if document else None
         if (last and block["type"] == "table" and last["type"] == "table"
                 and "head" not in block):
-            last["rows"] += block["rows"]
+            rows, pages = block["rows"], block["_row_pages"]
+            # A row cut by the page break comes back as a row with one cell
+            # filled: the tail of a sentence, and nothing beside it. It is
+            # the end of the row before, not a row.
+            if rows and last["rows"] and sum(1 for c in rows[0] if c.strip()) == 1:
+                for i, cell in enumerate(rows[0]):
+                    if cell.strip():
+                        last["rows"][-1][i] = f"{last['rows'][-1][i]} {cell}".strip()
+                rows, pages = rows[1:], pages[1:]
+            last["rows"] += rows
+            last["_row_pages"] += pages
             continue
         if (last and block["type"] == "paragraph" == last["type"]
                 and block is page_blocks[0]):
@@ -231,6 +257,36 @@ def merge(document, page_blocks):
             continue
         document.append(dict(block))
     return document
+
+
+def split(document, last_free):
+    """One document into the part anybody may have and the part behind an account.
+
+    Split by page, and inside a table by row, so that a table that starts on
+    page 4 and ends on page 5 gives page 4's rows to the free file and page
+    5's to the gated one — marked `continues`, so the page can put them back
+    under the same heading for somebody who may see both.
+    """
+    free, gated = [], []
+
+    def clean(block):
+        return {k: v for k, v in block.items() if not k.startswith("_")}
+
+    for block in document:
+        if block["type"] != "table":
+            (free if block["_page"] <= last_free else gated).append(clean(block))
+            continue
+        rows = list(zip(block["rows"], block["_row_pages"]))
+        before = [r for r, p in rows if p <= last_free]
+        after = [r for r, p in rows if p > last_free]
+        if before:
+            free.append(dict(clean(block), rows=before))
+        if after:
+            tail = dict(clean(block), rows=after)
+            if before:
+                tail["continues"] = True
+            gated.append(tail)
+    return free, gated
 
 
 def themes(pdf):
@@ -265,7 +321,6 @@ def main():
     if not PDF.exists():
         sys.exit(f"missing {PDF}")
     PUBLIC.mkdir(parents=True, exist_ok=True)
-    GATED.mkdir(parents=True, exist_ok=True)
     CONTENT.parent.mkdir(parents=True, exist_ok=True)
 
     doc = pdfium.PdfDocument(str(PDF))
@@ -279,40 +334,43 @@ def main():
         img.save(path, "WEBP", quality=82, method=6)
         print(f"  free  {number:>2} -> {path.name} ({path.stat().st_size // 1024} KB)")
 
-    for number in range(FIRST_GATED, TOTAL_PAGES + 1):
-        page = doc[number - 1]
-        blurred = render(page, BLUR_WIDTH).convert("RGB")
+    for number in range(FIRST_GATED, LAST_CONTENT + 1):
+        blurred = render(doc[number - 1], BLUR_WIDTH).convert("RGB")
         blurred = blurred.filter(ImageFilter.GaussianBlur(BLUR_RADIUS))
-        path = PUBLIC / f"blur-{number}.webp"
-        blurred.save(path, "WEBP", quality=70, method=6)
-
-        sharp = render(page, WIDTH).convert("RGB")
-        sharp.save(GATED / f"page-{number}.webp", "WEBP", quality=82, method=6)
-    print(f"  gated {FIRST_GATED}-{TOTAL_PAGES} -> blur-N.webp + vocab-pages/page-N.webp")
+        blurred.save(PUBLIC / f"blur-{number}.webp", "WEBP", quality=70, method=6)
+    print(f"  gated {FIRST_GATED}-{LAST_CONTENT} -> blur-N.webp")
 
     with pdfplumber.open(str(PDF)) as pdf:
-        blocks = []
-        for number in FREE:
-            merge(blocks, read_page(pdf.pages[number - 1]))
+        document = []
+        for number in range(FREE[0], LAST_CONTENT + 1):
+            merge(document, read_page(pdf.pages[number - 1], number))
         found_themes = themes(pdf)
+    free, gated = split(document, FREE[-1])
 
-    payload = {
-        "_comment": ("Generated by backend/tools/lead_pdf_preview.py from "
-                     f"{PDF.name}. Every word comes out of the PDF. "
-                     "Do not edit by hand."),
+    def tally(blocks):
+        return {"tables": sum(b["type"] == "table" for b in blocks),
+                "rows": sum(len(b["rows"]) for b in blocks if b["type"] == "table")}
+
+    comment = (f"Generated by backend/tools/lead_pdf_preview.py from {PDF.name}. "
+               "Every word comes out of the PDF. Do not edit by hand.")
+    io.open(CONTENT, "w", encoding="utf-8", newline="\n").write(json.dumps({
+        "_comment": comment,
         "freePages": list(FREE),
+        "contentPages": [FREE[0], LAST_CONTENT],
         "totalPages": TOTAL_PAGES,
         "themes": found_themes,
-        "blocks": blocks,
-    }
-    io.open(CONTENT, "w", encoding="utf-8", newline="\n").write(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
-    counts = {}
-    for block in blocks:
-        counts[block["type"]] = counts.get(block["type"], 0) + 1
-    print(f"  text  -> {CONTENT.name}: {counts}, "
-          f"{len(found_themes)} themes, "
-          f"{sum(len(b['rows']) for b in blocks if b['type'] == 'table')} table rows")
+        "blocks": free,
+        # What is behind the account, counted, so the locked teaser can say
+        # how much without being handed any of it.
+        "gated": tally(gated),
+    }, ensure_ascii=False, indent=2) + "\n")
+    io.open(GATED, "w", encoding="utf-8", newline="\n").write(json.dumps({
+        "_comment": comment,
+        "pages": [FIRST_GATED, LAST_CONTENT],
+        "blocks": gated,
+    }, ensure_ascii=False, indent=2) + "\n")
+    print(f"  text  -> {CONTENT.name}: {tally(free)}  |  "
+          f"{GATED.name}: {tally(gated)}  |  {len(found_themes)} themes")
 
 
 if __name__ == "__main__":
