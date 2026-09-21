@@ -5,6 +5,10 @@
     3,
     4
   ],
+  "contentPages": [
+    2,
+    24
+  ],
   "totalPages": 25,
   "themes": [
     {
@@ -691,5 +695,9 @@
       ],
       "type": "table"
     }
-  ]
+  ],
+  "gated": {
+    "tables": 102,
+    "rows": 707
+  }
 }

@@ -10,10 +10,13 @@
  *    name, address and number — asking again in a popup would be asking twice
  *    for what we have, so for them the file is simply a link.
  *
- * 2. Once per browser, whatever the answer. A visitor who closed it said no,
- *    and showing it again on the next page is how an offer turns into an
- *    irritation. The "captured" key outlives the "dismissed" one on purpose:
- *    giving the number once should never be asked for twice.
+ * 2. Not again for a day after it was closed, and never again after it was
+ *    answered. A visitor who closed it said no, and showing it again on the
+ *    next page is how an offer turns into an irritation — but "no" today is
+ *    not "no" tomorrow, and a returning visitor who is leaving again is
+ *    somebody the offer is for. Giving the number, on the other hand, is
+ *    answered for good: the file is theirs, and asking twice for what we
+ *    have is asking twice.
  *
  * 3. Never while prerendering. react-snap runs the real app, effects
  *    included, so anything open at snapshot time is baked into the static
@@ -58,6 +61,9 @@ const CAPTURED_KEY = 'prepfrancais.leadCaptured';
 const DISMISSED_KEY = 'prepfrancais.leadDismissed';
 const SOURCE_KEY = 'prepfrancais.leadSource';
 
+/* How long a closed dialog stays closed. */
+const DISMISSED_FOR_MS = 24 * 60 * 60 * 1000;
+
 /* The pages of the real file, as pictures — see backend/tools/lead_pdf_preview.py.
  *
  * It starts at page 2 because page 1 is the cover, and a cover proves nothing:
@@ -89,6 +95,24 @@ function stored(key) {
 
 function remember(key) {
   try { window.localStorage.setItem(key, '1'); } catch { /* private mode */ }
+}
+
+/* The moment it was closed, so that the day can be counted from it. */
+function rememberDismissed() {
+  try { window.localStorage.setItem(DISMISSED_KEY, String(Date.now())); }
+  catch { /* private mode */ }
+}
+
+/* Closed less than a day ago. The value used to be a bare '1' — meaning
+   "ever" — and a browser still carrying one is read as closed today rather
+   than as never closed, so the change does not open the dialog on everybody
+   who had already said no. */
+function recentlyDismissed() {
+  const raw = stored(DISMISSED_KEY);
+  if (!raw) return false;
+  const at = Number(raw);
+  if (!Number.isFinite(at) || at < DISMISSED_FOR_MS) return true;
+  return Date.now() - at < DISMISSED_FOR_MS;
 }
 
 function rememberSource(value) {
@@ -147,7 +171,7 @@ export default function LeadMagnetModal() {
     setOpen(true);
     /* Counted as shown the moment it is shown, not when it is answered: a
        visitor who closes the tab over the dialog has still seen the offer. */
-    remember(DISMISSED_KEY);
+    rememberDismissed();
   }, []);
 
   useEffect(() => {
@@ -156,7 +180,7 @@ export default function LeadMagnetModal() {
 
     // `loading` is the session still settling: without it a signed-in visitor
     // is offered the form for the second /auth/me takes to answer.
-    if (loading || user || alreadyCaptured() || stored(DISMISSED_KEY) === '1') {
+    if (loading || user || alreadyCaptured() || recentlyDismissed()) {
       return undefined;
     }
 

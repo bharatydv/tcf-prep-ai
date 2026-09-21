@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { CommunityInline } from '../components/CommunityButton';
 import { EnvelopeSimple, Lock, User, Phone, Eye, EyeSlash } from '@phosphor-icons/react';
 import { toast } from 'sonner';
@@ -16,6 +16,10 @@ export default function Register() {
   const { register } = useAuth();
   const t = useT();
   const navigate = useNavigate();
+  /* Where they were, if a page sent them here to unlock something on it —
+     the vocabulary guide does. The same shape Login reads, so a page can
+     point at either door with the same state. */
+  const from = useLocation().state?.from?.pathname;
   const [form, setForm] = useState({ name: '', email: '', phone: '', password: '', confirm: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -58,6 +62,7 @@ export default function Register() {
          click from the gateway, with the plan they picked already chosen. */
       const wanted = new URLSearchParams(window.location.search).get('plan');
       if (res.user?.role === 'admin') navigate('/admin');
+      else if (from && from !== '/register') navigate(from, { replace: true });
       else navigate(wanted ? '/pricing' : '/practice');
     } else { setError(res.error); toast.error(res.error); }
   };
