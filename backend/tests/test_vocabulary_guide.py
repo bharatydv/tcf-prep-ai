@@ -16,7 +16,7 @@ import server
 
 ROOT = Path(server.__file__).resolve().parent.parent
 PUBLIC = ROOT / "frontend" / "public" / "tcf-vocabulary"
-TABLES = ROOT / "frontend" / "src" / "content" / "vocabularyTables.json"
+CONTENT = ROOT / "frontend" / "src" / "content" / "vocabularyGuide.json"
 
 FREE = (2, 3, 4)
 
@@ -65,21 +65,63 @@ def test_the_cover_is_not_shown_anywhere():
     assert not (server.VOCAB_PAGES_DIR / "page-1.webp").exists()
 
 
-def test_the_extracted_tables_are_real_pairs():
-    """The page's indexable text. Generated from the PDF, never retyped."""
-    data = json.loads(TABLES.read_text(encoding="utf-8"))
-    tables = data["tables"]
-    assert tables, "no tables were extracted"
-    for table in tables:
-        assert table["heading"].strip()
-        # Only the free pages: this text is readable with no account, so it
-        # must not come from a page that needs one.
-        assert table["page"] in FREE, (
-            f"{table['heading']} came from page {table['page']}, which is "
-            f"behind the account check")
-        assert table["rows"], f"{table['heading']} has no rows"
-        for french, english in table["rows"]:
-            # A column that slid would show up as an empty cell or as one
-            # side holding both languages, not as a crash.
-            assert french.strip() and english.strip(), table["heading"]
-            assert french != english, table["heading"]
+def _content():
+    return json.loads(CONTENT.read_text(encoding="utf-8"))
+
+
+def test_the_page_says_which_pages_it_transcribes():
+    data = _content()
+    assert data["freePages"] == list(FREE)
+    assert data["totalPages"] == server.VOCAB_TOTAL_PAGES
+    assert max(data["freePages"]) + 1 == server.VOCAB_FIRST_GATED
+
+
+def test_the_transcription_keeps_the_guides_own_order():
+    """The blocks are the guide's, in its order, and every table has cells.
+
+    A column boundary that slid by two points does not crash: it moves the I
+    of "Il faut que" into the cell before it, and the only way that is ever
+    noticed is by checking. These are the shapes that go wrong when it does —
+    an empty cell, a ragged row, a table with no rows at all.
+    """
+    blocks = _content()["blocks"]
+    kinds = [b["type"] for b in blocks]
+    assert kinds[0] == "title", "the transcription should open with the guide's title"
+    assert "table" in kinds and "paragraph" in kinds and "heading" in kinds
+
+    for block in blocks:
+        if block["type"] != "table":
+            assert block["text"].strip(), block
+            continue
+        assert block["rows"], block.get("head")
+        width = len(block["head"]) if "head" in block else len(block["rows"][0])
+        assert width >= 2
+        for row in block["rows"]:
+            assert len(row) == width, (block.get("head"), row)
+            assert all(cell.strip() for cell in row), (block.get("head"), row)
+
+
+def test_the_transcription_is_the_free_pages_and_only_those():
+    """It ends where page 4 ends.
+
+    Page 5 opens theme 2, so the presence of any theme after the first would
+    mean the transcription had run past the account check and published a page
+    nobody signed in for.
+    """
+    data = _content()
+    text = json.dumps(data["blocks"], ensure_ascii=False)
+    later = [t["title"] for t in data["themes"] if t["page"] > max(FREE)]
+    assert later, "the guide should have themes past the free pages"
+    for title in later:
+        assert title not in text, f"{title} is behind the account check"
+
+
+def test_the_contents_list_comes_out_of_the_guide():
+    themes = _content()["themes"]
+    assert len(themes) == 10
+    assert themes[0]["page"] == 3
+    # Numbered as the guide numbers them, ascending, with no gaps.
+    for i, theme in enumerate(themes, start=1):
+        assert theme["title"].startswith(f"{i}. "), theme
+    pages = [t["page"] for t in themes]
+    assert pages == sorted(pages)

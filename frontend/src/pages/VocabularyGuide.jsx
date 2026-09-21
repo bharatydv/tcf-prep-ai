@@ -36,45 +36,22 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  FilePdf, DownloadSimple, Lock, CheckCircle, ArrowRight, BookOpen, Sparkle,
+  FilePdf, DownloadSimple, Lock, ArrowRight, BookOpen, Sparkle,
 } from '@phosphor-icons/react';
 import { useT } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
 import { useAuth } from '../context/AuthContext';
 import { downloadPath } from '../components/LeadMagnetModal';
-import VOCABULARY from '../content/vocabularyTables.json';
+import GUIDE from '../content/vocabularyGuide.json';
 
 export const VOCAB_PATH = '/tcf-canada-vocabulary';
 
-/* The file, as it is. Kept beside the generator's own constants on purpose:
-   if the PDF gains a page, both move together or the reader ends on a 404. */
-const TOTAL_PAGES = 25;
-const FREE_PAGES = [2, 3, 4];
-const FIRST_GATED = 5;
-
-/* The ten themes, with the page each one opens on — taken from the guide's
-   own headings. Printed as text rather than left inside the pictures, because
-   "does it cover housing?" is the question somebody asks before downloading
-   anything, and a picture cannot answer it. */
-const THEMES = [
-  { n: 1, en: 'Work and career', fr: 'Le travail / La carrière', page: 3 },
-  { n: 2, en: 'Environment and ecology', fr: "L'environnement / L'écologie", page: 5 },
-  { n: 3, en: 'Travel and tourism', fr: 'Le voyage / Le tourisme', page: 7 },
-  { n: 4, en: 'Technology and social media', fr: 'La technologie / Les réseaux sociaux', page: 9 },
-  { n: 5, en: 'Health and well-being', fr: 'La santé / Le bien-être', page: 12 },
-  { n: 6, en: 'Family and social relationships', fr: 'La famille / Les relations sociales', page: 14 },
-  { n: 7, en: 'Money and consumption', fr: "L'argent / La consommation", page: 16 },
-  { n: 8, en: 'Housing, urban and rural life', fr: 'Le logement / Vie urbaine vs rurale', page: 18 },
-  { n: 9, en: 'Media and information', fr: "Les médias / L'information", page: 20 },
-  { n: 10, en: 'Sport and leisure', fr: 'Le sport / Les loisirs', page: 22 },
-];
-
-/* The grammar the guide opens with, before the themes. Listed because these
-   are the pages that are free to read, so naming them is naming what anybody
-   can have without an account. */
-const STRUCTURES = [
-  'vocab.s1', 'vocab.s2', 'vocab.s3', 'vocab.s4', 'vocab.s5', 'vocab.s6',
-];
+/* The file, as it is — read out of the PDF by the generator rather than typed
+   here, so a guide that gains a page does not leave the reader ending on a
+   404 and the contents list naming a page that moved. */
+const TOTAL_PAGES = GUIDE.totalPages;
+const FREE_PAGES = GUIDE.freePages;
+const FIRST_GATED = Math.max(...FREE_PAGES) + 1;
 
 const FAQ = [1, 2, 3, 4, 5].map((n) => ({ q: `vocab.faq${n}q`, a: `vocab.faq${n}a` }));
 
@@ -90,33 +67,75 @@ function pageSrc(number, signedIn) {
     : `/tcf-vocabulary/blur-${number}.webp`;
 }
 
-/* One extracted table, as a table. Not a grid of divs: these are rows of two
-   related values with a header on each column, which is what a table is, and
-   what lets a screen reader read "un métier — an occupation" as one thing. */
-function VocabTable({ heading, rows }) {
-  const t = useT();
+/* One table of the guide, as a table.
+   Not a grid of divs: these are rows of related values under a header, which
+   is what a table is, and what lets a screen reader read "un métier — an
+   occupation" as one thing rather than as two stray words. The first column
+   is the French one in every table the guide has, so it is the one marked as
+   French for a screen reader and for a translator. */
+/* What turns a wide table into a stack of labelled lines on a phone.
+   Four columns of French at 390px is four columns of about sixty pixels, in
+   which "rapidement." is broken across two lines — legible in the sense that
+   the characters are all present. The column heading comes back as the label
+   through `data-label`, so nothing loses its name when the header row goes. */
+const STACK_TABLE = 'max-sm:block';
+const STACK_ROW = 'max-sm:mb-[10px] max-sm:block max-sm:rounded-xl max-sm:border max-sm:border-violet-100 max-sm:last:mb-0';
+const STACK_CELL = 'max-sm:block max-sm:w-full max-sm:px-3 max-sm:pb-0 max-sm:pt-2 max-sm:before:mb-0.5 max-sm:before:block max-sm:before:text-[9px] max-sm:before:font-bold max-sm:before:uppercase max-sm:before:tracking-wider max-sm:before:text-gray-500 max-sm:before:content-[attr(data-label)]';
+
+function GuideTable({ head, rows }) {
+  /* Two columns fit a phone; more do not. Read off the table rather than
+     configured, because the guide sets its own tables at two, three and four
+     columns and this is rendering whatever it finds. */
+  const wide = (head ? head.length : rows[0].length) > 2;
   return (
-    <div className="mt-6 overflow-hidden rounded-2xl border border-violet-100">
-      <h3 className="bg-violet-50 px-4 py-3 font-heading text-sm font-bold text-gray-900">
-        {heading}
-      </h3>
-      <table className="w-full table-fixed border-collapse text-left">
-        <thead>
-          <tr className="border-y border-violet-100 bg-white text-[10px] uppercase tracking-wider text-gray-500">
-            <th className="w-1/2 px-4 py-2 font-bold">{t('vocab.colFr')}</th>
-            <th className="w-1/2 px-4 py-2 font-bold">{t('vocab.colEn')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(([fr, en]) => (
-            <tr key={fr} className="border-b border-violet-50 last:border-b-0 odd:bg-violet-50/30">
-              <td lang="fr" className="break-words px-4 py-2 text-[13px] font-semibold text-gray-900">{fr}</td>
-              <td className="break-words px-4 py-2 text-[13px] text-gray-600">{en}</td>
+    <div className="mt-3 rounded-2xl border border-violet-100 max-sm:border-0">
+      <table className={`w-full table-fixed border-collapse text-left ${wide ? STACK_TABLE : ''}`}>
+        {head && (
+          <thead className={wide ? 'max-sm:hidden' : ''}>
+            <tr className="border-b border-violet-100 bg-violet-50 text-[10px] uppercase tracking-wider text-gray-600">
+              {head.map((cell) => (
+                <th key={cell} className="px-3 py-2 font-bold">{cell}</th>
+              ))}
+            </tr>
+          </thead>
+        )}
+        <tbody className={wide ? STACK_TABLE : ''}>
+          {rows.map((row) => (
+            <tr key={row.join('|')}
+              className={`border-b border-violet-50 last:border-b-0 odd:bg-violet-50/30 ${wide ? `${STACK_ROW} max-sm:pb-2` : ''}`}>
+              {row.map((cell, i) => (
+                <td key={i} lang={i === 0 ? 'fr' : undefined}
+                  data-label={head ? head[i] : undefined}
+                  className={`break-words px-3 py-2 text-[13px] leading-snug ${wide ? STACK_CELL : ''} ${i === 0 ? 'font-semibold text-gray-900' : 'text-gray-600'}`}>
+                  {cell}
+                </td>
+              ))}
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+/* The guide's free pages, block by block, in its own order and its own words.
+   Nothing here chooses what to say — the shapes are the shapes the generator
+   found in the PDF, and this only decides what each one looks like. */
+function GuideBlock({ block }) {
+  if (block.type === 'table') return <GuideTable head={block.head} rows={block.rows} />;
+  if (block.type === 'paragraph') {
+    return <p className="mt-3 text-[14px] leading-relaxed text-gray-700">{block.text}</p>;
+  }
+  if (block.type === 'heading') {
+    return <h4 className="mt-7 font-heading text-[15px] font-bold text-gray-900">{block.text}</h4>;
+  }
+  /* `title` and `section`: the two sizes the guide sets its own headings in.
+     Both are h3 here, under the h2 of the section they sit in — the level is
+     the page's outline, not the PDF's point size. */
+  return (
+    <h3 className={`font-heading font-extrabold text-gray-900 ${block.type === 'title' ? 'mt-8 text-xl' : 'mt-10 text-lg'}`}>
+      {block.text}
+    </h3>
   );
 }
 
@@ -136,7 +155,7 @@ export default function VocabularyGuide() {
       headline: t('vocab.docTitle'),
       description: t('vocab.docDesc'),
       inLanguage: 'en',
-      about: THEMES.map((theme) => theme.en).join(', '),
+      about: GUIDE.themes.map((theme) => theme.title).join(', '),
       author: { '@type': 'Organization', name: 'prepfrancais' },
       publisher: {
         '@type': 'Organization',
@@ -218,7 +237,7 @@ export default function VocabularyGuide() {
           </div>
           {/* What it is, in the three numbers somebody scans for. */}
           <dl className="mx-auto mt-7 grid max-w-lg grid-cols-3 gap-3 text-center">
-            {[[TOTAL_PAGES, t('vocab.statPages')], [THEMES.length, t('vocab.statThemes')],
+            {[[TOTAL_PAGES, t('vocab.statPages')], [GUIDE.themes.length, t('vocab.statThemes')],
               ['B2', t('vocab.statLevel')]].map(([value, label]) => (
                 <div key={label} className="rounded-2xl border border-violet-200 bg-white/80 px-3 py-3">
                   <dt className="font-heading text-xl font-extrabold text-primary">{value}</dt>
@@ -230,48 +249,42 @@ export default function VocabularyGuide() {
       </section>
 
       <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
-        <p className="text-[15px] leading-relaxed text-gray-700">{t('vocab.intro')}</p>
-
-        {/* WHAT IS IN IT ------------------------------------------------- */}
-        <h2 className="mt-10 font-heading text-2xl font-extrabold text-gray-900">
-          {t('vocab.insideTitle')}
+        {/* THE CONTENTS --------------------------------------------------- */}
+        <h2 className="font-heading text-2xl font-extrabold text-gray-900">
+          {t('vocab.themesTitle')}
         </h2>
-        <p className="mt-2 text-[15px] leading-relaxed text-gray-700">{t('vocab.insideIntro')}</p>
-
-        <h3 className="mt-6 font-heading text-lg font-bold text-gray-900">{t('vocab.structuresTitle')}</h3>
-        <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-          {STRUCTURES.map((key) => (
-            <li key={key} className="flex items-start gap-2 text-[14px] leading-snug text-gray-700">
-              <CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-primary" />
-              {t(key)}
-            </li>
-          ))}
-        </ul>
-
-        <h3 className="mt-8 font-heading text-lg font-bold text-gray-900">{t('vocab.themesTitle')}</h3>
-        <ol className="mt-3 divide-y divide-violet-100 rounded-2xl border border-violet-100">
-          {THEMES.map((theme) => (
-            <li key={theme.n} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-4 py-2.5">
-              <span className="font-heading text-sm font-bold text-gray-900">
-                {theme.n}. {theme.en}
-              </span>
-              <span lang="fr" className="text-[13px] text-gray-500">{theme.fr}</span>
+        <p className="mt-2 text-[15px] leading-relaxed text-gray-700">{t('vocab.themesNote')}</p>
+        {/* The guide's own theme headings, spelled as it spells them, with
+            the page each one opens on. "Does it cover housing?" is the
+            question somebody asks before downloading anything, and a picture
+            of a page cannot answer it. */}
+        <ol className="mt-4 divide-y divide-violet-100 rounded-2xl border border-violet-100">
+          {GUIDE.themes.map((theme) => (
+            <li key={theme.title} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-4 py-2.5">
+              <span className="font-heading text-sm font-bold text-gray-900">{theme.title}</span>
               <span className="ml-auto whitespace-nowrap text-[11px] font-semibold text-primary">
                 {t('vocab.fromPage', { n: theme.page })}
               </span>
             </li>
           ))}
         </ol>
-        <p className="mt-3 text-[13px] leading-relaxed text-gray-600">{t('vocab.themesNote')}</p>
 
-        {/* THE SAMPLE, AS TEXT -------------------------------------------- */}
+        {/* THE FREE PAGES, AS TEXT ---------------------------------------- */}
         <h2 className="mt-12 font-heading text-2xl font-extrabold text-gray-900">
-          {t('vocab.sampleTitle')}
+          {t('vocab.textTitle', { from: FREE_PAGES[0], to: FREE_PAGES[FREE_PAGES.length - 1] })}
         </h2>
-        <p className="mt-2 text-[15px] leading-relaxed text-gray-700">{t('vocab.sampleIntro')}</p>
-        {VOCABULARY.tables.map((table) => (
-          <VocabTable key={table.heading} heading={table.heading} rows={table.rows} />
-        ))}
+        <p className="mt-2 text-[15px] leading-relaxed text-gray-700">{t('vocab.textIntro')}</p>
+        {/* Every heading, sentence and cell below is the guide's, in its
+            order and its wording — see backend/tools/lead_pdf_preview.py.
+            Nothing is summarised and nothing is added. */}
+        <div data-testid="vocab-text">
+          {GUIDE.blocks.map((block, i) => (
+            <GuideBlock key={i} block={block} />
+          ))}
+        </div>
+        <p className="mt-6 rounded-2xl border border-violet-100 bg-violet-50/50 px-4 py-3 text-[13px] leading-relaxed text-gray-700">
+          {t('vocab.textEnds', { page: FREE_PAGES[FREE_PAGES.length - 1] })}
+        </p>
 
         {/* THE READER ------------------------------------------------------ */}
         <h2 id="pages" className="mt-12 scroll-mt-20 font-heading text-2xl font-extrabold text-gray-900">
