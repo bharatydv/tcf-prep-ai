@@ -62,7 +62,28 @@ const SEVERITY_TONE = {
 /* One cell, the prototype's padding and rule. Named because it is repeated
    five times a row and a table whose columns disagree about their padding by
    a pixel is a table that looks slightly broken and cannot be pointed at. */
-const CELL = 'border-b border-[#e7e2f2] px-[13px] py-[14px] align-top text-[12px]';
+const CELL = 'border-b border-[#e7e2f2] px-[13px] py-[14px] align-top text-[12px] break-words';
+
+/* What turns one <td> into a labelled line of a card below lg.
+ *
+ * The same cells, restyled — not a second copy of the rows. Two copies would
+ * mean two play buttons carrying the same id, and the synthesiser keys on the
+ * id: pressing one would stop the other. The column heading comes back as the
+ * label through `data-label`, so nothing on the row loses its name when the
+ * header row goes away. */
+const STACK = 'max-lg:block max-lg:w-full max-lg:border-b-0 max-lg:px-[14px] max-lg:pb-0 max-lg:pt-[10px] max-lg:before:mb-[4px] max-lg:before:block max-lg:before:text-[9px] max-lg:before:font-bold max-lg:before:uppercase max-lg:before:tracking-[0.06em] max-lg:before:text-[#64748b] max-lg:before:content-[attr(data-label)]';
+
+/* The columns, as shares of the card rather than pixels, so the table is
+   always exactly as wide as the space it has. Written out as whole class
+   names because Tailwind's JIT reads this file for literals — see the note in
+   speakingReport. The Remember column only exists when something fills it,
+   and the other four widen to take back its share. */
+const COLUMNS = (hasRemember) => (hasRemember
+  ? [['speak.colSaid', 'w-[19%]'], ['speak.colFix', 'w-[19%]'],
+     ['speak.colType', 'w-[12%]'], ['speak.colWhy', 'w-[26%]'],
+     ['report.colRemember', 'w-[24%]']]
+  : [['speak.colSaid', 'w-[24%]'], ['speak.colFix', 'w-[24%]'],
+     ['speak.colType', 'w-[14%]'], ['speak.colWhy', 'w-[38%]']]);
 
 /* Where "Practice my mistakes" goes. A plain href rather than a router Link:
    this component deliberately imports no react-router — see speakingReport. */
@@ -131,6 +152,9 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
   const history = result.history || {};
   const rows = showAll ? ranked : ranked.slice(0, IMPORTANT_COUNT);
   const hasMore = ranked.length > IMPORTANT_COUNT;
+  /* Over every correction rather than the five on screen, so the table does
+     not gain a column halfway down "View all". */
+  const hasRemember = ranked.some(({ e }) => e.remember);
 
   return (
     <div className="space-y-5">
@@ -176,7 +200,11 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
       {ranked.length > 0 && (
         <section className={TOKENS.card} data-testid="corrections-table">
           <h2 className={TOKENS.title}>{t('report.corrections')}</h2>
-          <p className={TOKENS.desc}>{t('report.correctionsSub')}</p>
+          {/* The subtitle names the Remember column, so it only says so
+              when there is one to name. */}
+          <p className={TOKENS.desc}>
+            {t(hasRemember ? 'report.correctionsSub' : 'report.correctionsSubPlain')}
+          </p>
 
           {/* The legend earns its place the moment a row can be something
               other than a mistake: without it "Upgrade" reads as a fourth
@@ -194,37 +222,37 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
             </span>
           </div>
 
-          {/* Fixed column widths and a scroll, rather than columns that fold
-              away below a breakpoint. Five columns of French do not fit a
-              phone at any size that can still be read, and the two that used
-              to fold — "Why" and "Remember" — are the two the table is for.
-              Scrolling shows all of every row; folding showed none of two. */}
-          <div className="overflow-x-auto rounded-[14px] border border-[#e7e2f2]">
-            <table className="w-full min-w-[950px] border-collapse">
-              <thead>
+          {/* It never scrolls sideways. The columns are shares of the card
+              rather than pixel widths, so the whole of every row is on screen
+              at every width — a table you have to drag is a table whose last
+              two columns most people never learn are there.
+
+              Below lg the same cells become a stacked card, labelled by the
+              heading each one lost. Not the old folding, which dropped "Why"
+              and "Remember" and so dropped the two columns the table exists
+              for: nothing is hidden here, it is only laid out downwards. */}
+          <div className="rounded-[14px] border border-[#e7e2f2] max-lg:border-0">
+            <table className="w-full table-fixed border-collapse max-lg:block">
+              <thead className="max-lg:hidden">
                 <tr>
-                  {[['speak.colSaid', 'w-[190px]'], ['speak.colFix', 'w-[190px]'],
-                    ['speak.colType', 'w-[100px]'], ['speak.colWhy', 'w-[250px]'],
-                    /* The new column, last, so nothing above it moved. Widest
-                       of the five on purpose: it is the one worth carrying out
-                       of the page. */
-                    ['report.colRemember', 'w-[260px]']].map(([key, width]) => (
-                      <th key={key}
-                        className={`${width} border-b border-[#e7e2f2] bg-[#faf8ff] px-[13px] py-[12px] text-left text-[10px] font-bold uppercase tracking-[0.06em] text-[#64748b]`}>
-                        {t(key)}
-                      </th>
-                    ))}
+                  {COLUMNS(hasRemember).map(([key, width]) => (
+                    <th key={key}
+                      className={`${width} border-b border-[#e7e2f2] bg-[#faf8ff] px-[13px] py-[12px] text-left text-[10px] font-bold uppercase tracking-[0.06em] text-[#64748b]`}>
+                      {t(key)}
+                    </th>
+                  ))}
                 </tr>
               </thead>
-              <tbody className="[&>tr:last-child>td]:border-b-0">
+              <tbody className="max-lg:block lg:[&>tr:last-child>td]:border-b-0">
                 {rows.map(({ e, at }) => (
-                  <tr key={at} className={KIND_ROW[e.kind] || ''}>
+                  <tr key={at}
+                    className={`${KIND_ROW[e.kind] || ''} max-lg:mb-[10px] max-lg:block max-lg:rounded-[14px] max-lg:border max-lg:border-[#e7e2f2] max-lg:pb-[12px] max-lg:last:mb-0`}>
                     {/* No wash of colour across the cell. The tint said
                         "this whole side is wrong", which is not what a
                         correction means — the wrong part is a word or two
                         inside an otherwise fine phrase, and that is what is
                         marked now. */}
-                    <td className={CELL}>
+                    <td data-label={t('speak.colSaid')} className={`${CELL} ${STACK}`}>
                       <span className="flex flex-wrap items-center gap-1.5">
                         <CorrectionText said={e.error} correction={e.correction} side="said" />
                         {/* Both sides are playable, not just the right one. A
@@ -243,7 +271,7 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
                           : <SpeakButton text={e.error} id={`${idPrefix}said-${at}`} {...tts} />}
                       </span>
                     </td>
-                    <td className={CELL}>
+                    <td data-label={t('speak.colFix')} className={`${CELL} ${STACK}`}>
                       <span className="flex flex-wrap items-center gap-1.5">
                         <CorrectionText said={e.error} correction={e.correction} side="fix" />
                         <SpeakButton text={e.correction} id={`${idPrefix}fix-${at}`} {...tts} />
@@ -251,8 +279,8 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
                     </td>
                     {/* Stacked, not in a row: pills side by side are what
                         forces this column wide. */}
-                    <td className={CELL}>
-                      <span className="flex flex-col items-start gap-[6px]">
+                    <td data-label={t('speak.colType')} className={`${CELL} ${STACK}`}>
+                      <span className="flex flex-wrap items-center gap-[6px] lg:flex-col lg:items-start">
                         {/* What to do about it, added above what it costs.
                             Absent on an old result, which had no such field
                             and on which every row was a mistake. */}
@@ -271,20 +299,28 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
                         </span>
                       </span>
                     </td>
-                    <td className={`${CELL} leading-[1.5] text-[#334155]`}>
+                    <td data-label={t('speak.colWhy')}
+                      className={`${CELL} ${STACK} leading-[1.5] text-[#334155]`}>
                       {e.explanation}
                     </td>
                     {/* The rule, not the explanation again. Its own box
                         because it is the one thing on the row worth carrying
                         out of the page. */}
-                    <td className={CELL}>
-                      {e.remember && (
-                        <span className="block rounded-[10px] border border-[#e4d8ff] bg-[#f5f0ff] p-[10px] leading-[1.45] text-[#4c1d95]">
-                          <span className="mb-[3px] block font-black">{t('report.colRemember')}</span>
-                          {e.remember}
-                        </span>
-                      )}
-                    </td>
+                    {/* Only when at least one correction carries a rule.
+                        A grader that returned none — and every result graded
+                        before the field existed returned none — used to get a
+                        headed column of five empty cells, which reads as the
+                        page having lost something rather than as the grader
+                        never having said it. */}
+                    {hasRemember && (
+                      <td data-label={t('report.colRemember')} className={`${CELL} ${STACK}`}>
+                        {e.remember && (
+                          <span className="block rounded-[10px] border border-[#e4d8ff] bg-[#f5f0ff] p-[10px] leading-[1.45] text-[#4c1d95]">
+                            {e.remember}
+                          </span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

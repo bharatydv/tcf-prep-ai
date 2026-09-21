@@ -1,13 +1,12 @@
 import { Link } from 'react-router-dom';
 import {
   Sparkle, BookOpen, Question, ArrowRight, GraduationCap, Lightbulb, Compass,
-  FilePdf, DownloadSimple,
+  FilePdf,
 } from '@phosphor-icons/react';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
 import { PageIntro } from '../components/PageIntro';
-import { useAuth } from '../context/AuthContext';
-import { LEAD_OPEN_EVENT, downloadPath } from '../components/LeadMagnetModal';
+import { VOCAB_PATH } from './VocabularyGuide';
 
 /* Copy lives as translation keys and is resolved with t() at render time. */
 const RESOURCE_CARDS = [
@@ -18,16 +17,16 @@ const RESOURCE_CARDS = [
 
 const TIPS = ['res.tip1', 'res.tip2', 'res.tip3', 'res.tip4'];
 
-/* The free PDF. Signed in, it is a link; signed out, it is the same form the
-   exit-intent dialog shows — one component owns the offer, and this only asks
-   it to open. */
+/* The free PDF. A link to its own page rather than a download button.
+   The card used to be the whole resource: a button that either downloaded a
+   file or opened a form, with nothing in between for somebody who only wanted
+   to know what was in it — and nothing at all for a search engine, which
+   cannot open a form. The page it points at answers both. */
 function VocabularyCard() {
   const t = useT();
-  const { user } = useAuth();
-
-  const shell = 'group flex flex-col rounded-3xl border border-violet-200 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-6 text-left shadow-soft transition hover:-translate-y-1 hover:shadow-xl hover:shadow-violet-200/50';
-  const inside = (
-    <>
+  return (
+    <Link to={VOCAB_PATH}
+      className="group flex flex-col rounded-3xl border border-violet-200 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-6 text-left shadow-soft transition hover:-translate-y-1 hover:shadow-xl hover:shadow-violet-200/50">
       <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-primary shadow-sm">
         <FilePdf size={24} weight="fill" />
       </span>
@@ -36,20 +35,10 @@ function VocabularyCard() {
       </h3>
       <p className="mt-2 flex-1 text-sm leading-relaxed text-gray-600">{t('lead.cardDesc')}</p>
       <span className="mt-4 flex items-center gap-1.5 text-sm font-semibold text-primary">
-        <DownloadSimple size={15} weight="bold" className="shrink-0" />
-        {user ? t('lead.cardCtaReady') : t('lead.cardCta')}
+        <ArrowRight size={15} weight="bold" className="shrink-0" />
+        {t('lead.cardCta')}
       </span>
-    </>
-  );
-
-  if (user) {
-    return <a href={downloadPath()} download className={shell}>{inside}</a>;
-  }
-  return (
-    <button type="button" className={shell}
-      onClick={() => window.dispatchEvent(new Event(LEAD_OPEN_EVENT))}>
-      {inside}
-    </button>
+    </Link>
   );
 }
 

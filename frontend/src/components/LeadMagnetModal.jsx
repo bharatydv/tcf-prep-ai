@@ -49,7 +49,11 @@ import { useT } from '../i18n';
 /* The resource this offer is for. One slug, matching backend DOWNLOADS. */
 export const LEAD_RESOURCE = 'tcf-vocabulary';
 
-/* Opens the form from anywhere. The Resources card uses it. */
+/* Opens the form from anywhere, for a surface that wants to ask for the
+   file by name. Nothing dispatches it today — the Resources card now links to
+   /tcf-canada-vocabulary, which is a better answer to "what is in it?" than a
+   form is — but the door stays, because the alternative is every future
+   caller reaching into this component's state. */
 export const LEAD_OPEN_EVENT = 'prepfrancais:lead-open';
 
 const CAPTURED_KEY = 'prepfrancais.leadCaptured';
@@ -74,10 +78,10 @@ const TOUCH_DELAY_MS = 45000;
 const TOTAL_PAGES = 25;
 const FIRST_LOCKED = 5;
 const SLIDES = [
-  { page: 2, src: '/lead-preview/page-2.webp' },
-  { page: 3, src: '/lead-preview/page-3.webp' },
-  { page: 4, src: '/lead-preview/page-4.webp' },
-  { locked: true, src: '/lead-preview/locked.webp' },
+  { page: 2, src: '/tcf-vocabulary/page-2.webp' },
+  { page: 3, src: '/tcf-vocabulary/page-3.webp' },
+  { page: 4, src: '/tcf-vocabulary/page-4.webp' },
+  { locked: true, src: '/tcf-vocabulary/blur-5.webp' },
 ];
 
 /* Split out so the number can be dialled from one field and the country from
@@ -102,14 +106,13 @@ function lastSource() {
   catch { return 'exit_intent'; }
 }
 
-/* Whether the file has already been handed to this browser. Exported so the
-   Resources page can offer the direct link instead of the form. */
+/* Whether the file has already been handed to this browser. */
 export function alreadyCaptured() {
   return stored(CAPTURED_KEY) === '1';
 }
 
 /* The unsigned path. Serves anybody signed in; refuses everybody else, which
-   is why the form exists at all. */
+   is why the form exists at all. Used by the guide page's download button. */
 export function downloadPath(resource = LEAD_RESOURCE) {
   return `/api/downloads/${resource}`;
 }
@@ -157,9 +160,9 @@ export default function LeadMagnetModal() {
     if (typeof window === 'undefined') return undefined;
     if (/ReactSnap/i.test(window.navigator.userAgent)) return undefined;
 
-    /* Asked for by name — the Resources card — which overrides every rule
-       below. Those rules are about not interrupting somebody; a button
-       somebody pressed is not an interruption. */
+    /* Asked for by name, which overrides every rule below. Those rules are
+       about not interrupting somebody; a button somebody pressed is not an
+       interruption. */
     const onAsk = () => show('resources');
     window.addEventListener(LEAD_OPEN_EVENT, onAsk);
     const stop = () => window.removeEventListener(LEAD_OPEN_EVENT, onAsk);

@@ -102,6 +102,9 @@ anglicismes · améliorations C1 (style upgrades, which never count as errors)
 - /: what the platform does
 - /tef-tcf-writing-guide: long-form guide to the written exam
 - /blog: articles on exam technique and French grammar
+- /tcf-canada-vocabulary: the free 25-page Vocabulaire Thématique guide —
+  ten exam themes of French vocabulary with English on every line. The first
+  pages are readable without an account; the rest need a free one.
 - /recent-topics: real recent consignes with model answers
 - /practice: writing practice against official tâches
 - /speaking: speaking practice with the official timers
