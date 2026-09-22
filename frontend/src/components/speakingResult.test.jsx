@@ -218,7 +218,7 @@ describe('SpeakingResult', () => {
     page.unmount();
   });
 
-  it('hides the transcript for tâches 1 and 2', () => {
+  it('shows the transcript for tâches 1 and 2 too', () => {
     const host = document.createElement('div');
     document.body.appendChild(host);
     const root = createRoot(host);
@@ -229,8 +229,8 @@ describe('SpeakingResult', () => {
         </I18nProvider>,
       );
     });
-    expect(host.querySelector('[data-testid="transcript-diff"]')).toBeNull();
-    expect(host.querySelector('[data-testid="transcript-withheld"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="transcript-diff"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="transcript-withheld"]')).toBeNull();
     act(() => root.unmount());
   });
 });

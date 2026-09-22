@@ -120,17 +120,13 @@ export function rankErrors(errors) {
     });
 }
 
-/* Tâches 1 and 2 are practised without words on screen, so their results are
-   read the same way. Hiding the transcript during the conversation and then
-   printing it underneath the grade would be a rule that lasts ninety seconds.
-
-   The corrected rewrite goes with it: it is the same answer with the mistakes
-   taken out, so showing it hands back everything that was said. What stays is
-   the part that teaches — the criteria, the individual corrections, and the
-   suggestions — none of which reproduces the answer as a whole. */
-export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) {
+// `taskType` is still accepted so callers need not change; nothing reads it now.
+export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) { // eslint-disable-line no-unused-vars
   const t = useT();
-  const showTranscript = taskType !== 1 && taskType !== 2;
+  /* The transcript is shown for every tâche. It was withheld for tâches 1
+     and 2 for a while (heard, not read, like the exam), but a correction of a
+     sentence you cannot see is the part of the report that teaches least. */
+  const showTranscript = true;
   const [showAll, setShowAll] = useState(false);
   /* The candidate's own voice, for the left-hand column. Needs three things
      that are each allowed to be missing — a kept recording, word timings from
@@ -334,13 +330,6 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
             </button>
           )}
         </section>
-      )}
-
-      {!showTranscript && (
-        <div className="rounded-3xl border border-violet-100 bg-violet-50/40 p-5"
-          data-testid="transcript-withheld">
-          <p className="text-xs leading-relaxed text-gray-600">{t('speak.transcriptHidden')}</p>
-        </div>
       )}
 
       {/* The answer, twice, side by side.
