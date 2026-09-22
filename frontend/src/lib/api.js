@@ -59,6 +59,7 @@ api.interceptors.response.use(
     const status = error?.response?.status;
     const isRefreshCall = original?.url?.includes('/auth/refresh');
     if (status === 402) announcePaywall(paywallDetail(error));
+    if (status === 403) announceFinishSignup(finishSignupDetail(error));
     if (status !== 401 || !original || original._retried || isRefreshCall) {
       return Promise.reject(error);
     }
@@ -249,6 +250,37 @@ export function announcePaywall(detail) {
   if (!detail) return false;
   try {
     window.dispatchEvent(new CustomEvent(PAYWALL_EVENT, { detail }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* ------------------------------------------------- finishing an account ----
+   The same idea as the paywall, for the other thing that is not an error.
+
+   An account made by the free-PDF form has no password and an unconfirmed
+   address, so the server answers 403 account_incomplete to everything except
+   the download. That is not a failure to report but a form to show, and it is
+   announced here for the same reason the paywall is: whoever hit it was in
+   the middle of recording an answer, and navigating away would throw it out. */
+export const FINISH_SIGNUP_EVENT = 'prepfrancais:finish-signup';
+
+export function finishSignupDetail(errOrDetail, status) {
+  const isErr = errOrDetail?.response !== undefined || errOrDetail?.isAxiosError;
+  const code = isErr ? errOrDetail?.response?.status : status;
+  if (code !== 403) return null;
+  const detail = isErr ? errOrDetail?.response?.data?.detail : errOrDetail;
+  // Only this one. Admin-only routes answer 403 as well, and turning those
+  // into a sign-up form would be nonsense.
+  if (!detail || typeof detail !== 'object') return null;
+  return detail.code === 'account_incomplete' ? detail : null;
+}
+
+export function announceFinishSignup(detail) {
+  if (!detail) return false;
+  try {
+    window.dispatchEvent(new CustomEvent(FINISH_SIGNUP_EVENT, { detail }));
     return true;
   } catch {
     return false;

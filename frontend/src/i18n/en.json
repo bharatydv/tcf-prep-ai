@@ -1852,7 +1852,7 @@
     "formIntro": "Enter your details below and we'll give you access to the PDF.",
     "formCta": "Get the PDF",
     "formTitleIn": "The guide is yours",
-    "formIntroIn": "Your account already has it. Download the full 25 pages whenever you like.",
+    "formIntroIn": "Your account already has it. Read it here or download all 25 pages whenever you like.",
     "h1fr": "Vocabulaire Thématique",
     "download": "Download the PDF",
     "statPages": "pages",
@@ -1876,7 +1876,13 @@
     "nextGuide": "Read the writing guide",
     "formPrivacy": "Your information is used to deliver the PDF and keep you updated about prepfrancais.",
     "previewNote": "Pages 2 to 4, as they are in the file. The rest unlocks with the form.",
-    "previewNoteIn": "Pages 2 to 4, as they are in the file. The rest is yours to download."
+    "previewNoteIn": "Pages 2 to 4, as they are in the file. The rest is yours to download.",
+    "readCta": "Read all 25 pages",
+    "readTitle": "TCF Canada Vocabulary Guide",
+    "readBack": "Back to the guide",
+    "readNoAccess": "Get the guide first — the form takes a moment.",
+    "accountExists": "That address already has an account. Your download has started — sign in to keep your practice with it.",
+    "accountNew": "Your download has started, and your free account is open. You can set a password the first time you practise."
   },
   "words": {
     "cappedWarning": "At the real exam this length lowers the score however good the French is.",
@@ -1912,5 +1918,29 @@
     "topicsList": "Theme topics",
     "writeFirst": "Write something first.",
     "yourQuestion": "Your question"
+  },
+  "finish": {
+    "eyebrow": "One last step",
+    "title": "Finish your free account",
+    "passwordIntro": "You already gave us everything but a password. Choose one and your practice, corrections and scores are saved to your account.",
+    "password": "Choose a password",
+    "passwordPh": "At least 8 characters",
+    "confirm": "Type it again",
+    "passwordCta": "Save and send my code",
+    "saving": "Saving…",
+    "mismatch": "The two passwords are not the same.",
+    "fail": "That did not save. Please try again.",
+    "codeIntro": "We sent a 6-digit code to {{email}}. Type it here and you are done — no need to leave this page.",
+    "code": "6-digit code",
+    "codeCta": "Confirm my email",
+    "checking": "Checking…",
+    "codeSent": "Code sent. Check your inbox.",
+    "codeResent": "A new code is on its way.",
+    "codeNotSent": "We could not send the code. Try again in a moment.",
+    "codeFail": "That code is wrong or has expired. Ask for a new one.",
+    "resend": "Send me another code",
+    "doneTitle": "Your account is ready",
+    "doneBody": "That is everything. Carry on where you left off — your work is saved from now on.",
+    "doneCta": "Carry on"
   }
 }

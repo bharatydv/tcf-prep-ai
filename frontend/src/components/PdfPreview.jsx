@@ -18,7 +18,8 @@
  * one somebody looks at longest.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CaretLeft, CaretRight, DownloadSimple, Lock } from '@phosphor-icons/react';
+import { Link } from 'react-router-dom';
+import { CaretLeft, CaretRight, BookOpen, Lock } from '@phosphor-icons/react';
 import { useT } from '../i18n';
 
 export const TOTAL_PAGES = 25;
@@ -30,12 +31,13 @@ const SLIDES = [
   { locked: true, src: '/tcf-vocabulary/blur-5.webp' },
 ];
 
-/* `downloadUrl` is the file, for somebody entitled to it: given, the locked
-   slide offers the download instead of the padlock. `keys` wires the arrow
+/* `readPath` is where the rest of the guide is, for somebody entitled to
+   it: given, the last slide offers the way through instead of the padlock,
+   because a lock over pages you already own is a lie. `keys` wires the arrow
    keys, which a dialog wants (it owns the keyboard while open) and a page
    does not (a reader pressing → to scroll a table must not turn a page
    they are not looking at). `compact` is the dialog's height budget. */
-export default function PdfPreview({ downloadUrl = null, keys = false, compact = false, className = '' }) {
+export default function PdfPreview({ readPath = null, keys = false, compact = false, className = '' }) {
   const t = useT();
   const [slide, setSlide] = useState(0);
 
@@ -86,11 +88,11 @@ export default function PdfPreview({ downloadUrl = null, keys = false, compact =
           ))}
           {current.locked && (
             <div className="absolute inset-0 grid place-items-center bg-white/45 px-4 text-center">
-              {downloadUrl ? (
-                <a href={downloadUrl} download data-testid="preview-download"
+              {readPath ? (
+                <Link to={readPath} data-testid="preview-read"
                   className="btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600 !py-2.5 text-sm">
-                  <DownloadSimple size={16} weight="bold" /> {t('lead.doneCta')}
-                </a>
+                  <BookOpen size={16} weight="fill" /> {t('vocab.readCta')}
+                </Link>
               ) : (
                 <div>
                   <span className="mx-auto grid h-9 w-9 place-items-center rounded-full bg-primary text-white shadow-lg">

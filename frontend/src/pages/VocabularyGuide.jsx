@@ -13,7 +13,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
-  DownloadSimple, ArrowRight, BookOpen, Sparkle, CheckCircle,
+  DownloadSimple, ArrowRight, BookOpen, Sparkle, CheckCircle, Warning,
 } from '@phosphor-icons/react';
 import { useT } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
@@ -21,6 +21,7 @@ import { useAuth } from '../context/AuthContext';
 import LeadCaptureForm from '../components/LeadCaptureForm';
 import PdfPreview from '../components/PdfPreview';
 import { downloadPath } from '../lib/leads';
+import { VOCAB_READ_PATH } from './VocabularyReader';
 import GUIDE from '../content/vocabularyGuide.json';
 
 export const VOCAB_PATH = '/tcf-canada-vocabulary';
@@ -34,13 +35,29 @@ const FAQ = [1, 2, 3, 4, 5].map((n) => ({ q: `vocab.faq${n}q`, a: `vocab.faq${n}
 export default function VocabularyGuide() {
   const t = useT();
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const signedIn = Boolean(user);
 
-  /* What the form gave back: the signed URL for the file, once. Held so the
-     card can turn into a download rather than reloading the page, and so the
-     link survives a browser that blocked the automatic download. */
+  /* What the form gave back: the signed URL for the file, and what became
+     of the account. Held so the card can turn into a download rather than
+     reloading the page, and so the link survives a browser that blocked the
+     automatic download.
+
+     `account` is "new" or "resumed" when the form opened or reused an
+     unfinished account and signed them in, and "exists" when the address
+     already belongs to a real one — in which case nothing was touched and
+     the only honest thing to offer is the sign-in door. */
   const [done, setDone] = useState(null);
+
+  /* The session the form just opened, once /auth/me has caught up. The card
+     below reads `signedIn` for the download, and without this it would keep
+     showing the form to somebody who has just filled it in. */
+  const onDone = async (result) => {
+    setDone(result);
+    if (result.account === 'new' || result.account === 'resumed') {
+      await refreshUser();
+    }
+  };
 
   /* Article, FAQ and a breadcrumb. Handed to <Seo> rather than appended by an
      effect, so `npm run build:prerender` bakes it into the static HTML and
@@ -98,7 +115,12 @@ export default function VocabularyGuide() {
      of somebody who answered before, because the exit dialog's "never
      again" rule is about not interrupting the same person twice, and
      nobody arrives on this page by accident. */
-  const url = signedIn ? downloadPath() : (done && done.url);
+  /* Whose file it is. Signed in — including the account the form just
+     opened — it is the unsigned path; straight after the form it is the
+     signed URL the server handed back, which is what a browser that has not
+     yet re-read /auth/me can still use. */
+  const exists = done && done.account === 'exists';
+  const url = exists ? null : (signedIn ? downloadPath() : (done && done.url));
 
   return (
     <main className="overflow-x-clip bg-white">
@@ -141,9 +163,9 @@ export default function VocabularyGuide() {
 
             {/* ---- what it is ------------------------------------------- */}
             <div className="mx-auto w-full max-w-sm">
-              <PdfPreview downloadUrl={signedIn ? url : null} />
+              <PdfPreview readPath={url ? VOCAB_READ_PATH : null} />
               <p className="mt-3 text-center text-[12px] leading-snug text-gray-600">
-                {signedIn ? t('vocab.previewNoteIn') : t('vocab.previewNote')}
+                {url ? t('vocab.previewNoteIn') : t('vocab.previewNote')}
               </p>
               {/* What it is, in the three numbers somebody scans for. */}
               <dl className="mt-6 grid grid-cols-3 gap-3 text-center">
@@ -168,18 +190,45 @@ export default function VocabularyGuide() {
                       {done ? t('lead.doneTitle') : t('vocab.formTitleIn')}
                     </p>
                     <p className="mt-2 text-[14px] leading-relaxed text-gray-600">
-                      {done ? t('lead.doneBody') : t('vocab.formIntroIn')}
+                      {done ? t('vocab.accountNew') : t('vocab.formIntroIn')}
                     </p>
+                    <Link to={VOCAB_READ_PATH} data-testid="vocab-read"
+                      className={`${primary} mt-5 w-full justify-center !py-3.5`}>
+                      <BookOpen size={18} weight="fill" /> {t('vocab.readCta')}
+                    </Link>
                     <a href={url} download data-testid="vocab-download"
+                      className="btn-outline mt-3 w-full justify-center !py-3">
+                      <DownloadSimple size={17} weight="bold" /> {t('vocab.download')}
+                    </a>
+                  </div>
+                ) : exists ? (
+                  /* The address already has a real account. The file still
+                     went out — it was asked for and it costs nothing — but
+                     signing anybody in on an address they merely typed would
+                     be a way into somebody else's account, so the server did
+                     not, and neither does this. */
+                  <div className="text-center" data-testid="vocab-account-exists">
+                    <Warning size={34} weight="fill" className="mx-auto text-amber-500" />
+                    <p className="mt-2 font-heading text-xl font-extrabold text-gray-900">
+                      {t('lead.doneTitle')}
+                    </p>
+                    <p className="mt-2 text-[14px] leading-relaxed text-gray-600">
+                      {t('vocab.accountExists')}
+                    </p>
+                    <a href={done.url} download data-testid="vocab-download"
                       className={`${primary} mt-5 w-full justify-center !py-3.5`}>
                       <DownloadSimple size={18} weight="bold" /> {t('vocab.download')}
                     </a>
+                    <Link to="/login" state={back}
+                      className="btn-outline mt-3 w-full justify-center !py-3">
+                      {t('vocab.lockedLogin')}
+                    </Link>
                   </div>
                 ) : (
                   <>
                     <p className="font-heading text-2xl font-extrabold text-gray-900">{t('vocab.formTitle')}</p>
                     <p className="mt-2 text-[14px] leading-relaxed text-gray-600">{t('vocab.formIntro')}</p>
-                    <LeadCaptureForm className="mt-6" variant="page" onDone={setDone} ctaKey="vocab.formCta" />
+                    <LeadCaptureForm className="mt-6" variant="page" onDone={onDone} ctaKey="vocab.formCta" />
                     <p className="mt-3 text-center text-[11px] leading-snug text-gray-400">
                       {t('vocab.formPrivacy')}{' '}
                       <Link to="/privacy" className="font-semibold text-gray-500 underline-offset-2 hover:text-primary hover:underline">

@@ -39,7 +39,13 @@ export default function VerifyBanner() {
   // Either channel confirms the account. `verified` is the server's answer to
   // that; the email flag alone is the fallback for a bundle that predates it.
   const confirmed = user?.verified ?? user?.email_verified;
-  if (!user || confirmed || dismissed) return null;
+  /* An account the free-PDF form opened has no password yet, and nobody who
+     filled that form in asked to register. Telling them to "secure your
+     account" for something they have not done yet is a warning about a
+     decision they were never offered — and it duplicates the confirmation
+     the finish dialog asks for at the moment it starts to matter. */
+  const notYetRegistered = user?.password_set === false;
+  if (!user || confirmed || dismissed || notYetRegistered) return null;
 
   const dismiss = () => {
     setDismissed(true);
