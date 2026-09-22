@@ -654,9 +654,10 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
                   const meaning = typeof v === 'string' ? '' : v?.meaning;
                   if (!phrase) return null;
                   return (
-                    <span key={i} title={meaning || undefined}
+                    <span key={i}
                       className="rounded-full bg-fuchsia-50 px-2.5 py-1 text-[11px] font-medium text-fuchsia-700">
                       {phrase}
+                      {meaning && <span className="ml-1 font-normal text-fuchsia-500">· {meaning}</span>}
                     </span>
                   );
                 })}
