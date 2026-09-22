@@ -50,3 +50,26 @@ def test_the_key_matches_the_backfill_sql():
     assert "regexp_replace(phone, '\\D', '', 'g')" in sql
     assert "'^00', ''" in sql
     assert "'+' ||" in sql
+
+
+def test_the_guide_page_form_needs_no_number():
+    """Two forms, one schema.
+
+    The exit dialog sends a number; the guide page sends a level and no
+    number. Both must pass, or one of the two forms silently 422s and the
+    lead it was collecting never arrives.
+    """
+    dialog = server.LeadIn(name="Ana", email="ana@example.com",
+                           phone="+1 555 010 1234")
+    assert dialog.level == ""
+    page = server.LeadIn(name="Ana", email="ana@example.com", level="B1")
+    assert page.phone == ""
+    assert page.level == "B1"
+
+
+def test_a_number_that_is_given_is_still_checked():
+    # Optional is not the same as unchecked: "call me" was refused before and
+    # is refused now, because it cannot be dialled.
+    import pytest
+    with pytest.raises(Exception):
+        server.LeadIn(name="Ana", email="ana@example.com", phone="call me")

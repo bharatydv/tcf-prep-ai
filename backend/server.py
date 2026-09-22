@@ -610,6 +610,9 @@ class Lead(Base):
     # Which file was asked for, and which surface asked.
     resource: Mapped[str] = mapped_column(String(64), index=True)
     source: Mapped[str] = mapped_column(String(40), default="exit_intent")
+    # Self-declared French level ("A2", "B1", "not-sure"...), as the guide
+    # page's form asks it. Empty for the exit dialog, which does not ask.
+    level: Mapped[str] = mapped_column(String(16), default="")
     # Null until we first handed over the file / first offered the group. Two
     # timestamps rather than two flags: "when" answers "whether" as well, and
     # is what makes the admin list worth reading.
@@ -4860,7 +4863,13 @@ class NewsletterIn(BaseModel):
 
 
 class LeadIn(BaseModel):
-    """The three fields the download form asks for.
+    """What the download forms ask for.
+
+    Two forms feed this. The exit dialog asks for a WhatsApp number, which is
+    what the community invitation needs; the guide page asks for a French
+    level instead, because a page somebody chose to visit is not the place to
+    ask for a phone number. Either field may therefore be empty, and the
+    endpoint offers the group only when there is a number to invite.
 
     The phone number is kept as typed rather than normalised: people give it
     with a country code, spaces, brackets or none of those, and a regex that
@@ -4870,8 +4879,10 @@ class LeadIn(BaseModel):
 
     name: str = Field(min_length=2, max_length=120)
     email: EmailStr
-    phone: str = Field(min_length=6, max_length=32,
-                       pattern=r"^[0-9+()\-.\s]{6,32}$")
+    phone: str = Field(default="", max_length=32,
+                       pattern=r"^([0-9+()\-.\s]{6,32})?$")
+    level: str = Field(default="", max_length=16,
+                       pattern=r"^[A-Za-z0-9/ -]{0,16}$")
     # Which file. Validated against DOWNLOADS by the endpoint, not here, so an
     # unknown slug answers 404 rather than 422.
     resource: str = Field(default="tcf-vocabulary", max_length=64)
@@ -5801,6 +5812,8 @@ MIGRATIONS = [
     # this form before now, and stamping the old rows as invited would quietly
     # withhold the invitation from the people who asked first.
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS community_invited_at TIMESTAMPTZ",
+    # The guide page asks for a level instead of a number; see LeadIn.
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS level VARCHAR(16) DEFAULT ''",
 ]
 
 
@@ -6479,19 +6492,25 @@ async def capture_lead(body: LeadIn, db: AsyncSession = Depends(get_db),
                                   Lead.community_invited_at.isnot(None))
             .limit(1)))
 
+    level = body.level.strip()
     if existing is None:
         existing_before = False
         existing = Lead(name=name, email=email, phone=phone, phone_key=key,
                         resource=body.resource, source=body.source,
-                        created_at=now)
+                        level=level, created_at=now)
         db.add(existing)
     else:
         existing_before = True
         # Asking again is the same person with a possibly better number.
+        # "Possibly": a form that did not ask for one is not a person
+        # withdrawing theirs, so an empty answer never blanks a kept one.
         existing.name = name
         existing.email = email
-        existing.phone = phone
-        existing.phone_key = key
+        if phone:
+            existing.phone = phone
+            existing.phone_key = key
+        if level:
+            existing.level = level
         existing.updated_at = now
 
     # The file goes out every time. That is what was asked for, and what was
@@ -6502,7 +6521,7 @@ async def capture_lead(body: LeadIn, db: AsyncSession = Depends(get_db),
     # answer tells the browser to show — the join button, or the line saying
     # they are already in — and the timestamp is what makes the second ask
     # different from the first.
-    invite = not invited_before
+    invite = bool(key) and not invited_before
     if invite and existing.community_invited_at is None:
         existing.community_invited_at = now
 
@@ -6621,12 +6640,12 @@ async def admin_leads(resource: Optional[str] = None,
             base.order_by(Lead.created_at.desc()))).scalars().all()
         out = io.StringIO()
         w = csv.writer(out)
-        w.writerow(["name", "email", "phone", "whatsapp", "resource",
-                    "source", "pdf_sent_at", "community_invited_at",
-                    "created_at"])
+        w.writerow(["name", "email", "phone", "whatsapp", "level",
+                    "resource", "source", "pdf_sent_at",
+                    "community_invited_at", "created_at"])
         for r in rows:
             w.writerow([r.name, r.email, r.phone, r.phone_key or "",
-                        r.resource, r.source,
+                        r.level or "", r.resource, r.source,
                         r.pdf_sent_at.isoformat() if r.pdf_sent_at else "",
                         (r.community_invited_at.isoformat()
                          if r.community_invited_at else ""),
@@ -6645,6 +6664,7 @@ async def admin_leads(resource: Optional[str] = None,
     return {"total": total,
             "leads": [{"name": r.name, "email": r.email, "phone": r.phone,
                        "whatsapp": r.phone_key or "",
+                       "level": r.level or "",
                        "resource": r.resource, "source": r.source,
                        "pdf_sent_at": (r.pdf_sent_at.isoformat()
                                        if r.pdf_sent_at else None),

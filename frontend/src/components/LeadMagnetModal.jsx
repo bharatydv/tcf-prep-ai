@@ -43,46 +43,26 @@
  * a desktop and stack short on a phone, and the whole panel is sized to fit
  * inside the viewport rather than to scroll inside it.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  X, DownloadSimple, CheckCircle, FilePdf, CaretLeft, CaretRight, Lock, Check,
+  X, DownloadSimple, CheckCircle, FilePdf, Check,
 } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 import { CommunityInline } from './CommunityButton';
 import { HAS_COMMUNITY } from '../lib/community';
 import { useT } from '../i18n';
 import LeadCaptureForm from './LeadCaptureForm';
+import PdfPreview from './PdfPreview';
 import {
   alreadyCaptured, recentlyDismissed, rememberDismissed, rememberSource,
 } from '../lib/leads';
-
-/* The pages of the real file, as pictures — see backend/tools/lead_pdf_preview.py.
- *
- * It starts at page 2 because page 1 is the cover, and a cover proves nothing:
- * anybody can put a title on a page. Pages 2 to 4 are the tables of French
- * with English beside it, which is the entire argument for handing over a
- * phone number.
- *
- * The last one is page 5 with the blur baked into the file rather than
- * applied in CSS, so "the rest is locked" is true of what was sent and not
- * just of what is displayed. Everything from there to page 25 is behind the
- * form. */
-const TOTAL_PAGES = 25;
-const FIRST_LOCKED = 5;
-const SLIDES = [
-  { page: 2, src: '/tcf-vocabulary/page-2.webp' },
-  { page: 3, src: '/tcf-vocabulary/page-3.webp' },
-  { page: 4, src: '/tcf-vocabulary/page-4.webp' },
-  { locked: true, src: '/tcf-vocabulary/blur-5.webp' },
-];
 
 export default function LeadMagnetModal() {
   const t = useT();
   const { user, loading } = useAuth();
   const [open, setOpen] = useState(false);
   const [done, setDone] = useState(null);      // { url, community }, once given
-  const [slide, setSlide] = useState(0);
   /* Read by the listeners, which are registered once and must not be torn
      down and rebuilt every time a field is typed into. */
   const openRef = useRef(false);
@@ -118,34 +98,14 @@ export default function LeadMagnetModal() {
     return () => document.removeEventListener('mouseout', onOut);
   }, [loading, user, show]);
 
-  const step = useCallback((by) => {
-    setSlide((i) => (i + by + SLIDES.length) % SLIDES.length);
-  }, []);
-
   useEffect(() => {
     if (!open) return undefined;
-    /* The arrow keys move the preview, because a carousel that can only be
-       driven with the mouse is one most people never turn past the first
-       page — and the first page is the least convincing one. */
-    const onKey = (e) => {
-      if (e.key === 'Escape') setOpen(false);
-      else if (e.key === 'ArrowLeft') step(-1);
-      else if (e.key === 'ArrowRight') step(1);
-    };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, step]);
-
-  const current = SLIDES[slide];
-  const caption = useMemo(() => (
-    current.locked
-      ? t('lead.locked', { from: FIRST_LOCKED, to: TOTAL_PAGES })
-      : t('lead.page', { n: current.page, total: TOTAL_PAGES })
-  ), [current, t]);
+  }, [open]);
 
   if (!open) return null;
-
-  const arrow = 'absolute top-1/2 z-10 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full border border-violet-100 bg-white/95 text-primary shadow-md transition hover:bg-white disabled:opacity-40';
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/70 p-3 backdrop-blur-sm sm:p-4"
@@ -200,54 +160,7 @@ export default function LeadMagnetModal() {
           <div className="grid gap-3 overflow-y-auto px-4 py-3 sm:grid-cols-[17rem_1fr] sm:gap-5 sm:overflow-visible sm:px-5 sm:py-5">
 
             {/* ---- what is in the file ---------------------------------- */}
-            <div>
-              <div className="relative">
-                <button type="button" onClick={() => step(-1)} aria-label={t('lead.prev')}
-                  data-testid="lead-prev" className={`${arrow} left-2`}>
-                  <CaretLeft size={15} weight="bold" />
-                </button>
-
-                {/* Every page is in the DOM at once so an arrow press is
-                    instant rather than a spinner over a blank rectangle.
-                    They are four small pictures, not the 3 MB file. */}
-                <div className="relative aspect-[857/1109] max-h-[27vh] w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm sm:max-h-none">
-                  {SLIDES.map((s, i) => (
-                    <img key={s.src} src={s.src} alt=""
-                      aria-hidden={i !== slide}
-                      className={`absolute inset-0 h-full w-full object-cover object-top transition-opacity duration-200 ${i === slide ? 'opacity-100' : 'opacity-0'}`} />
-                  ))}
-                  {current.locked && (
-                    <div className="absolute inset-0 grid place-items-center bg-white/45 px-4 text-center">
-                      <div>
-                        <span className="mx-auto grid h-9 w-9 place-items-center rounded-full bg-primary text-white shadow-lg">
-                          <Lock size={17} weight="fill" />
-                        </span>
-                        <p className="mt-2 font-heading text-[13px] font-black leading-snug text-gray-900">
-                          {t('lead.lockedBody')}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <button type="button" onClick={() => step(1)} aria-label={t('lead.next')}
-                  data-testid="lead-next" className={`${arrow} right-2`}>
-                  <CaretRight size={15} weight="bold" />
-                </button>
-              </div>
-
-              <div className="mt-2 flex items-center justify-center gap-2">
-                <span className="text-[11px] font-semibold text-gray-500" data-testid="lead-caption">
-                  {caption}
-                </span>
-                <span className="flex gap-1">
-                  {SLIDES.map((s, i) => (
-                    <i key={s.src}
-                      className={`h-1.5 rounded-full transition-all ${i === slide ? 'w-3.5 bg-primary' : 'w-1.5 bg-violet-200'}`} />
-                  ))}
-                </span>
-              </div>
-            </div>
+            <PdfPreview keys compact />
 
             {/* ---- the ask ---------------------------------------------- */}
             <div className="flex flex-col">
