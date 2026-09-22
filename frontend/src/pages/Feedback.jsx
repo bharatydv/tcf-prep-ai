@@ -54,12 +54,6 @@ export default function Feedback() {
   // Spoken work reads its "text" back as a transcript, and may have the
   // recording behind it. Written work never does.
   const spoken = SPEAKING_SOURCES.has(sub.source || '');
-  /* Tâches 1 and 2 are practised and marked without the words on screen, and
-     this page is where a candidate comes back to them days later. Showing the
-     transcript here would undo the rule with one extra click.
-     The recording stays: hearing yourself is the whole point, and it is the
-     thing the real exam denies you rather than the thing it grades. */
-  const hideTranscript = spoken && (sub.task_type === 1 || sub.task_type === 2);
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-10">
@@ -123,16 +117,8 @@ export default function Feedback() {
             {t('fb.audioMissing')}
           </p>
         )}
-        {hideTranscript ? (
-          <p className="text-sm leading-relaxed text-gray-600" data-testid="transcript-withheld">
-            {t('speak.transcriptHidden')}
-          </p>
-        ) : (
-          <>
-            <ErrorHighlightedText text={sub.original_text} errors={sub.errors} />
-            <p className="mt-4 text-xs text-gray-400">{t('fb.hoverHint')}</p>
-          </>
-        )}
+        <ErrorHighlightedText text={sub.original_text} errors={sub.errors} />
+        <p className="mt-4 text-xs text-gray-400">{t('fb.hoverHint')}</p>
       </section>
 
       {Object.entries(byCat).map(([cat, errs]) => (

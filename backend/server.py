@@ -3121,7 +3121,7 @@ CEFR scoring (overall_score 0-100, tcf_level one of A1,A2,B1,B2,C1,C2):
 - A1 (5-19) A2 (20-39) B1 (40-54) B2 (55-69) C1 (70-84) C2 (85-100).
 If the answer does not address the task, cap the score at B1.
 
-suggestions: 3-5 concrete English tips to improve THIS spoken answer. vocabulary_suggestions: French words/phrases to enrich it, each paired with a short English meaning. You are grading a transcript, so do NOT comment on pronunciation or accent.
+suggestions: 3-5 concrete English tips to improve THIS spoken answer. vocabulary_suggestions: 4-8 French words/phrases to enrich it, EVERY one an object {"phrase", "meaning"} with a short English meaning - never a bare string. You are grading a transcript, so do NOT comment on pronunciation or accent.
 
 enhanced_version - THE CANDIDATE'S OWN ANSWER, rewritten as a strong version of itself, in French. This is a model they can hear and copy, so:
 - Keep THEIR ideas, THEIR examples and THEIR opinion. Rewriting it into a different, better answer teaches nothing, because it is no longer about anything they said.
@@ -3211,7 +3211,7 @@ CEFR scoring (overall_score 0-100, tcf_level one of A1,A2,B1,B2,C1,C2):
 - A1 (5-19) A2 (20-39) B1 (40-54) B2 (55-69) C1 (70-84) C2 (85-100).
 Cap the score at B1 if the candidate asked fewer than three real questions or missed most of the required information.
 
-suggestions: 3-5 concrete English tips for THIS conversation. vocabulary_suggestions: French phrases that would have made the asking more idiomatic, each paired with a short English meaning.
+suggestions: 3-5 concrete English tips for THIS conversation. vocabulary_suggestions: 4-8 French phrases that would have made the asking more idiomatic, EVERY one an object {"phrase", "meaning"} with a short English meaning - never a bare string.
 
 missed_questions - "What more could you have asked?". List 2 to 5 questions, WORD FOR WORD IN FRENCH and ready to speak, that the candidate did not ask but should have. Draw them first from the points the consigne lists and the candidate skipped, then from the openings the agent left unexplored (a price mentioned without conditions, a date without a deadline). Never repeat a question the candidate already asked, even in other words. If the candidate genuinely covered everything, return the questions that would have deepened the exchange rather than an empty list.
 
@@ -3268,7 +3268,7 @@ CEFR scoring (overall_score 0-100, tcf_level one of A1,A2,B1,B2,C1,C2):
 - A1 (5-19) A2 (20-39) B1 (40-54) B2 (55-69) C1 (70-84) C2 (85-100).
 Cap the score at B1 if the candidate answered only in short bare phrases with no development.
 
-suggestions: 3-5 concrete English tips for THIS interview. vocabulary_suggestions: French words and phrases that would have made the self-presentation richer, each paired with a short English meaning. You are grading a transcript, so do NOT comment on pronunciation or accent.
+suggestions: 3-5 concrete English tips for THIS interview. vocabulary_suggestions: 4-8 French words and phrases that would have made the self-presentation richer, EVERY one an object {"phrase", "meaning"} with a short English meaning - never a bare string. You are grading a transcript, so do NOT comment on pronunciation or accent.
 
 enhanced_version - THE CANDIDATE'S OWN ANSWER, rewritten as a strong version of itself, in French. This is a model they can hear and copy, so:
 - Keep THEIR ideas, THEIR examples and THEIR opinion. Rewriting it into a different, better answer teaches nothing, because it is no longer about anything they said.
@@ -3394,6 +3394,8 @@ async def grade_interaction(consigne: str, history: list, db=None,
         return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
                 "relevance_comment": "", "suggestions": [],
                 **({"ai_error": "bad_reply"} if reason == "bad_reply" else {})}
+    result["vocabulary_suggestions"] = await gloss_vocabulary(
+        provider, result.get("vocabulary_suggestions") or [])
     _, _, model = _grader_backend(provider)
     result["ai_provider"] = provider
     result["ai_model"] = model
@@ -3936,6 +3938,44 @@ def _short_lines(value) -> list:
     return [str(x).strip()[:200] for x in (value or []) if str(x).strip()][:4]
 
 
+VOCAB_GLOSS_SYSTEM = """You are a French-English dictionary. You receive a JSON list of French words or phrases. Return ONLY a JSON object mapping each phrase, exactly as given, to a short English meaning (2-8 words). No preamble, no markdown."""
+
+
+async def gloss_vocabulary(provider: str, items: list) -> list:
+    """Put an English meaning beside every vocabulary suggestion.
+
+    The graders are asked for {phrase, meaning} pairs, and the page shows the
+    meaning under the phrase. When a model hands back bare strings anyway the
+    page has a French word and nothing to say about it, which is the one
+    thing the section exists to avoid. One small follow-up call fills the
+    gaps; when it fails the phrases are kept as they were, so this can only
+    add.
+    """
+    missing = [x for x in (items or []) if isinstance(x, str)]
+    if not missing:
+        return items
+    raw = await _grade_with_provider(provider, VOCAB_GLOSS_SYSTEM,
+                                     json.dumps(missing, ensure_ascii=False))
+    if not raw:
+        return items
+    try:
+        glosses = _extract_json(raw)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not read vocabulary glosses: %s", exc)
+        return items
+    if not isinstance(glosses, dict):
+        return items
+    lowered = {str(k).strip().lower(): str(v).strip() for k, v in glosses.items()}
+    out = []
+    for x in items:
+        if isinstance(x, str):
+            meaning = lowered.get(x.strip().lower(), "")[:120]
+            out.append({"phrase": x, "meaning": meaning} if meaning else x)
+        else:
+            out.append(x)
+    return out
+
+
 async def analyze_speaking_with_ai(transcript: str, question: str, db=None,
                                    task_type: Optional[int] = None) -> dict:
     """Grade a spoken answer using the active provider (Admin overrides .env).
@@ -3965,6 +4005,8 @@ async def analyze_speaking_with_ai(transcript: str, question: str, db=None,
         return {**dict(FALLBACK_ANALYSIS), "answers_question": False,
                 "relevance_comment": "", "suggestions": [],
                 **({"ai_error": "bad_reply"} if reason == "bad_reply" else {})}
+    result["vocabulary_suggestions"] = await gloss_vocabulary(
+        provider, result.get("vocabulary_suggestions") or [])
     _, _, model = _grader_backend(provider)
     result["ai_provider"] = provider
     result["ai_model"] = model

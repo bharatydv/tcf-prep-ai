@@ -32,13 +32,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
-  DownloadSimple, Lock, ArrowRight, BookOpen, Sparkle, CircleNotch,
+  DownloadSimple, Lock, ArrowRight, BookOpen, Sparkle, CircleNotch, Check,
+  CheckCircle,
 } from '@phosphor-icons/react';
 import { useT } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import { downloadPath } from '../components/LeadMagnetModal';
+import LeadCaptureForm from '../components/LeadCaptureForm';
+import { downloadPath } from '../lib/leads';
 import GUIDE from '../content/vocabularyGuide.json';
 
 export const VOCAB_PATH = '/tcf-canada-vocabulary';
@@ -145,6 +147,41 @@ function GuideBlock({ block }) {
   );
 }
 
+/* The file, as an object on a desk.
+   Three sheets, the front one a real page of the guide rather than a drawn
+   rectangle: what is being offered is twenty-five pages of French with
+   English beside it, and a picture of that argues for it better than any
+   sentence does. Decoration, so it is hidden from a screen reader — the
+   pages themselves are further down the page, as text. */
+function PdfStack({ t }) {
+  return (
+    <div aria-hidden className="relative mx-auto w-[15rem] sm:w-[18rem] lg:w-[20rem]">
+      {/* The sheets underneath, fanned, so the stack has a thickness. */}
+      <div className="absolute inset-0 -rotate-6 rounded-xl border border-violet-100 bg-white/70 shadow-lg" />
+      <div className="absolute inset-0 -rotate-3 rounded-xl border border-violet-100 bg-white/85 shadow-lg" />
+      <div className="relative rotate-2 overflow-hidden rounded-xl border border-violet-100 bg-white shadow-2xl">
+        <div className="bg-gradient-to-br from-primary to-fuchsia-600 px-5 py-6 text-white">
+          <p className="text-[11px] font-black tracking-tight">
+            prepfran<span className="text-fuchsia-200">ç</span>ais
+          </p>
+          <p className="mt-8 text-[9px] font-bold uppercase tracking-[0.12em] text-white/70">
+            {t('vocab.badge')}
+          </p>
+          <p lang="fr" className="mt-1.5 font-heading text-[22px] font-extrabold leading-tight">
+            {t('vocab.h1fr')}
+          </p>
+        </div>
+        <img src="/tcf-vocabulary/page-2.webp" alt=""
+          width="857" height="1109" loading="eager" decoding="async"
+          className="block h-40 w-full object-cover object-top sm:h-48" />
+      </div>
+      <span className="absolute -bottom-3 -right-3 rotate-[-3deg] rounded-lg bg-fuchsia-600 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-white shadow-lg">
+        {t('vocab.free')}
+      </span>
+    </div>
+  );
+}
+
 /* Pages 5 to 24, for somebody signed in. Fetched rather than bundled — see
    the note at the top — and fetched once, when there is an account to fetch
    them for. */
@@ -167,6 +204,11 @@ export default function VocabularyGuide() {
   const { user } = useAuth();
   const signedIn = Boolean(user);
   const gated = useGatedBlocks(signedIn);
+
+  /* What the form gave back: the signed URL for the file, once. Held so the
+     card can turn into a download rather than reloading the page, and so the
+     link survives a browser that blocked the automatic download. */
+  const [done, setDone] = useState(null);
 
   /* Article, FAQ and a breadcrumb. Handed to <Seo> rather than appended by an
      effect, so `npm run build:prerender` bakes it into the static HTML and
@@ -214,24 +256,17 @@ export default function VocabularyGuide() {
     },
   ]), [t]);
 
-  /* The same button for everybody. Signed in, it is the file. Signed out, it
-     is the door to an account, with a word underneath saying so, and the
-     page remembered so that somebody who makes the account lands back here
-     rather than on the practice page wondering where the download went. */
   const primary = 'btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600';
   const back = { from: location };
-  const download = signedIn ? (
-    <a href={downloadPath()} download data-testid="vocab-download" className={primary}>
-      <DownloadSimple size={18} weight="bold" /> {t('vocab.download')}
-    </a>
-  ) : (
-    <span className="inline-flex flex-col items-center gap-1">
-      <Link to="/register" state={back} data-testid="vocab-download-locked" className={primary}>
-        <DownloadSimple size={18} weight="bold" /> {t('vocab.download')}
-      </Link>
-      <span className="text-[11px] font-semibold text-gray-500">{t('vocab.downloadNote')}</span>
-    </span>
-  );
+
+  /* Whether the card asks for the details or simply hands the file over.
+     Signed in, it hands it over: that account already carries the name, the
+     address and the number, and asking again for what we have is asking
+     twice. Signed out, it asks — and it keeps asking on a later visit, even
+     of somebody who answered before, because the exit dialog's "never
+     again" rule is about not interrupting the same person twice, and
+     nobody arrives on this page by accident. */
+  const url = signedIn ? downloadPath() : (done && done.url);
 
   const blocks = signedIn && gated.blocks
     ? joinContinuations(GUIDE.blocks, gated.blocks)
@@ -249,38 +284,105 @@ export default function VocabularyGuide() {
           <div className="absolute -left-24 top-6 h-56 w-56 rounded-full bg-fuchsia-300/30 blur-3xl" />
           <div className="absolute right-0 top-1/3 h-64 w-64 rounded-full bg-violet-400/25 blur-3xl" />
         </div>
-        <div className="relative mx-auto max-w-3xl px-4 pb-12 pt-10 text-center sm:px-6">
-          <nav aria-label="Breadcrumb" className="mb-4 text-left text-xs font-semibold text-gray-500">
+        <div className="relative mx-auto max-w-6xl px-4 pb-14 pt-8 sm:px-6">
+          <nav aria-label="Breadcrumb" className="mb-6 text-xs font-semibold text-gray-500">
             <Link to="/resources" className="hover:text-primary">{t('nav.resources')}</Link>
             <span className="px-1.5 text-gray-400">/</span>
             <span className="text-gray-700">{t('vocab.h1')}</span>
           </nav>
-          <span className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-white/80 px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider text-primary shadow-sm">
-            <Sparkle size={14} weight="fill" /> {t('vocab.badge')}
-          </span>
-          <h1 className="mt-4 font-heading text-4xl font-extrabold leading-tight tracking-tight text-gray-900 sm:text-5xl">
-            {t('vocab.h1')}{' '}
-            <span lang="fr" className="bg-gradient-to-r from-primary via-fuchsia-600 to-fuchsia-500 bg-clip-text text-transparent">
-              {t('vocab.h1fr')}
-            </span>
-          </h1>
-          <p className="mx-auto mt-4 max-w-2xl text-[15px] leading-relaxed text-gray-700">
-            {t('vocab.heroSub')}
-          </p>
-          <div className="mt-6 flex flex-wrap items-start justify-center gap-3">
-            {download}
-            <a href="#guide" className="btn-outline">{t('vocab.jump')}</a>
+
+          {/* The file on the left, the ask on the right.
+              The guide used to be introduced by a paragraph about itself
+              above a button; what it actually is — a stack of printed pages
+              of French with English beside it — is a picture, and the picture
+              makes the case in the time somebody spends deciding whether to
+              scroll. */}
+          <div className="grid items-center gap-10 lg:grid-cols-[minmax(0,1fr)_27rem] lg:gap-12">
+
+            {/* ---- what it is ------------------------------------------- */}
+            <div className="order-2 lg:order-1">
+              <PdfStack t={t} />
+              {/* What it is, in the three numbers somebody scans for. */}
+              <dl className="mx-auto mt-10 grid max-w-md grid-cols-3 gap-3 text-center">
+                {[[TOTAL_PAGES, t('vocab.statPages')], [GUIDE.themes.length, t('vocab.statThemes')],
+                  ['B2', t('vocab.statLevel')]].map(([value, label]) => (
+                    <div key={label} className="rounded-2xl border border-violet-200 bg-white/80 px-3 py-3">
+                      <dt className="font-heading text-xl font-extrabold text-primary">{value}</dt>
+                      <dd className="mt-0.5 text-[11px] leading-tight text-gray-600">{label}</dd>
+                    </div>
+                  ))}
+              </dl>
+            </div>
+
+            {/* ---- the ask ---------------------------------------------- */}
+            <div className="order-1 lg:order-2">
+              <span className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-white/80 px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider text-primary shadow-sm">
+                <Sparkle size={14} weight="fill" /> {t('vocab.badge')}
+              </span>
+              <h1 className="mt-4 font-heading text-4xl font-extrabold leading-[1.08] tracking-tight text-gray-900 sm:text-[2.9rem]">
+                {t('vocab.h1lead')}{' '}
+                <span className="whitespace-nowrap bg-gradient-to-r from-primary via-fuchsia-600 to-fuchsia-500 bg-clip-text text-transparent">
+                  {t('vocab.h1accent')}
+                </span>
+              </h1>
+              <p className="mt-4 text-[15px] leading-relaxed text-gray-700">{t('vocab.heroSub')}</p>
+              <ul className="mt-5 flex flex-wrap gap-2">
+                {['vocab.chip1', 'vocab.chip2', 'vocab.chip3'].map((k) => (
+                  <li key={k} className="rounded-lg border border-violet-200 bg-white/80 px-3 py-1.5 text-[12px] font-semibold text-gray-600">
+                    {t(k)}
+                  </li>
+                ))}
+              </ul>
+
+              <div className="mt-6 rounded-3xl border border-violet-200 bg-white p-6 shadow-xl shadow-violet-200/40"
+                data-testid="vocab-offer">
+                {url ? (
+                  <div className="text-center">
+                    {done && <CheckCircle size={34} weight="fill" className="mx-auto text-emerald-500" />}
+                    <p className="font-heading text-lg font-extrabold text-gray-900">
+                      {done ? t('lead.doneTitle') : t('vocab.formTitleIn')}
+                    </p>
+                    <p className="mt-1 text-[13px] leading-snug text-gray-600">
+                      {done ? t('lead.doneBody') : t('vocab.formIntroIn')}
+                    </p>
+                    <a href={url} download data-testid="vocab-download"
+                      className={`${primary} mt-4 w-full justify-center`}>
+                      <DownloadSimple size={18} weight="bold" /> {t('vocab.download')}
+                    </a>
+                  </div>
+                ) : (
+                  <>
+                    <p className="font-heading text-lg font-extrabold text-gray-900">{t('vocab.formTitle')}</p>
+                    <p className="mt-1 text-[13px] leading-snug text-gray-600">{t('vocab.formIntro')}</p>
+                    <ul className="mt-4 space-y-1.5">
+                      {['lead.b1', 'lead.b2', 'lead.b3'].map((k) => (
+                        <li key={k} className="flex items-start gap-1.5 text-[12px] leading-snug text-gray-600">
+                          <Check size={13} weight="bold" className="mt-0.5 shrink-0 text-primary" />
+                          {t(k)}
+                        </li>
+                      ))}
+                    </ul>
+                    <LeadCaptureForm className="mt-4" onDone={setDone} ctaKey="vocab.formCta" />
+                    <p className="mt-2 text-[10px] leading-snug text-gray-400">
+                      {t('lead.privacy')}{' '}
+                      <Link to="/privacy" className="font-semibold text-gray-500 underline-offset-2 hover:text-primary hover:underline">
+                        {t('consent.privacy')}
+                      </Link>
+                    </p>
+                  </>
+                )}
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] font-semibold">
+                <a href="#guide" className="text-primary hover:underline">{t('vocab.jump')}</a>
+                {!signedIn && (
+                  <Link to="/login" state={back} className="text-gray-500 hover:text-primary">
+                    {t('vocab.lockedLogin')}
+                  </Link>
+                )}
+              </div>
+            </div>
           </div>
-          {/* What it is, in the three numbers somebody scans for. */}
-          <dl className="mx-auto mt-7 grid max-w-lg grid-cols-3 gap-3 text-center">
-            {[[TOTAL_PAGES, t('vocab.statPages')], [GUIDE.themes.length, t('vocab.statThemes')],
-              ['B2', t('vocab.statLevel')]].map(([value, label]) => (
-                <div key={label} className="rounded-2xl border border-violet-200 bg-white/80 px-3 py-3">
-                  <dt className="font-heading text-xl font-extrabold text-primary">{value}</dt>
-                  <dd className="mt-0.5 text-[11px] leading-tight text-gray-600">{label}</dd>
-                </div>
-              ))}
-          </dl>
         </div>
       </section>
 

@@ -653,3 +653,55 @@ class TestAnUnreadableReplyIsReAsked:
         assert len(asked) == 1
         assert out["ai_unavailable"] is True
         assert m.ai_error_detail(out) == m.AI_UNAVAILABLE_DETAIL
+
+
+class TestVocabularyIsGlossed:
+    """Every vocabulary suggestion reaches the page with an English meaning.
+
+    The graders are asked for {phrase, meaning} pairs, but a model that hands
+    back bare strings left the "What more you can ask?" section showing French
+    words with nothing under them. A small follow-up call fills the gaps.
+    """
+
+    def _replies(self, monkeypatch, replies):
+        asked = []
+
+        async def fake_grade(provider, system_prompt, user_text):
+            asked.append((system_prompt, user_text))
+            return replies[len(asked) - 1]
+
+        monkeypatch.setattr(m, "_grade_with_provider", fake_grade)
+        monkeypatch.setattr(m, "_grader_backend",
+                            lambda provider: (None, "key", "model-x"))
+        return asked
+
+    async def test_bare_strings_get_a_meaning_from_a_second_call(self, monkeypatch):
+        graded = json.dumps({**SPOKEN_OK,
+                             "vocabulary_suggestions": ["néanmoins", "en revanche"]})
+        asked = self._replies(monkeypatch, [
+            graded, '{"néanmoins": "nevertheless", "en revanche": "on the other hand"}'])
+        out = await m.analyze_speaking_with_ai(LONG_ANSWER, "Parlez de vous",
+                                               task_type=3)
+        assert len(asked) == 2
+        assert asked[1][0] == m.VOCAB_GLOSS_SYSTEM
+        assert out["vocabulary_suggestions"] == [
+            {"phrase": "néanmoins", "meaning": "nevertheless"},
+            {"phrase": "en revanche", "meaning": "on the other hand"}]
+
+    async def test_pairs_are_not_asked_about_again(self, monkeypatch):
+        graded = json.dumps({**SPOKEN_OK, "vocabulary_suggestions": [
+            {"phrase": "néanmoins", "meaning": "nevertheless"}]})
+        asked = self._replies(monkeypatch, [graded])
+        out = await m.grade_interaction("Entretien dirige", [
+            {"role": "agent", "text": "Presentez-vous."},
+            {"role": "candidate", "text": LONG_ANSWER}], task_type=1)
+        assert len(asked) == 1
+        assert out["vocabulary_suggestions"][0]["meaning"] == "nevertheless"
+
+    async def test_a_failed_gloss_keeps_the_phrases(self, monkeypatch):
+        graded = json.dumps({**SPOKEN_OK, "vocabulary_suggestions": ["néanmoins"]})
+        self._replies(monkeypatch, [graded, None])
+        out = await m.analyze_speaking_with_ai(LONG_ANSWER, "Parlez de vous",
+                                               task_type=3)
+        assert out["vocabulary_suggestions"] == ["néanmoins"]
+        assert "ai_unavailable" not in out

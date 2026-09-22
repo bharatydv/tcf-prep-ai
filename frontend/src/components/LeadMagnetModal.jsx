@@ -48,21 +48,14 @@ import { Link } from 'react-router-dom';
 import {
   X, DownloadSimple, CheckCircle, FilePdf, CaretLeft, CaretRight, Lock, Check,
 } from '@phosphor-icons/react';
-import { api, errMsg } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { CommunityInline } from './CommunityButton';
 import { HAS_COMMUNITY } from '../lib/community';
 import { useT } from '../i18n';
-
-/* The resource this offer is for. One slug, matching backend DOWNLOADS. */
-export const LEAD_RESOURCE = 'tcf-vocabulary';
-
-const CAPTURED_KEY = 'prepfrancais.leadCaptured';
-const DISMISSED_KEY = 'prepfrancais.leadDismissed';
-const SOURCE_KEY = 'prepfrancais.leadSource';
-
-/* How long a closed dialog stays closed. */
-const DISMISSED_FOR_MS = 24 * 60 * 60 * 1000;
+import LeadCaptureForm from './LeadCaptureForm';
+import {
+  alreadyCaptured, recentlyDismissed, rememberDismissed, rememberSource,
+} from '../lib/leads';
 
 /* The pages of the real file, as pictures — see backend/tools/lead_pdf_preview.py.
  *
@@ -84,81 +77,12 @@ const SLIDES = [
   { locked: true, src: '/tcf-vocabulary/blur-5.webp' },
 ];
 
-/* Split out so the number can be dialled from one field and the country from
-   another: a single box collects a national number from most people, and a
-   national number is not something anyone can send a WhatsApp invite to. */
-const DEFAULT_CODE = '+1';
-
-function stored(key) {
-  try { return window.localStorage.getItem(key); } catch { return null; }
-}
-
-function remember(key) {
-  try { window.localStorage.setItem(key, '1'); } catch { /* private mode */ }
-}
-
-/* The moment it was closed, so that the day can be counted from it. */
-function rememberDismissed() {
-  try { window.localStorage.setItem(DISMISSED_KEY, String(Date.now())); }
-  catch { /* private mode */ }
-}
-
-/* Closed less than a day ago. The value used to be a bare '1' — meaning
-   "ever" — and a browser still carrying one is read as closed today rather
-   than as never closed, so the change does not open the dialog on everybody
-   who had already said no. */
-function recentlyDismissed() {
-  const raw = stored(DISMISSED_KEY);
-  if (!raw) return false;
-  const at = Number(raw);
-  if (!Number.isFinite(at) || at < DISMISSED_FOR_MS) return true;
-  return Date.now() - at < DISMISSED_FOR_MS;
-}
-
-function rememberSource(value) {
-  try { window.sessionStorage.setItem(SOURCE_KEY, value); } catch { /* ditto */ }
-}
-
-function lastSource() {
-  try { return window.sessionStorage.getItem(SOURCE_KEY) || 'exit_intent'; }
-  catch { return 'exit_intent'; }
-}
-
-/* Whether the file has already been handed to this browser. */
-export function alreadyCaptured() {
-  return stored(CAPTURED_KEY) === '1';
-}
-
-/* The unsigned path. Serves anybody signed in; refuses everybody else, which
-   is why the form exists at all. Used by the guide page's download button. */
-export function downloadPath(resource = LEAD_RESOURCE) {
-  return `/api/downloads/${resource}`;
-}
-
-/* Start the download without leaving the page. A plain <a download> click
-   rather than fetch+blob, so the browser's own download UI handles it and a
-   3 MB PDF never sits in a tab's memory. */
-function startDownload(url) {
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = '';
-  a.rel = 'noopener';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
-
 export default function LeadMagnetModal() {
   const t = useT();
   const { user, loading } = useAuth();
   const [open, setOpen] = useState(false);
   const [done, setDone] = useState(null);      // { url, community }, once given
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
   const [slide, setSlide] = useState(0);
-  const [form, setForm] = useState({
-    name: '', email: '', code: DEFAULT_CODE, phone: '',
-  });
   /* Read by the listeners, which are registered once and must not be torn
      down and rebuilt every time a field is typed into. */
   const openRef = useRef(false);
@@ -167,7 +91,6 @@ export default function LeadMagnetModal() {
   const show = useCallback((source) => {
     if (openRef.current) return;
     rememberSource(source);
-    setError('');
     setOpen(true);
     /* Counted as shown the moment it is shown, not when it is answered: a
        visitor who closes the tab over the dialog has still seen the offer. */
@@ -222,38 +145,6 @@ export default function LeadMagnetModal() {
 
   if (!open) return null;
 
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
-
-  const submit = async (e) => {
-    e.preventDefault();
-    if (busy) return;
-    setBusy(true);
-    setError('');
-    try {
-      /* The two boxes are joined here rather than on the server, so what is
-         stored is what somebody would read back to you off their phone. */
-      const code = form.code.trim().startsWith('+')
-        ? form.code.trim() : `+${form.code.trim()}`;
-      const { data } = await api.post('/leads', {
-        name: form.name.trim(),
-        email: form.email.trim(),
-        phone: `${code} ${form.phone.trim()}`.trim(),
-        resource: LEAD_RESOURCE,
-        source: lastSource(),
-      });
-      remember(CAPTURED_KEY);
-      setDone({ url: data.url, community: data.community !== false });
-      startDownload(data.url);
-    } catch (err) {
-      /* The dialog stays open with the values still in it. A lead form that
-         clears itself on a failed submit is a lead that never arrives. */
-      setError(errMsg(err, t('lead.fail')));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const field = 'w-full rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-primary focus:ring-2 focus:ring-violet-200';
   const arrow = 'absolute top-1/2 z-10 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full border border-violet-100 bg-white/95 text-primary shadow-md transition hover:bg-white disabled:opacity-40';
 
   return (
@@ -374,35 +265,7 @@ export default function LeadMagnetModal() {
                 ))}
               </ul>
 
-              <form onSubmit={submit} className="mt-3 space-y-2" data-testid="lead-form">
-                <input className={field} value={form.name} onChange={set('name')}
-                  name="name" autoComplete="given-name" required minLength={2} maxLength={120}
-                  placeholder={t('lead.name')} aria-label={t('lead.name')} />
-                <input className={field} value={form.email} onChange={set('email')}
-                  name="email" type="email" autoComplete="email" required maxLength={255}
-                  placeholder={t('lead.email')} aria-label={t('lead.email')} />
-                {/* The country code has its own box because without one the
-                    number cannot be written to: most people type the national
-                    number they say out loud, and a WhatsApp invite needs the
-                    international one. Two boxes ask for it without anybody
-                    having to be told. */}
-                <div className="grid grid-cols-[4.5rem_1fr] gap-2">
-                  {/* Escaped for `v`-mode: see the note on the registration
-                      form. An unescaped ( makes Chrome discard the pattern. */}
-                  <input className={`${field} text-center`} value={form.code} onChange={set('code')}
-                    name="code" inputMode="tel" required maxLength={5} pattern="\+?[0-9]{1,4}"
-                    aria-label={t('lead.code')} />
-                  <input className={field} value={form.phone} onChange={set('phone')}
-                    name="phone" type="tel" autoComplete="tel-national" required
-                    minLength={6} maxLength={20} pattern="[0-9\(\)\.\-\s]{6,20}"
-                    placeholder={t('lead.phone')} aria-label={t('lead.phone')} />
-                </div>
-                {error && <p className="text-xs font-semibold text-rose-600">{error}</p>}
-                <button type="submit" disabled={busy}
-                  className="btn-primary w-full !bg-gradient-to-r !from-primary !to-fuchsia-600 !py-2.5 text-sm disabled:opacity-60">
-                  {busy ? t('lead.sending') : t('lead.cta')}
-                </button>
-              </form>
+              <LeadCaptureForm className="mt-3" onDone={setDone} />
 
               <p className="mt-2 text-[10px] leading-snug text-gray-400">
                 {t('lead.privacy')}{' '}
