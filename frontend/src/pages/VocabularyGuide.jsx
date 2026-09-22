@@ -32,14 +32,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
-  DownloadSimple, Lock, ArrowRight, BookOpen, Sparkle, CircleNotch, Check,
-  CheckCircle,
+  DownloadSimple, Lock, ArrowRight, BookOpen, Sparkle, CircleNotch, CheckCircle,
 } from '@phosphor-icons/react';
 import { useT } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import LeadCaptureForm from '../components/LeadCaptureForm';
+import PdfPreview from '../components/PdfPreview';
 import { downloadPath } from '../lib/leads';
 import GUIDE from '../content/vocabularyGuide.json';
 
@@ -147,41 +147,6 @@ function GuideBlock({ block }) {
   );
 }
 
-/* The file, as an object on a desk.
-   Three sheets, the front one a real page of the guide rather than a drawn
-   rectangle: what is being offered is twenty-five pages of French with
-   English beside it, and a picture of that argues for it better than any
-   sentence does. Decoration, so it is hidden from a screen reader — the
-   pages themselves are further down the page, as text. */
-function PdfStack({ t }) {
-  return (
-    <div aria-hidden className="relative mx-auto w-[15rem] sm:w-[18rem] lg:w-[20rem]">
-      {/* The sheets underneath, fanned, so the stack has a thickness. */}
-      <div className="absolute inset-0 -rotate-6 rounded-xl border border-violet-100 bg-white/70 shadow-lg" />
-      <div className="absolute inset-0 -rotate-3 rounded-xl border border-violet-100 bg-white/85 shadow-lg" />
-      <div className="relative rotate-2 overflow-hidden rounded-xl border border-violet-100 bg-white shadow-2xl">
-        <div className="bg-gradient-to-br from-primary to-fuchsia-600 px-5 py-6 text-white">
-          <p className="text-[11px] font-black tracking-tight">
-            prepfran<span className="text-fuchsia-200">ç</span>ais
-          </p>
-          <p className="mt-8 text-[9px] font-bold uppercase tracking-[0.12em] text-white/70">
-            {t('vocab.badge')}
-          </p>
-          <p lang="fr" className="mt-1.5 font-heading text-[22px] font-extrabold leading-tight">
-            {t('vocab.h1fr')}
-          </p>
-        </div>
-        <img src="/tcf-vocabulary/page-2.webp" alt=""
-          width="857" height="1109" loading="eager" decoding="async"
-          className="block h-40 w-full object-cover object-top sm:h-48" />
-      </div>
-      <span className="absolute -bottom-3 -right-3 rotate-[-3deg] rounded-lg bg-fuchsia-600 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-white shadow-lg">
-        {t('vocab.free')}
-      </span>
-    </div>
-  );
-}
-
 /* Pages 5 to 24, for somebody signed in. Fetched rather than bundled — see
    the note at the top — and fetched once, when there is an account to fetch
    them for. */
@@ -284,26 +249,41 @@ export default function VocabularyGuide() {
           <div className="absolute -left-24 top-6 h-56 w-56 rounded-full bg-fuchsia-300/30 blur-3xl" />
           <div className="absolute right-0 top-1/3 h-64 w-64 rounded-full bg-violet-400/25 blur-3xl" />
         </div>
-        <div className="relative mx-auto max-w-6xl px-4 pb-14 pt-8 sm:px-6">
+        <div className="relative mx-auto max-w-5xl px-4 pb-14 pt-8 sm:px-6">
           <nav aria-label="Breadcrumb" className="mb-6 text-xs font-semibold text-gray-500">
             <Link to="/resources" className="hover:text-primary">{t('nav.resources')}</Link>
             <span className="px-1.5 text-gray-400">/</span>
             <span className="text-gray-700">{t('vocab.h1')}</span>
           </nav>
 
+          <div className="text-center">
+            <span className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-white/80 px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider text-primary shadow-sm">
+              <Sparkle size={14} weight="fill" /> {t('vocab.badge')}
+            </span>
+            <h1 className="mx-auto mt-4 max-w-3xl font-heading text-4xl font-extrabold leading-[1.08] tracking-tight text-gray-900 sm:text-5xl">
+              {t('vocab.h1lead')}{' '}
+              <span className="whitespace-nowrap bg-gradient-to-r from-primary via-fuchsia-600 to-fuchsia-500 bg-clip-text text-transparent">
+                {t('vocab.h1accent')}
+              </span>
+            </h1>
+          </div>
+
           {/* The file on the left, the ask on the right.
-              The guide used to be introduced by a paragraph about itself
-              above a button; what it actually is — a stack of printed pages
-              of French with English beside it — is a picture, and the picture
-              makes the case in the time somebody spends deciding whether to
-              scroll. */}
-          <div className="grid items-center gap-10 lg:grid-cols-[minmax(0,1fr)_27rem] lg:gap-12">
+              The same pages the exit dialog turns, because what is being
+              offered is twenty-five pages of French with English beside it,
+              and three real ones argue for it better than a sentence about
+              them. Past page 4 the picture is blurred in the file itself,
+              so what a signed-out visitor sees is what was sent. */}
+          <div className="mt-10 grid items-start gap-10 lg:grid-cols-2 lg:gap-14">
 
             {/* ---- what it is ------------------------------------------- */}
-            <div className="order-2 lg:order-1">
-              <PdfStack t={t} />
+            <div className="mx-auto w-full max-w-sm">
+              <PdfPreview downloadUrl={signedIn ? url : null} />
+              <p className="mt-3 text-center text-[12px] leading-snug text-gray-600">
+                {signedIn ? t('vocab.previewNoteIn') : t('vocab.previewNote')}
+              </p>
               {/* What it is, in the three numbers somebody scans for. */}
-              <dl className="mx-auto mt-10 grid max-w-md grid-cols-3 gap-3 text-center">
+              <dl className="mt-6 grid grid-cols-3 gap-3 text-center">
                 {[[TOTAL_PAGES, t('vocab.statPages')], [GUIDE.themes.length, t('vocab.statThemes')],
                   ['B2', t('vocab.statLevel')]].map(([value, label]) => (
                     <div key={label} className="rounded-2xl border border-violet-200 bg-white/80 px-3 py-3">
@@ -315,56 +295,30 @@ export default function VocabularyGuide() {
             </div>
 
             {/* ---- the ask ---------------------------------------------- */}
-            <div className="order-1 lg:order-2">
-              <span className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-white/80 px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider text-primary shadow-sm">
-                <Sparkle size={14} weight="fill" /> {t('vocab.badge')}
-              </span>
-              <h1 className="mt-4 font-heading text-4xl font-extrabold leading-[1.08] tracking-tight text-gray-900 sm:text-[2.9rem]">
-                {t('vocab.h1lead')}{' '}
-                <span className="whitespace-nowrap bg-gradient-to-r from-primary via-fuchsia-600 to-fuchsia-500 bg-clip-text text-transparent">
-                  {t('vocab.h1accent')}
-                </span>
-              </h1>
-              <p className="mt-4 text-[15px] leading-relaxed text-gray-700">{t('vocab.heroSub')}</p>
-              <ul className="mt-5 flex flex-wrap gap-2">
-                {['vocab.chip1', 'vocab.chip2', 'vocab.chip3'].map((k) => (
-                  <li key={k} className="rounded-lg border border-violet-200 bg-white/80 px-3 py-1.5 text-[12px] font-semibold text-gray-600">
-                    {t(k)}
-                  </li>
-                ))}
-              </ul>
-
-              <div className="mt-6 rounded-3xl border border-violet-200 bg-white p-6 shadow-xl shadow-violet-200/40"
+            <div className="mx-auto w-full max-w-md lg:max-w-none">
+              <div className="rounded-3xl border border-violet-200 bg-white p-6 shadow-xl shadow-violet-200/40 sm:p-8"
                 data-testid="vocab-offer">
                 {url ? (
                   <div className="text-center">
                     {done && <CheckCircle size={34} weight="fill" className="mx-auto text-emerald-500" />}
-                    <p className="font-heading text-lg font-extrabold text-gray-900">
+                    <p className="font-heading text-2xl font-extrabold text-gray-900">
                       {done ? t('lead.doneTitle') : t('vocab.formTitleIn')}
                     </p>
-                    <p className="mt-1 text-[13px] leading-snug text-gray-600">
+                    <p className="mt-2 text-[14px] leading-relaxed text-gray-600">
                       {done ? t('lead.doneBody') : t('vocab.formIntroIn')}
                     </p>
                     <a href={url} download data-testid="vocab-download"
-                      className={`${primary} mt-4 w-full justify-center`}>
+                      className={`${primary} mt-5 w-full justify-center !py-3.5`}>
                       <DownloadSimple size={18} weight="bold" /> {t('vocab.download')}
                     </a>
                   </div>
                 ) : (
                   <>
-                    <p className="font-heading text-lg font-extrabold text-gray-900">{t('vocab.formTitle')}</p>
-                    <p className="mt-1 text-[13px] leading-snug text-gray-600">{t('vocab.formIntro')}</p>
-                    <ul className="mt-4 space-y-1.5">
-                      {['lead.b1', 'lead.b2', 'lead.b3'].map((k) => (
-                        <li key={k} className="flex items-start gap-1.5 text-[12px] leading-snug text-gray-600">
-                          <Check size={13} weight="bold" className="mt-0.5 shrink-0 text-primary" />
-                          {t(k)}
-                        </li>
-                      ))}
-                    </ul>
-                    <LeadCaptureForm className="mt-4" onDone={setDone} ctaKey="vocab.formCta" />
-                    <p className="mt-2 text-[10px] leading-snug text-gray-400">
-                      {t('lead.privacy')}{' '}
+                    <p className="font-heading text-2xl font-extrabold text-gray-900">{t('vocab.formTitle')}</p>
+                    <p className="mt-2 text-[14px] leading-relaxed text-gray-600">{t('vocab.formIntro')}</p>
+                    <LeadCaptureForm className="mt-6" variant="page" onDone={setDone} ctaKey="vocab.formCta" />
+                    <p className="mt-3 text-center text-[11px] leading-snug text-gray-400">
+                      {t('vocab.formPrivacy')}{' '}
                       <Link to="/privacy" className="font-semibold text-gray-500 underline-offset-2 hover:text-primary hover:underline">
                         {t('consent.privacy')}
                       </Link>
@@ -373,7 +327,7 @@ export default function VocabularyGuide() {
                 )}
               </div>
 
-              <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] font-semibold">
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-[13px] font-semibold">
                 <a href="#guide" className="text-primary hover:underline">{t('vocab.jump')}</a>
                 {!signedIn && (
                   <Link to="/login" state={back} className="text-gray-500 hover:text-primary">
