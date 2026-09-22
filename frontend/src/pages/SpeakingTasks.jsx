@@ -660,9 +660,17 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
             <div className="rounded-2xl border border-violet-100 bg-white p-4">
               <p className="text-xs font-bold text-gray-900">{t('st.vocabulary')}</p>
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {result.vocabulary_suggestions.map((v, i) => (
-                  <span key={i} className="rounded-full bg-fuchsia-50 px-2.5 py-1 text-[11px] font-medium text-fuchsia-700">{v}</span>
-                ))}
+                {result.vocabulary_suggestions.map((v, i) => {
+                  const phrase = typeof v === 'string' ? v : v?.phrase;
+                  const meaning = typeof v === 'string' ? '' : v?.meaning;
+                  if (!phrase) return null;
+                  return (
+                    <span key={i} title={meaning || undefined}
+                      className="rounded-full bg-fuchsia-50 px-2.5 py-1 text-[11px] font-medium text-fuchsia-700">
+                      {phrase}
+                    </span>
+                  );
+                })}
               </div>
             </div>
           )}

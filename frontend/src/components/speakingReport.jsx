@@ -370,11 +370,17 @@ export function Vocabulary({ items }) {
   return (
     <Panel title={t('report.vocab')} description={t('report.vocabSub')} testId="vocabulary">
       <div className="grid gap-[9px] sm:grid-cols-2">
-        {items.map((v, i) => (
-          <div key={i} className={`rounded-[11px] border border-[#e7e2f2] px-[12px] py-[11px]`}>
-            <p className="text-[13px] font-extrabold text-[#6d28d9]">{v}</p>
-          </div>
-        ))}
+        {items.map((v, i) => {
+          const phrase = typeof v === 'string' ? v : v?.phrase;
+          const meaning = typeof v === 'string' ? '' : v?.meaning;
+          if (!phrase) return null;
+          return (
+            <div key={i} className={`rounded-[11px] border border-[#e7e2f2] px-[12px] py-[11px]`}>
+              <p className="text-[13px] font-extrabold text-[#6d28d9]">{phrase}</p>
+              {meaning && <p className="mt-[3px] text-[11px] text-[#64748b]">{meaning}</p>}
+            </div>
+          );
+        })}
       </div>
     </Panel>
   );

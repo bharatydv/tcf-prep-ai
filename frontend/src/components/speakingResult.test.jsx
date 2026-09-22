@@ -235,9 +235,26 @@ describe('SpeakingResult', () => {
   });
 });
 
+/* ProfileCards no longer appears on the speaking result page — the grid
+   below it said the same thing in more detail — but the component itself
+   stays, tested on its own rather than through the full page. */
+function mountBare(node) {
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  act(() => {
+    root.render(<I18nProvider>{node}</I18nProvider>);
+  });
+  return {
+    host,
+    find: (id) => host.querySelector(`[data-testid="${id}"]`),
+    unmount: () => act(() => root.unmount()),
+  };
+}
+
 describe('the speaking profile cards', () => {
   it('draws one card per criterion the grader marked', () => {
-    const page = mount(RESULT);
+    const page = mountBare(<ProfileCards criteria={RESULT.criteria} />);
     const cards = page.find('profile-cards');
     expect(cards).not.toBeNull();
     // Three criteria in the fixture; phonology is absent, as it is whenever
@@ -249,29 +266,23 @@ describe('the speaking profile cards', () => {
   });
 
   it('leaves out a criterion nobody assessed rather than scoring it zero', () => {
-    const page = mount({ ...RESULT, criteria: { linguistic: { score: 45, comment: 'x' } } });
+    const page = mountBare(
+      <ProfileCards criteria={{ linguistic: { score: 45, comment: 'x' } }} />,
+    );
     expect(page.find('profile-cards').children).toHaveLength(1);
     page.unmount();
   });
 
   it('draws nothing at all when no criterion was marked', () => {
-    const page = mount({ ...RESULT, criteria: {} });
+    const page = mountBare(<ProfileCards criteria={{}} />);
     expect(page.find('profile-cards')).toBeNull();
-    // and the rest of the page survives
-    expect(page.find('result-hero')).not.toBeNull();
-    page.unmount();
-  });
-
-  it('keeps the detailed grid underneath the cards', () => {
-    const page = mount(RESULT);
-    const html = page.host.innerHTML;
-    expect(html.indexOf('data-testid="profile-cards"'))
-      .toBeLessThan(html.indexOf('data-testid="speaking-grid"'));
     page.unmount();
   });
 
   it('survives a criterion whose score is missing', () => {
-    const page = mount({ ...RESULT, criteria: { linguistic: { comment: 'no score' } } });
+    const page = mountBare(
+      <ProfileCards criteria={{ linguistic: { comment: 'no score' } }} />,
+    );
     expect(page.find('profile-cards')).toBeNull();
     page.unmount();
   });
