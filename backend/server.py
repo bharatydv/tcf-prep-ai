@@ -491,7 +491,24 @@ class User(Base):
     user_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(Text)
+    # Whether `password_hash` is a password at all.
+    #
+    # An account that asked for the free PDF is created without one: the form
+    # that made it asks for a name, an address, a number and a level, because
+    # asking somebody to choose a password before they have seen the thing
+    # they came for is asking for the one field nobody fills in. Such an
+    # account holds `""` here, which verify_password can never match, so the
+    # login door is shut for it whatever anyone types.
+    #
+    # It is what "finished" means, together with a confirmed address, and
+    # get_current_user turns an unfinished account away from everything the
+    # PDF is not.
+    password_set: Mapped[bool] = mapped_column(Boolean, default=True)
     name: Mapped[str] = mapped_column(String(255))
+    # Self-declared French level, as the download form asks it ("B1",
+    # "not-sure"). Kept on the account as well as on the lead so the finish
+    # form can hand it back rather than asking twice.
+    level: Mapped[str] = mapped_column(String(16), default="")
     role: Mapped[str] = mapped_column(String(20), default="user")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     # Lifetime total, kept in step with the two counters below so the admin
@@ -968,6 +985,18 @@ def strip_user(u: User) -> dict:
     return _row_to_dict(u, drop=("password_hash",))
 
 
+def account_complete(u: User) -> bool:
+    """Whether this account is finished, or still only owns the free PDF.
+
+    Two things, both of them necessary. A password, because without one there
+    is no way back in and nothing to protect what accumulates. A confirmed
+    address or number, because until then the account is held in a name
+    anybody could have typed.
+    """
+    return bool(u.password_set) and (bool(u.email_verified)
+                                     or bool(u.phone_verified))
+
+
 def public_user(u: User) -> dict:
     return {
         "user_id": u.user_id,
@@ -992,6 +1021,12 @@ def public_user(u: User) -> dict:
         "phone_verified": bool(u.phone_verified),
         # Either channel confirms the account; the banner clears on the first.
         "verified": bool(u.email_verified) or bool(u.phone_verified),
+        "level": u.level or "",
+        "password_set": bool(u.password_set),
+        # The one the interface reads. False means the account came from the
+        # download form and still owes us a password and a confirmed address;
+        # everything except the PDF is closed until it is True.
+        "complete": account_complete(u),
         # Shown before the editor, so nobody writes 150 words only to be told
         # afterwards that they had no attempts left.
         "trial": trial_state(u),
@@ -1098,32 +1133,40 @@ async def issue_link_token(db: AsyncSession, user_id: str, purpose: str,
     return raw
 
 
-async def issue_phone_code(db: AsyncSession, user_id: str) -> str:
-    """Mint a six-digit SMS code, storing only its hash.
+async def issue_phone_code(db: AsyncSession, user_id: str,
+                           purpose: str = "phone") -> str:
+    """Mint a six-digit code, storing only its hash.
 
     The hash covers the user id as well as the digits: token_hash is unique,
     and two people are going to be sent the same six digits eventually.
+
+    `purpose` is "phone" for the SMS and "email_code" for the one the finish
+    form reads. Same machine — six digits, ten minutes, five guesses — because
+    the argument for a short code over a long link is the same in both places:
+    somebody in the middle of doing something must not have to leave the page
+    to carry on, and a link is a page they leave.
     """
     await db.execute(
         sa_update(AuthToken)
-        .where(AuthToken.user_id == user_id, AuthToken.purpose == "phone",
+        .where(AuthToken.user_id == user_id, AuthToken.purpose == purpose,
                AuthToken.used_at.is_(None))
         .values(used_at=now_utc()))
     code = f"{secrets.randbelow(1000000):06d}"
     db.add(AuthToken(
         token_hash=_hash_link_token(f"{user_id}:{code}"), user_id=user_id,
-        purpose="phone", created_at=now_utc(),
+        purpose=purpose, created_at=now_utc(),
         expires_at=now_utc() + timedelta(minutes=PHONE_CODE_TTL_MINUTES),
         used_at=None, attempts=0))
     await db.commit()
     return code
 
 
-async def consume_phone_code(db: AsyncSession, user_id: str, code: str) -> bool:
+async def consume_phone_code(db: AsyncSession, user_id: str, code: str,
+                             purpose: str = "phone") -> bool:
     """Spend the outstanding code, or record a failed guess against it."""
     res = await db.execute(
         select(AuthToken).where(
-            AuthToken.user_id == user_id, AuthToken.purpose == "phone",
+            AuthToken.user_id == user_id, AuthToken.purpose == purpose,
             AuthToken.used_at.is_(None),
             AuthToken.expires_at > now_utc())
         # issue_phone_code retires the previous code, but two requests racing
@@ -1356,6 +1399,18 @@ def phone_code_body(code: str) -> str:
             f"It expires in {PHONE_CODE_TTL_MINUTES} minutes.")
 
 
+def verify_code_body(name: str, code: str) -> str:
+    greeting = f"Hi {name}," if name else "Hi,"
+    return (f"{greeting}{NEWLINE}{NEWLINE}"
+            f"Your prepfrancais confirmation code is:{NEWLINE}{NEWLINE}"
+            f"    {code}{NEWLINE}{NEWLINE}"
+            f"Type it on the page you left open. It expires in "
+            f"{PHONE_CODE_TTL_MINUTES} minutes.{NEWLINE}{NEWLINE}"
+            f"If you did not ask for this, ignore this message — "
+            f"nobody can use the address without the code.{NEWLINE}{NEWLINE}"
+            f"— prepfrancais")
+
+
 def verify_email_body(name: str, link: str) -> str:
     greeting = f"Hi {name}," if name else "Hi,"
     return (f"{greeting}{NEWLINE}{NEWLINE}"
@@ -1536,8 +1591,15 @@ listening_check_rate_limit = rate_limit("listencheck", limit=120, window_seconds
 # ----------------------------------------------------------------------------
 # Auth dependencies
 # ----------------------------------------------------------------------------
-async def get_current_user(request: Request,
+async def get_session_user(request: Request,
                            db: AsyncSession = Depends(get_db)) -> User:
+    """Whoever the cookie belongs to, finished account or not.
+
+    Only four things take this: /auth/me and /auth/logout, which have to work
+    for an account that cannot yet do anything else; the finish-registration
+    pair, which is how it stops being unfinished; and the download, which is
+    the one thing such an account was made to have.
+    """
     token = request.cookies.get("access_token")
     if not token:
         auth = request.headers.get("Authorization", "")
@@ -1558,6 +1620,28 @@ async def get_current_user(request: Request,
     return user
 
 
+async def get_current_user(user: User = Depends(get_session_user)) -> User:
+    """A finished account. What almost every endpoint means by "the user".
+
+    An account made by the download form gets a session — it has to, or the
+    page could not hand it the file or remember who to prefill the finish
+    form for — and that session must not be a way past the door. So the
+    refusal is here, once, rather than in each of the endpoints that would
+    otherwise treat it as an ordinary account with an empty history.
+
+    The code is what the browser acts on: `account_incomplete` opens the
+    finish form, where `401` would sign them out and lose the details.
+    """
+    if not account_complete(user):
+        raise HTTPException(status_code=403, detail={
+            "code": "account_incomplete",
+            "msg": "Finish setting up your account to start practising.",
+            "password_set": bool(user.password_set),
+            "email_verified": bool(user.email_verified),
+        })
+    return user
+
+
 async def get_optional_user(request: Request,
                             db: AsyncSession = Depends(get_db)) -> Optional[User]:
     """The signed-in user, or None. Never raises.
@@ -1566,12 +1650,16 @@ async def get_optional_user(request: Request,
     everybody — and for crawlers, which carry no cookie and would otherwise be
     served a 401 for a page that has public content on it.
 
-    It reuses get_current_user rather than repeating the token checks, so a
-    revoked session or a token minted before a password change is treated as
-    signed out here too instead of quietly staying valid on this path.
+    Unfinished accounts count as signed in here. The only endpoint that reads
+    this and cares is the download, and the file is exactly what such an
+    account was created to have.
+
+    It reuses the token checks rather than repeating them, so a revoked
+    session or a token minted before a password change is treated as signed
+    out here too instead of quietly staying valid on this path.
     """
     try:
-        return await get_current_user(request, db)
+        return await get_session_user(request, db)
     except HTTPException:
         return None
 
@@ -4814,6 +4902,25 @@ class RegisterIn(BaseModel):
                        pattern=r"^[0-9+()\-.\s]{6,32}$")
 
 
+class FinishRegistrationIn(BaseModel):
+    """The one field the download form did not ask for, plus corrections.
+
+    Name, number and level come back prefilled from the account, so they are
+    optional here: an empty one means "unchanged", never "clear it".
+    """
+
+    password: str = Field(min_length=8, max_length=72)
+    name: str = Field(default="", max_length=120)
+    phone: str = Field(default="", max_length=32,
+                       pattern=r"^([0-9+()\-.\s]{6,32})?$")
+    level: str = Field(default="", max_length=16,
+                       pattern=r"^[A-Za-z0-9/ -]{0,16}$")
+
+
+class EmailCodeIn(BaseModel):
+    code: str = Field(min_length=4, max_length=8, pattern=r"^[0-9]{4,8}$")
+
+
 class LoginIn(BaseModel):
     email: EmailStr
     # Capped like RegisterIn: bcrypt only reads the first 72 bytes, and an
@@ -5814,6 +5921,14 @@ MIGRATIONS = [
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS community_invited_at TIMESTAMPTZ",
     # The guide page asks for a level instead of a number; see LeadIn.
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS level VARCHAR(16) DEFAULT ''",
+
+    # ---- users: accounts that exist before a password does ----------------
+    # TRUE for every row that already existed, because every one of them was
+    # made by the registration form and has a real hash. Only the download
+    # form writes FALSE.
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_set BOOLEAN DEFAULT TRUE",
+    "UPDATE users SET password_set = TRUE WHERE password_set IS NULL",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS level VARCHAR(16) DEFAULT ''",
 ]
 
 
@@ -6024,25 +6139,40 @@ async def register(body: RegisterIn, response: Response,
                    db: AsyncSession = Depends(get_db),
                    _rl=Depends(auth_rate_limit)):
     email = body.email.lower()
-    if await get_user_by_email(db, email):
+    existing = await get_user_by_email(db, email)
+    if existing is not None and existing.password_set:
         raise HTTPException(status_code=400, detail="Email already registered")
-    user = User(
-        user_id=new_id("user"),
-        email=email,
-        password_hash=hash_password(body.password),
-        name=body.name.strip(),
-        phone=body.phone.strip(),
-        role="admin" if email == ADMIN_EMAIL else "user",
-        created_at=now_utc(),
-        free_submissions_used=0,
-        subscription_status="free",
-        monthly_reset_date=now_utc(),
-        current_streak=0, longest_streak=0,
-        last_activity_date=None, xp=0, badges=[],
-        model_answers_read=0, model_answer_topic_ids=[],
-        token_version=0, email_verified=False,
-    )
-    db.add(user)
+    if existing is not None:
+        # The address already has an account because it asked for the free
+        # PDF. Registering is finishing that account, not colliding with it —
+        # refusing here would tell somebody their own address was taken, by
+        # them, with no way to prove it or get it back.
+        user = existing
+        user.password_hash = hash_password(body.password)
+        user.password_set = True
+        user.name = body.name.strip()
+        user.phone = body.phone.strip()
+        if email == ADMIN_EMAIL:
+            user.role = "admin"
+    else:
+        user = User(
+            user_id=new_id("user"),
+            email=email,
+            password_hash=hash_password(body.password),
+            password_set=True,
+            name=body.name.strip(),
+            phone=body.phone.strip(),
+            role="admin" if email == ADMIN_EMAIL else "user",
+            created_at=now_utc(),
+            free_submissions_used=0,
+            subscription_status="free",
+            monthly_reset_date=now_utc(),
+            current_streak=0, longest_streak=0,
+            last_activity_date=None, xp=0, badges=[],
+            model_answers_read=0, model_answer_topic_ids=[],
+            token_version=0, email_verified=False,
+        )
+        db.add(user)
     await db.commit()
     await db.refresh(user)
     # No session is opened here. Confirmation used to be offered and never
@@ -6143,7 +6273,7 @@ async def refresh(request: Request, response: Response,
 
 @app.get("/api/auth/me")
 async def me(response: Response,
-             user: User = Depends(get_current_user),
+             user: User = Depends(get_session_user),
              db: AsyncSession = Depends(get_db)):
     # Refresh the readable session hint on the way out, so a session that
     # predates the cookie stops probing after one successful load.
@@ -6260,6 +6390,92 @@ async def verify_email(body: VerifyEmailIn,
     # - and it was unmeasurable before, because nothing ever wrote this event.
     await record_event(db, "email_verified", user_id=user_id)
     return {"detail": "Email confirmed"}
+
+
+# ----------------------------------------------------------------------------
+# Finishing an account that the download form started
+#
+# Three calls, and the reason there are three rather than one link in an
+# email: whoever is doing this was about to practise. A link takes them out
+# of the page, into a mail client, and back to wherever the link decides —
+# and most of them do not come back. A six-digit code keeps them where they
+# were, which is the only place the next click makes sense.
+# ----------------------------------------------------------------------------
+async def _send_email_code(db: AsyncSession, user: User) -> bool:
+    code = await issue_phone_code(db, user.user_id, "email_code")
+    return await send_email(user.email,
+                            "Your prepfrancais confirmation code",
+                            verify_code_body(user.name or "", code))
+
+
+@app.post("/api/auth/finish-registration")
+async def finish_registration(body: FinishRegistrationIn,
+                              user: User = Depends(get_session_user),
+                              db: AsyncSession = Depends(get_db),
+                              _rl=Depends(auth_rate_limit)):
+    """Choose the password the download form did not ask for.
+
+    Only for an account that has none. Somebody who already has a password
+    and an unconfirmed address is not finishing anything — they want a code,
+    which is the next endpoint.
+    """
+    if user.password_set:
+        raise HTTPException(status_code=400,
+                            detail="This account already has a password.")
+    user.password_hash = hash_password(body.password)
+    user.password_set = True
+    if body.name.strip():
+        user.name = body.name.strip()
+    if body.phone.strip():
+        user.phone = body.phone.strip()
+    if body.level.strip():
+        user.level = body.level.strip()
+    if user.email == ADMIN_EMAIL:
+        user.role = "admin"
+    await db.commit()
+    await db.refresh(user)
+    sent = await _send_email_code(db, user)
+    # The account became a real one here, not when the download form ran: this
+    # is the moment there is a password and a person who meant to make one.
+    await record_event(db, "sign_up", user_id=user.user_id,
+                       method="lead_finish", verification_sent=bool(sent))
+    return {"user": public_user(user), "email_sent": bool(sent)}
+
+
+@app.post("/api/auth/email-code/send")
+async def email_code_send(user: User = Depends(get_session_user),
+                          db: AsyncSession = Depends(get_db),
+                          _rl=Depends(auth_rate_limit)):
+    """A fresh code, for a first send or after one expired."""
+    if user.email_verified:
+        return {"detail": "Already verified", "email_sent": False}
+    sent = await _send_email_code(db, user)
+    return {"detail": "Code sent", "email_sent": bool(sent)}
+
+
+@app.post("/api/auth/email-code/verify")
+async def email_code_verify(body: EmailCodeIn, response: Response,
+                            user: User = Depends(get_session_user),
+                            db: AsyncSession = Depends(get_db),
+                            _rl=Depends(auth_rate_limit)):
+    """Spend the code, and with it the last thing holding the account back."""
+    if user.email_verified:
+        return {"user": public_user(user)}
+    if not await consume_phone_code(db, user.user_id, body.code, "email_code"):
+        raise HTTPException(
+            status_code=400,
+            detail="That code is wrong or has expired. Ask for a new one.")
+    user.email_verified = True
+    user.email_verified_at = now_utc()
+    await db.commit()
+    await db.refresh(user)
+    # The cookies are reissued rather than left alone. They are still valid —
+    # nothing was revoked — but the session hint is what the browser reads to
+    # decide whether to ask who is signed in, and an account that just became
+    # usable should not wait for the old one to lapse.
+    set_auth_cookies(response, user.user_id, user.token_version or 0)
+    await record_event(db, "email_verified", user_id=user.user_id)
+    return {"user": public_user(user)}
 
 
 @app.post("/api/auth/resend-verification")
@@ -6451,8 +6667,64 @@ def _download_url(slug: str) -> str:
 lead_rate_limit = rate_limit("leads", limit=10, window_seconds=86400)
 
 
+async def _account_for_lead(db: AsyncSession, response: Response, name: str,
+                            email: str, phone: str, level: str) -> str:
+    """Give the download form's answers somewhere to live: an account.
+
+    Without a password. The form asks for the four things that identify a
+    learner and nothing else, because a password demanded before somebody has
+    seen the thing they came for is the field that empties the form. What it
+    buys is that the next step — the first time they try to practise — is
+    finishing an account rather than starting one, with every answer already
+    in the boxes.
+
+    The refusal matters more than the creation. If the address already
+    belongs to a finished account, this does nothing and signs nobody in:
+    otherwise typing a known address into a public form would be a way into
+    somebody else's account. They still get the file; the page tells them to
+    sign in.
+    """
+    user = await get_user_by_email(db, email)
+    if user is not None and user.password_set:
+        return "exists"
+
+    if user is None:
+        user = User(
+            user_id=new_id("user"), email=email,
+            # Never a hash, so verify_password can never match it. The login
+            # door is shut for this account until a password is chosen.
+            password_hash="", password_set=False,
+            name=name, phone=phone or None, level=level,
+            # Not ADMIN_EMAIL, whatever was typed: the admin role is granted
+            # by registering, where a password proves who is asking.
+            role="user", created_at=now_utc(),
+            free_submissions_used=0, subscription_status="free",
+            monthly_reset_date=now_utc(),
+            current_streak=0, longest_streak=0, last_activity_date=None,
+            xp=0, badges=[], model_answers_read=0, model_answer_topic_ids=[],
+            token_version=0, email_verified=False,
+        )
+        db.add(user)
+        created = True
+    else:
+        # The same unfinished account, asking again with possibly better
+        # details. Blank answers leave what is there alone.
+        created = False
+        user.name = name or user.name
+        if phone:
+            user.phone = phone
+        if level:
+            user.level = level
+
+    await db.commit()
+    await db.refresh(user)
+    set_auth_cookies(response, user.user_id, user.token_version or 0)
+    return "new" if created else "resumed"
+
+
 @app.post("/api/leads")
-async def capture_lead(body: LeadIn, db: AsyncSession = Depends(get_db),
+async def capture_lead(body: LeadIn, response: Response,
+                       db: AsyncSession = Depends(get_db),
                        _rl=Depends(lead_rate_limit)):
     """Record a download request and hand back a signed link to the file.
 
@@ -6533,16 +6805,33 @@ async def capture_lead(body: LeadIn, db: AsyncSession = Depends(get_db),
                        source=body.source, returning=existing_before,
                        invited=invite)
 
-    return {"url": _download_url(body.resource), "community": invite}
+    # The account, made from the same answers. After the lead row rather than
+    # before it, so a name that reached the table is never lost to a failure
+    # on this side.
+    account = await _account_for_lead(db, response, name, email, phone, level)
+
+    return {"url": _download_url(body.resource), "community": invite,
+            # "new" / "resumed": signed in, unfinished, prefill from /auth/me.
+            # "exists": the address already has a real account and nothing was
+            # touched, so the page offers the sign-in door instead.
+            "account": account}
 
 
 @app.get("/api/downloads/{slug}")
-async def download_resource(slug: str, t: str = "",
+async def download_resource(slug: str, t: str = "", inline: int = 0,
                             user: Optional[User] = Depends(get_optional_user)):
     """Serve a free resource to a signed link, or to anyone signed in.
 
     Somebody with an account has already given us more than the form asks for,
-    so making them fill it in would be asking twice for what we have.
+    so making them fill it in would be asking twice for what we have. That
+    includes an account the download form itself made, which is the only thing
+    such an account is for.
+
+    `inline=1` is the same bytes with the same permission check, asking the
+    browser to display the file rather than save it. It is what the reader
+    page puts in its frame. There is no weaker gate behind it: a reader who
+    can see the pages can press the download button beside them, so serving
+    the file to be read costs nothing that serving it to be saved did not.
     """
     item = DOWNLOADS.get(slug)
     if not item:
@@ -6557,10 +6846,11 @@ async def download_resource(slug: str, t: str = "",
         # so this one is worth a log line rather than a silent 404.
         log.error("Download %s is missing from %s", slug, DOWNLOADS_DIR)
         raise HTTPException(status_code=404, detail="File not available")
+    disposition = "inline" if inline else "attachment"
     return FileResponse(
         path, media_type=item["media_type"],
         headers={"Content-Disposition":
-                 f'attachment; filename="{item["filename"]}"'})
+                 f'{disposition}; filename="{item["filename"]}"'})
 
 
 # The part of the vocabulary guide that needs an account, as text, for the

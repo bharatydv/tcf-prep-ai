@@ -66,6 +66,13 @@ export function downloadPath(resource = LEAD_RESOURCE) {
   return `/api/downloads/${resource}`;
 }
 
+/* The same file, asked for as something to look at rather than to keep.
+   The permission check behind it is identical — see download_resource. */
+export function readerPath(resource = LEAD_RESOURCE) {
+  return `/api/downloads/${resource}?inline=1`;
+}
+
+
 /* Start the download without leaving the page. A plain <a download> click
    rather than fetch+blob, so the browser's own download UI handles it and a
    3 MB PDF never sits in a tab's memory. */

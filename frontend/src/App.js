@@ -15,6 +15,7 @@ import ConsentBanner from "./components/ConsentBanner";
    from the first page onwards, and a lazy chunk would miss exactly the
    visitors who leave quickly. It renders nothing until it is triggered. */
 import LeadMagnetModal from "./components/LeadMagnetModal";
+import FinishSignup from "./components/FinishSignup";
 /* Static for the same reason: it has to be watching the location from the
    first navigation onwards, and a lazy chunk would miss the ones that happen
    while it loads. It renders nothing. */
@@ -67,6 +68,7 @@ const BlogPost = lazy(() => import("./pages/BlogPost"));
 const BlogAdmin = lazy(() => import("./pages/BlogAdmin"));
 const Resources = lazy(() => import("./pages/Resources"));
 const VocabularyGuide = lazy(() => import("./pages/VocabularyGuide"));
+const VocabularyReader = lazy(() => import("./pages/VocabularyReader"));
 const TefTcfWritingGuide = lazy(() => import("./pages/TefTcfWritingGuide"));
 const SpeakingHome = lazy(() => import("./pages/SpeakingHome"));
 const SpeakingTasks = lazy(() => import("./pages/SpeakingTasks"));
@@ -101,6 +103,7 @@ export default function App() {
             the blog is the same visitor leaving the pricing page, and no page
             should have to know about the download offer to make it. */}
         <LeadMagnetModal />
+        <FinishSignup />
         {/* One boundary around the routes: a per-route spinner would flash the
             header's own layout twice on every navigation. */}
         <Suspense fallback={<RouteFallback />}>
@@ -134,6 +137,10 @@ export default function App() {
               the exam and the thing, because that is what it is searched
               for — see pages/VocabularyGuide. */}
           <Route path="/tcf-canada-vocabulary" element={<VocabularyGuide />} />
+          {/* The file itself, read in the page. Not prerendered and not
+              indexed: a crawler carries no cookie and would be served a
+              403 inside the frame. */}
+          <Route path="/tcf-canada-vocabulary/read" element={<VocabularyReader />} />
           <Route path="/reading" element={<ReadingHome />} />
           {/* Practice and test read the same papers; the mode decides whether a
               question is marked as it is answered or only at hand-in. */}

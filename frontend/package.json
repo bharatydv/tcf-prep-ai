@@ -45,7 +45,15 @@
   "eslintConfig": {
     "extends": [
       "react-app"
-    ]
+    ],
+    "rules": {
+      "react/no-unstable-nested-components": [
+        "error",
+        {
+          "allowAsProps": true
+        }
+      ]
+    }
   },
   "proxy": "http://localhost:8000",
   "reactSnap": {
@@ -62,7 +70,7 @@
       "/reading",
       "/listening",
       "/resources",
-    "/tcf-canada-vocabulary",
+      "/tcf-canada-vocabulary",
       "/blog",
       "/recent-topics",
       "/tef-tcf-writing-guide",
