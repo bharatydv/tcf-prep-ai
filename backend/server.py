@@ -2529,6 +2529,28 @@ def _normalise_level(raw) -> Optional[str]:
     return hit.group(1) if hit and hit.group(1) in CEFR_LEVELS else None
 
 
+def _normalise_vocab(raw) -> list:
+    """A vocabulary suggestion, as either a bare French phrase (the writing
+    grader) or a {phrase, meaning} pair (the speaking graders, which are
+    asked for an English gloss too). Either shape survives; an item with
+    neither a phrase nor any text is dropped rather than kept as an empty
+    entry."""
+    out = []
+    for x in (raw or [])[:12]:
+        if isinstance(x, dict):
+            phrase = str(x.get("phrase") or x.get("word") or x.get("french") or "").strip()
+            meaning = str(x.get("meaning") or x.get("english") or x.get("translation") or "").strip()
+            if phrase and meaning:
+                out.append({"phrase": phrase, "meaning": meaning})
+            elif phrase:
+                out.append(phrase)
+        else:
+            s = str(x).strip()
+            if s:
+                out.append(s)
+    return out
+
+
 def _validate_analysis(data: dict) -> dict:
     errors = []
     for e in data.get("errors", []) or []:
@@ -2584,7 +2606,7 @@ def _validate_analysis(data: dict) -> dict:
         "tcf_level": level,
         "improvement_suggestions": [str(x) for x in (data.get("improvement_suggestions") or [])][:8],
         "linking_words": [str(x) for x in (data.get("linking_words") or [])][:12],
-        "vocabulary_suggestions": [str(x) for x in (data.get("vocabulary_suggestions") or [])][:12],
+        "vocabulary_suggestions": _normalise_vocab(data.get("vocabulary_suggestions")),
     }
 
 
@@ -3089,7 +3111,7 @@ SPEAKING_GRADER_SYSTEM = """You are a certified TEF/TCF Canada examiner evaluati
 You receive the QUESTION (the task) and the TRANSCRIPT of what the candidate said. The transcript may contain small transcription errors; judge the language charitably where a word is clearly a transcription artifact, not a learner error.
 
 Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
-{"answers_question": true, "relevance_comment": "one sentence (English) on whether and how well the answer addresses the task", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement","severity":"major|moderate|minor","kind":"error|better|upgrade","remember":"one short reusable rule (English)"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "corrected_version":"what they said, with the mistakes fixed and nothing else changed", "language_mix":{"detected":false,"languages":[],"sample":""}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French"}
+{"answers_question": true, "relevance_comment": "one sentence (English) on whether and how well the answer addresses the task", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement","severity":"major|moderate|minor","kind":"error|better|upgrade","remember":"one short reusable rule (English)"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "corrected_version":"what they said, with the mistakes fixed and nothing else changed", "language_mix":{"detected":false,"languages":[],"sample":""}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":[{"phrase":"French word/phrase","meaning":"English meaning"}], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French"}
 
 Evaluate TWO things:
 1. RELEVANCE - does the spoken answer actually address the question/task? Set answers_question true/false and explain in relevance_comment. An off-topic or incomplete answer should lower the score even if the French is correct.
@@ -3099,12 +3121,12 @@ CEFR scoring (overall_score 0-100, tcf_level one of A1,A2,B1,B2,C1,C2):
 - A1 (5-19) A2 (20-39) B1 (40-54) B2 (55-69) C1 (70-84) C2 (85-100).
 If the answer does not address the task, cap the score at B1.
 
-suggestions: 3-5 concrete English tips to improve THIS spoken answer. vocabulary_suggestions: French words/phrases to enrich it. You are grading a transcript, so do NOT comment on pronunciation or accent.
+suggestions: 3-5 concrete English tips to improve THIS spoken answer. vocabulary_suggestions: French words/phrases to enrich it, each paired with a short English meaning. You are grading a transcript, so do NOT comment on pronunciation or accent.
 
 enhanced_version - THE CANDIDATE'S OWN ANSWER, rewritten as a strong version of itself, in French. This is a model they can hear and copy, so:
 - Keep THEIR ideas, THEIR examples and THEIR opinion. Rewriting it into a different, better answer teaches nothing, because it is no longer about anything they said.
 - Fix every error, and raise the register by roughly one level: better connectors, more precise verbs, fuller sentences.
-- Keep it the length someone actually speaks in this task. Do not return three times what they said.
+- Match the candidate's word count closely - within a handful of words, not shorter and not three times longer.
 - It is read aloud by a speech synthesiser, so punctuate it the way it should be spoken and never use brackets, asterisks, or notes to the reader.
 - French only, and nothing but the answer itself.
 
@@ -3131,7 +3153,7 @@ severity - how much each error actually costs the candidate, not how easy it was
 - minor: a slip a native speaker also makes, or a small awkwardness (a missing liaison in writing, a slightly odd but understandable turn of phrase).
 An "improvement" entry is a style upgrade on a correct sentence and is always "minor".
 
-corrected_version - EXACTLY what the candidate said, with the mistakes taken out and NOTHING else changed. Same ideas, same words, same register, same length; fix the errors and stop. This is deliberately not enhanced_version: read side by side, every difference between the transcript and this one is a mistake they made, and every difference between this one and enhanced_version is a way they could have said it better. Blurring the two loses both. French only.
+corrected_version - EXACTLY what the candidate said, with the mistakes taken out and NOTHING else changed. Same ideas, same words, same register, the same word count as the transcript - never a shortened summary; fix the errors and stop. This is deliberately not enhanced_version: read side by side, every difference between the transcript and this one is a mistake they made, and every difference between this one and enhanced_version is a way they could have said it better. Blurring the two loses both. French only.
 
 language_mix - did the candidate speak anything other than French? Set detected true only when they actually produced words in another language (finishing a sentence in English, an untranslated phrase from their first language) - NOT for a French word used wrongly, which is an anglicism and belongs in errors. List the languages, and quote a short sample of what they said. The Expression orale paper marks French: language produced in another one cannot be marked at all, and saying so is more use to the candidate than quietly scoring the gap."""
 
@@ -3177,7 +3199,7 @@ INTERACTION_GRADER_SYSTEM = """You are a certified TCF Canada examiner grading T
 You receive the CONSIGNE (the scenario) and the full DIALOGUE. Grade ONLY the candidate's turns. The transcript comes from speech recognition, so judge charitably where a word is clearly a transcription artifact rather than a learner error.
 
 Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
-{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate obtained the information the consigne asked for", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement","severity":"major|moderate|minor","kind":"error|better|upgrade","remember":"one short reusable rule (English)"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "corrected_version":"what they said, with the mistakes fixed and nothing else changed", "language_mix":{"detected":false,"languages":[],"sample":""}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French", "missed_questions":[{"question":"question in French the candidate should have asked","why":"what it would have obtained (English)"}]}
+{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate obtained the information the consigne asked for", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement","severity":"major|moderate|minor","kind":"error|better|upgrade","remember":"one short reusable rule (English)"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "corrected_version":"what they said, with the mistakes fixed and nothing else changed", "language_mix":{"detected":false,"languages":[],"sample":""}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":[{"phrase":"French word/phrase","meaning":"English meaning"}], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French", "missed_questions":[{"question":"question in French the candidate should have asked","why":"what it would have obtained (English)"}]}
 
 Because this task is INTERACTION, weigh these alongside grammar and vocabulary:
 1. QUESTION QUALITY - did the candidate actually ask questions, and were they well formed? Flat statements, or questions built only by raising intonation ("vous avez des places ?") where inversion or est-ce que is expected, are the single most common Tâche 2 weakness. Report them as errors.
@@ -3189,7 +3211,7 @@ CEFR scoring (overall_score 0-100, tcf_level one of A1,A2,B1,B2,C1,C2):
 - A1 (5-19) A2 (20-39) B1 (40-54) B2 (55-69) C1 (70-84) C2 (85-100).
 Cap the score at B1 if the candidate asked fewer than three real questions or missed most of the required information.
 
-suggestions: 3-5 concrete English tips for THIS conversation. vocabulary_suggestions: French phrases that would have made the asking more idiomatic.
+suggestions: 3-5 concrete English tips for THIS conversation. vocabulary_suggestions: French phrases that would have made the asking more idiomatic, each paired with a short English meaning.
 
 missed_questions - "What more could you have asked?". List 2 to 5 questions, WORD FOR WORD IN FRENCH and ready to speak, that the candidate did not ask but should have. Draw them first from the points the consigne lists and the candidate skipped, then from the openings the agent left unexplored (a price mentioned without conditions, a date without a deadline). Never repeat a question the candidate already asked, even in other words. If the candidate genuinely covered everything, return the questions that would have deepened the exchange rather than an empty list.
 
@@ -3198,7 +3220,7 @@ You are grading a transcript, so do NOT comment on pronunciation or accent.
 enhanced_version - THE CANDIDATE'S OWN ANSWER, rewritten as a strong version of itself, in French. This is a model they can hear and copy, so:
 - Keep THEIR ideas, THEIR examples and THEIR opinion. Rewriting it into a different, better answer teaches nothing, because it is no longer about anything they said.
 - Fix every error, and raise the register by roughly one level: better connectors, more precise verbs, fuller sentences.
-- Keep it the length someone actually speaks in this task. Do not return three times what they said.
+- Match the candidate's word count closely - within a handful of words, not shorter and not three times longer.
 - It is read aloud by a speech synthesiser, so punctuate it the way it should be spoken and never use brackets, asterisks, or notes to the reader.
 - French only, and nothing but the answer itself.
 
@@ -3225,7 +3247,7 @@ severity - how much each error actually costs the candidate, not how easy it was
 - minor: a slip a native speaker also makes, or a small awkwardness (a missing liaison in writing, a slightly odd but understandable turn of phrase).
 An "improvement" entry is a style upgrade on a correct sentence and is always "minor".
 
-corrected_version - EXACTLY what the candidate said, with the mistakes taken out and NOTHING else changed. Same ideas, same words, same register, same length; fix the errors and stop. This is deliberately not enhanced_version: read side by side, every difference between the transcript and this one is a mistake they made, and every difference between this one and enhanced_version is a way they could have said it better. Blurring the two loses both. French only.
+corrected_version - EXACTLY what the candidate said, with the mistakes taken out and NOTHING else changed. Same ideas, same words, same register, the same word count as the transcript - never a shortened summary; fix the errors and stop. This is deliberately not enhanced_version: read side by side, every difference between the transcript and this one is a mistake they made, and every difference between this one and enhanced_version is a way they could have said it better. Blurring the two loses both. French only.
 
 language_mix - did the candidate speak anything other than French? Set detected true only when they actually produced words in another language (finishing a sentence in English, an untranslated phrase from their first language) - NOT for a French word used wrongly, which is an anglicism and belongs in errors. List the languages, and quote a short sample of what they said. The Expression orale paper marks French: language produced in another one cannot be marked at all, and saying so is more use to the candidate than quietly scoring the gap."""
 
@@ -3234,7 +3256,7 @@ INTERVIEW_GRADER_SYSTEM = """You are a certified TCF Canada examiner grading Tâ
 You receive the BRIEF and the full DIALOGUE. Grade ONLY the candidate's turns. The transcript comes from speech recognition, so judge charitably where a word is clearly a transcription artifact rather than a learner error.
 
 Return ONLY valid JSON (no markdown, no commentary) with this exact shape:
-{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate answered what was asked", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement","severity":"major|moderate|minor","kind":"error|better|upgrade","remember":"one short reusable rule (English)"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "corrected_version":"what they said, with the mistakes fixed and nothing else changed", "language_mix":{"detected":false,"languages":[],"sample":""}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":["French word/phrase"], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French"}
+{"answers_question": true, "relevance_comment": "one sentence (English) on whether the candidate answered what was asked", "errors":[{"error":"wrong text","correction":"fixed","explanation":"why (English)","category":"prepositions|spelling|conjugation|gender_number|anglicism|improvement","severity":"major|moderate|minor","kind":"error|better|upgrade","remember":"one short reusable rule (English)"}], "overall_score": 50, "tcf_level":"B1", "criteria":{"linguistic":{"score":50,"comment":"..."},"adequacy":{"score":50,"comment":"..."},"discourse":{"score":50,"comment":"..."}}, "corrected_version":"what they said, with the mistakes fixed and nothing else changed", "language_mix":{"detected":false,"languages":[],"sample":""}, "strengths":["what the candidate genuinely did well (English)"], "focus_areas":["what to work on next (English)"], "suggestions":["concrete English suggestion"], "vocabulary_suggestions":[{"phrase":"French word/phrase","meaning":"English meaning"}], "enhanced_version":"the candidate's own answer rewritten as a strong version of itself, in French"}
 
 This task is a PRESENTATION, not an interaction. The candidate is NOT expected to ask questions, and must never be penalised for not asking any. Weigh instead:
 1. ANSWERING - did the candidate actually answer each question, rather than talking past it?
@@ -3246,12 +3268,12 @@ CEFR scoring (overall_score 0-100, tcf_level one of A1,A2,B1,B2,C1,C2):
 - A1 (5-19) A2 (20-39) B1 (40-54) B2 (55-69) C1 (70-84) C2 (85-100).
 Cap the score at B1 if the candidate answered only in short bare phrases with no development.
 
-suggestions: 3-5 concrete English tips for THIS interview. vocabulary_suggestions: French words and phrases that would have made the self-presentation richer. You are grading a transcript, so do NOT comment on pronunciation or accent.
+suggestions: 3-5 concrete English tips for THIS interview. vocabulary_suggestions: French words and phrases that would have made the self-presentation richer, each paired with a short English meaning. You are grading a transcript, so do NOT comment on pronunciation or accent.
 
 enhanced_version - THE CANDIDATE'S OWN ANSWER, rewritten as a strong version of itself, in French. This is a model they can hear and copy, so:
 - Keep THEIR ideas, THEIR examples and THEIR opinion. Rewriting it into a different, better answer teaches nothing, because it is no longer about anything they said.
 - Fix every error, and raise the register by roughly one level: better connectors, more precise verbs, fuller sentences.
-- Keep it the length someone actually speaks in this task. Do not return three times what they said.
+- Match the candidate's word count closely - within a handful of words, not shorter and not three times longer.
 - It is read aloud by a speech synthesiser, so punctuate it the way it should be spoken and never use brackets, asterisks, or notes to the reader.
 - French only, and nothing but the answer itself.
 
@@ -3278,7 +3300,7 @@ severity - how much each error actually costs the candidate, not how easy it was
 - minor: a slip a native speaker also makes, or a small awkwardness (a missing liaison in writing, a slightly odd but understandable turn of phrase).
 An "improvement" entry is a style upgrade on a correct sentence and is always "minor".
 
-corrected_version - EXACTLY what the candidate said, with the mistakes taken out and NOTHING else changed. Same ideas, same words, same register, same length; fix the errors and stop. This is deliberately not enhanced_version: read side by side, every difference between the transcript and this one is a mistake they made, and every difference between this one and enhanced_version is a way they could have said it better. Blurring the two loses both. French only.
+corrected_version - EXACTLY what the candidate said, with the mistakes taken out and NOTHING else changed. Same ideas, same words, same register, the same word count as the transcript - never a shortened summary; fix the errors and stop. This is deliberately not enhanced_version: read side by side, every difference between the transcript and this one is a mistake they made, and every difference between this one and enhanced_version is a way they could have said it better. Blurring the two loses both. French only.
 
 language_mix - did the candidate speak anything other than French? Set detected true only when they actually produced words in another language (finishing a sentence in English, an untranslated phrase from their first language) - NOT for a French word used wrongly, which is an anglicism and belongs in errors. List the languages, and quote a short sample of what they said. The Expression orale paper marks French: language produced in another one cannot be marked at all, and saying so is more use to the candidate than quietly scoring the gap."""
 
@@ -3428,16 +3450,45 @@ def _transcribe_gemini(audio_bytes: bytes, filename: str, mime: str = "") -> str
     return (resp.text or "").strip()
 
 
-def _transcribe_groq(audio_bytes: bytes, filename: str, mime: str = "") -> str:
-    """Transcribe with Groq Whisper (OpenAI-compatible audio endpoint)."""
+def _transcribe_groq(audio_bytes: bytes, filename: str, mime: str = "") -> dict:
+    """Transcribe with Groq Whisper (OpenAI-compatible audio endpoint).
+
+    Returns {"text", "words"}. The recording is already in hand for the
+    transcript itself, so this asks the same request for word-level timing
+    too — `response_format="verbose_json"` with `timestamp_granularities`
+    is the one thing on top of a plain call, and whisper-large-v3 supports
+    it the same way OpenAI's own whisper-1 does. That is what lets the
+    speaking result play the candidate's own recording for a correction
+    instead of falling back to the synthesiser, without a second provider
+    or a second upload of the audio.
+
+    Falls back to a plain transcription if the timestamped request fails —
+    an older Groq deployment that does not accept the extra parameters must
+    not lose the transcript over a feature it cannot give.
+    """
     import io
     del mime  # same as OpenAI: the filename carries the format
     client = _openai_client(f"compat:{GROQ_BASE_URL}", GROQ_API_KEY, GROQ_BASE_URL)
     buf = io.BytesIO(audio_bytes)
     buf.name = filename or "audio.webm"
-    resp = client.audio.transcriptions.create(
-        model=GROQ_TRANSCRIBE_MODEL, file=buf, language="fr")
-    return (resp.text or "").strip()
+    try:
+        resp = client.audio.transcriptions.create(
+            model=GROQ_TRANSCRIBE_MODEL, file=buf, language="fr",
+            response_format="verbose_json", timestamp_granularities=["word"])
+        words = [
+            {"text": str(getattr(w, "word", "") or "").strip(),
+             "start": int(round(w.start * 1000)), "end": int(round(w.end * 1000))}
+            for w in (getattr(resp, "words", None) or [])
+            if str(getattr(w, "word", "") or "").strip()
+        ]
+        return {"text": (resp.text or "").strip(), "words": words}
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Groq word timestamps unavailable, falling back to plain "
+                    "transcription: %s", _scrub_secrets(exc))
+        buf.seek(0)
+        resp = client.audio.transcriptions.create(
+            model=GROQ_TRANSCRIBE_MODEL, file=buf, language="fr")
+        return {"text": (resp.text or "").strip(), "words": []}
 
 
 async def _transcribe_assemblyai_async(audio_bytes: bytes, filename: str,
@@ -3511,10 +3562,12 @@ async def transcribe_audio_detailed(audio_bytes: bytes, filename: str, db=None,
     """Transcribe using the active provider (Admin panel overrides .env).
 
     Returns {"text", "words"}. `words` is populated only by providers that
-    report per-word timing and confidence — today that is AssemblyAI alone,
-    which is also the configured default. Everything still works on the
-    others; the speaking result simply loses the criterion that is measured
-    from those numbers, exactly as it did before they were kept.
+    report per-word timing — AssemblyAI and Groq today; OpenAI's configured
+    model (gpt-4o-transcribe) and Gemini do not expose it, so those still
+    come back with an empty list. Everything else still works; the speaking
+    result simply loses the criterion and the own-voice playback that are
+    measured from those numbers, exactly as it did before any provider kept
+    them.
     """
     provider = (await get_provider("transcribe_provider")) if db is not None else TRANSCRIBE_PROVIDER
     if provider == "gemini":
@@ -3532,6 +3585,8 @@ async def transcribe_audio_detailed(audio_bytes: bytes, filename: str, db=None,
     try:
         if provider == "assemblyai":
             return await _transcribe_assemblyai_async(audio_bytes, filename, mime)
+        if provider == "groq":
+            return await run_ai(fn, audio_bytes, filename, mime)
         return {"text": await run_ai(fn, audio_bytes, filename, mime), "words": []}
     except Exception as exc:  # noqa: BLE001
         log.warning("Transcription failed (%s): %s", provider, _scrub_secrets(exc))
@@ -3814,7 +3869,7 @@ def _validate_speaking(data: dict) -> dict:
     # Length-capped like every other free-text field here: a model that ignores
     # "do not return three times what they said" must not be able to write an
     # essay into the page, and this one is also read aloud.
-    base["enhanced_version"] = str(data.get("enhanced_version", "")).strip()[:1500]
+    base["enhanced_version"] = str(data.get("enhanced_version", "")).strip()[:3000]
     # "What more could you have asked?" — tâche 2 only, empty elsewhere. Models
     # sometimes return bare strings instead of the {question, why} object, so
     # both shapes are accepted rather than dropping the whole section.
@@ -3853,7 +3908,7 @@ def _validate_speaking(data: dict) -> dict:
     # touched. Not the same thing as enhanced_version, which is a better answer
     # written at a higher register: this one is theirs, so the two can be read
     # side by side and every difference is an error they made.
-    base["corrected_version"] = str(data.get("corrected_version", "")).strip()[:2000]
+    base["corrected_version"] = str(data.get("corrected_version", "")).strip()[:4000]
     base["language_mix"] = _validate_language_mix(data.get("language_mix"))
     return base
 
@@ -8494,8 +8549,9 @@ async def speaking_analyze(question: str = Form(...),
     # the result page play the exact half-second of their own recording that a
     # correction is about.
     #
-    # Only AssemblyAI reports them, so this is often empty and the page falls
-    # back to the synthesiser — the same thing it did before.
+    # Only AssemblyAI and Groq report them, so on the other providers this is
+    # empty and the page falls back to the synthesiser — the same thing it
+    # did before.
     #
     # Short keys because this rides inside the submission's JSON column and a
     # minute of speech is a couple of hundred words.

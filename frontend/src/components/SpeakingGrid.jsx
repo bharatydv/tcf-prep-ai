@@ -41,6 +41,16 @@ const RATING_TONE = [
 // each level is higher than the last, and the filled one says where you stand.
 const COLUMN_HEIGHT = ['34%', '50%', '66%', '82%', '100%'];
 
+// The headline of a criterion's comment, for the column that has otherwise
+// nothing in it. Not a truncation to a character count, which cuts a word in
+// half as often as not — the first full sentence, whole or not at all.
+function firstSentence(text) {
+  const s = String(text || '').trim();
+  if (!s) return '';
+  const m = s.match(/^[^.!?]*[.!?]/);
+  return (m ? m[0] : s).trim();
+}
+
 /* A bar's colour from its score, on the same CEFR bands the rubric uses. A
    single accent colour for every score would make a 25 and a 75 look alike at
    a glance, which is the one thing a bar chart is for. */
@@ -169,6 +179,27 @@ export function SpeakingGrid({ result, showNarrative = true }) {
                   <li key={i} className="text-xs leading-relaxed text-gray-700">• {s}</li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {/* Where the strengths/focus boxes above would otherwise sit empty:
+              `showNarrative` is false here whenever this page already has
+              "What you did well" and "Your next step" of its own, so this
+              column has nothing in it below the mark. A one-line take from
+              each criterion on the right fills it without repeating either
+              of those sections. */}
+          {!showNarrative && rows.length > 0 && (
+            <div className="mt-4 space-y-2" data-testid="grid-highlights">
+              {rows.map(([name, c]) => {
+                const line = firstSentence(c.comment);
+                if (!line) return null;
+                return (
+                  <div key={name} className="rounded-2xl border border-violet-100 bg-violet-50/40 p-3">
+                    <p className="font-heading text-xs font-bold text-primary">{t(`grid.${name}`)}</p>
+                    <p className="mt-1 text-xs leading-relaxed text-gray-600">{line}</p>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

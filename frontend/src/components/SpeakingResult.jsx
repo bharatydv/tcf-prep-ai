@@ -38,7 +38,7 @@ import { SpeakingGrid } from './SpeakingGrid';
 import { TranscriptDiff } from './TranscriptDiff';
 import {
   ResultHero, DidWell, Priorities, Recurring, Progress, Vocabulary,
-  NextStep, PracticeCta, Panel, ProfileCards, TOKENS, CAT_LABELS, KIND_TONE,
+  NextStep, PracticeCta, Panel, TOKENS, CAT_LABELS, KIND_TONE,
   KIND_ROW, KIND_LABEL,
 } from './speakingReport';
 import { useOwnVoice } from '../lib/ownVoice';
@@ -418,22 +418,11 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
       <NextStep focusAreas={result.focus_areas} practiceHref={PRACTICE_HREF} />
 
       {/* The examiner's grid. The detail behind the number at the top, which
-          is why it reads after the answer to "what should I do now". */}
-      <Panel title={t('report.profile')} description={t('report.profileSub')}
-        testId="speaking-profile">
-        {/* The four cards first — one glance, four criteria — and the grid
-            under them for the detail behind each: the A1→C2 ladder, the mark
-            out of 20, the CLB band, how it was delivered, and the speech-rate
-            figures. The cards say where you stand; the grid says how far the
-            next band is. */}
-        <ProfileCards criteria={result.criteria} />
-        <div className="mt-[15px]">
-          {/* Without this the grid repeats two sections the report
-              already has: its strengths box is "What you did well"
-              and its focus box is "Your next step". */}
-          <SpeakingGrid result={result} showNarrative={false} />
-        </div>
-      </Panel>
+          is why it reads after the answer to "what should I do now". Shown on
+          its own now, without the "Your speaking profile" card and the
+          summary cards that used to sit above it: those repeated, in miniature,
+          exactly what the grid already says below them. */}
+      <SpeakingGrid result={result} showNarrative={false} />
 
       {Array.isArray(result.pronunciation_errors) && result.pronunciation_errors.length > 0 && (
         <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft"
