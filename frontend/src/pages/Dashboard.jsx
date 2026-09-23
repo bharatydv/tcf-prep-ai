@@ -4,10 +4,6 @@ import {
   Receipt, Fire, Trophy, GameController, BookOpen, Headphones,
   PenNib, Microphone, Stack, ChartLineUp, Info,
 } from '@phosphor-icons/react';
-import {
-  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
-  BarChart, Bar, Cell, LineChart, Line,
-} from 'recharts';
 import { api, errMsg, CATEGORY_META } from '../lib/api';
 import { RecordingPlayer } from '../components/RecordingPlayer';
 import { useT } from '../i18n';
@@ -68,7 +64,6 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [mistakes, setMistakes] = useState(null);
   const [subs, setSubs] = useState([]);
-  const [comprehension, setComprehension] = useState(null);
   const [reading, setReading] = useState([]);
   const [listening, setListening] = useState([]);
   const [error, setError] = useState('');
@@ -97,9 +92,6 @@ export default function Dashboard() {
       .then(({ data }) => setStats(data))
       .catch((e) => setError(errMsg(e, t('dash.loadError'))));
     api.get('/api/mistakes/summary').then(({ data }) => setMistakes(data)).catch(() => {});
-    // Where reading and listening answers go wrong, by CEFR level. The AI
-    // error analysis cannot speak for these papers, but the level can.
-    api.get('/api/dashboard/comprehension').then(({ data }) => setComprehension(data)).catch(() => {});
     api.get('/api/submissions').then(({ data }) => setSubs(data.submissions || [])).catch(() => {});
     // Reading and listening live in their own tables, not in submissions, so a
     // dashboard that read only /api/submissions could never show two of the
@@ -194,13 +186,6 @@ export default function Dashboard() {
     return Math.round((scored.reduce((s, a) => s + a.score, 0) / scored.length) * 10) / 10;
   }, [filtered]);
 
-  // Oldest first, so the chart reads left to right in time order.
-  const trend = useMemo(() => [...filtered]
-    .filter((a) => typeof a.score === 'number')
-    .reverse()
-    .map((a) => ({ date: (a.at || '').slice(5, 10), score: a.score })),
-  [filtered]);
-
   if (error && !stats) {
     return (
       <main className="mx-auto max-w-md px-4 py-20 text-center">
@@ -234,15 +219,7 @@ export default function Dashboard() {
     );
   }
 
-  const breakdownData = Object.entries(stats.error_breakdown).map(([k, v]) => ({
-    name: CATEGORY_META[k]?.label || k, count: v, color: CATEGORY_META[k]?.color || '#ddd',
-  }));
   const tone = TONE[skill];
-  /* Levels ordered A1→C2, not alphabetically by chance: the whole point of the
-     chart is reading where the wall is, which only works if the axis climbs. */
-  const levelData = (comprehension?.[skill] || [])
-    .filter((r) => r.asked > 0)
-    .sort((a, b) => a.level.localeCompare(b.level));
   const skillName = t(SKILLS.find((s) => s.id === skill).key);
   const aiGraded = AI_GRADED.has(skill);
 
@@ -326,94 +303,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* CHARTS — the original pairing, kept. */}
-      <div className="mt-5 grid gap-5 lg:grid-cols-2">
-        <section className="card p-6">
-          <Head title={`${t('dash.scoreTrend')} · ${skillName}`}
-            note={trend.length ? t('dash.nAttempts', { n: trend.length }) : null} />
-          {trend.length ? (
-            <div className="h-64">
-              <ResponsiveContainer>
-                <AreaChart data={trend} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="dashGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={tone} stopOpacity={0.3} />
-                      <stop offset="100%" stopColor={tone} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#EFEDF3" vertical={false} />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#9CA3AF' }}
-                    axisLine={false} tickLine={false} />
-                  <YAxis domain={[0, 20]} tick={{ fontSize: 11, fill: '#9CA3AF' }}
-                    axisLine={false} tickLine={false} width={44} />
-                  <Tooltip
-                    contentStyle={{ borderRadius: 10, border: '1px solid #E7E2F0', fontSize: 12 }} />
-                  <Area type="monotone" dataKey="score" stroke={tone} strokeWidth={2}
-                    fill="url(#dashGrad)" dot={false}
-                    activeDot={{ r: 4, strokeWidth: 2, stroke: '#fff' }} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          ) : (
-            <p className="rounded-xl bg-gray-50 px-4 py-10 text-center text-sm text-gray-500">
-              {t('dash.noDataPeriod')}
-            </p>
-          )}
-        </section>
-
-        <section className="card p-6">
-          <Head title={aiGraded ? t('dash.errorsByCategory') : t('dash.wrongByLevel')}
-            note={t('dash.allTime')} />
-          {/* A comprehension paper has no category of mistake, but every one of
-              its questions has a level — and which level a candidate starts
-              losing marks at is the number their result is capped by. */}
-          {!aiGraded ? (levelData.length ? (
-            <div className="h-64">
-              <ResponsiveContainer>
-                <BarChart data={levelData} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#EFEDF3" vertical={false} />
-                  <XAxis dataKey="level" tick={{ fontSize: 11, fill: '#9CA3AF' }}
-                    axisLine={false} tickLine={false} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#9CA3AF' }}
-                    axisLine={false} tickLine={false} width={44} />
-                  <Tooltip cursor={{ fill: '#F7F5FB' }}
-                    contentStyle={{ borderRadius: 10, border: '1px solid #E7E2F0', fontSize: 12 }}
-                    formatter={(v, _n, p) => [
-                      t('dash.wrongOfAsked', { wrong: v, asked: p.payload.asked }),
-                      t('dash.wrongLabel')]} />
-                  <Bar dataKey="wrong" radius={[5, 5, 0, 0]} fill={tone} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          ) : (
-            <p className="rounded-xl bg-gray-50 px-4 py-10 text-center text-sm text-gray-500">
-              {t('dash.noDataPeriod')}
-            </p>
-          )) : breakdownData.some((d) => d.count > 0) ? (
-            <div className="h-64">
-              <ResponsiveContainer>
-                <BarChart data={breakdownData} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#EFEDF3" vertical={false} />
-                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#9CA3AF' }} interval={0}
-                    angle={-20} textAnchor="end" height={62} axisLine={false} tickLine={false} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#9CA3AF' }}
-                    axisLine={false} tickLine={false} width={44} />
-                  <Tooltip cursor={{ fill: '#F7F5FB' }}
-                    contentStyle={{ borderRadius: 10, border: '1px solid #E7E2F0', fontSize: 12 }} />
-                  <Bar dataKey="count" radius={[5, 5, 0, 0]}>
-                    {breakdownData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          ) : (
-            <p className="rounded-xl bg-gray-50 px-4 py-10 text-center text-sm text-gray-500">
-              {t('dash.noErrors')}
-            </p>
-          )}
-        </section>
-      </div>
-
       {/* WEAK POINTS + RECURRING — the original 2/3 + 1/3 split, kept. */}
       <div className="mt-5 grid gap-5 lg:grid-cols-3">
         <section className="card p-6 lg:col-span-2">
@@ -466,25 +355,6 @@ export default function Dashboard() {
           )}
         </section>
       </div>
-
-      {aiGraded && mistakes?.trend?.length > 1 && (
-        <section className="card mt-5 p-6">
-          <Head title={t('dash.errorsPer100')} note={t('dash.normalised')} />
-          <div className="h-52">
-            <ResponsiveContainer>
-              <LineChart data={mistakes.trend} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#EFEDF3" vertical={false} />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#9CA3AF' }}
-                  axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: '#9CA3AF' }} axisLine={false} tickLine={false} width={44} />
-                <Tooltip contentStyle={{ borderRadius: 10, border: '1px solid #E7E2F0', fontSize: 12 }} />
-                <Line type="monotone" dataKey="errors_per_100_words" stroke="#7C3AED"
-                  strokeWidth={2} dot={{ r: 3 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </section>
-      )}
 
       {/* SPEAKING PAPERS — three tâches read as one result, which is the way
           the exam reports Expression orale and the only way this page ever
