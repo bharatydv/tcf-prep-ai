@@ -25,6 +25,23 @@ const HOW_IT_WORKS = [
 
 const FAQ_NUMBERS = [1, 2, 3, 4];
 
+/* The /tcf-canada family, linked from the page Google trusts most.
+ *
+ * Those pages were reachable only through /tcf-canada and each other, so most
+ * sat in Search Console as "Discovered - currently not indexed": known from the
+ * sitemap, never worth a crawl. A link from the homepage is the strongest
+ * signal the site can send that they matter. */
+const GUIDES = [
+  { to: '/tcf-canada-mock-test', key: 'mock' },
+  { to: '/tcf-canada-exam-simulator', key: 'sim' },
+  { to: '/tcf-canada-nclc-7', key: 'nclc' },
+  { to: '/tcf-canada-vocabulary', key: 'vocab' },
+  { to: '/tcf-canada-writing', key: 'writing' },
+  { to: '/tcf-canada-speaking', key: 'speaking' },
+  { to: '/tcf-canada-reading', key: 'reading' },
+  { to: '/tcf-canada-listening', key: 'listening' },
+];
+
 export default function Landing() {
   const { user } = useAuth();
   const t = useT();
@@ -797,6 +814,32 @@ export default function Landing() {
             </div>
           </div>
         </Reveal>
+      </section>
+
+      {/* ============================================================ GUIDES */}
+      <section className="mx-auto max-w-7xl px-4 pt-16 sm:px-6" data-testid="home-guides">
+        <Reveal>
+          <h2 className="text-center font-heading text-3xl font-extrabold text-gray-900">
+            {t('land.guidesA')} <span className="text-primary">{t('land.guidesB')}</span>
+          </h2>
+          <p className="mt-2 text-center text-sm text-gray-500">{t('land.guidesSub')}</p>
+        </Reveal>
+        <div className="mt-9 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {GUIDES.map((g, i) => (
+            <Reveal key={g.to} delay={i * 60}>
+              <Link to={g.to}
+                className="tilt-card group flex h-full flex-col rounded-3xl border border-violet-100 bg-white p-5 shadow-soft transition hover:border-violet-300">
+                <h3 className="font-heading text-base font-bold text-gray-900 group-hover:text-primary">
+                  {t(`land.guide_${g.key}_t`)}
+                </h3>
+                <p className="mt-1.5 flex-1 text-[13px] leading-relaxed text-gray-600">{t(`land.guide_${g.key}_b`)}</p>
+                <span className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-primary">
+                  {t('land.guideRead')} <ArrowRight size={13} weight="bold" />
+                </span>
+              </Link>
+            </Reveal>
+          ))}
+        </div>
       </section>
 
       {/* =============================================================== FAQ */}
