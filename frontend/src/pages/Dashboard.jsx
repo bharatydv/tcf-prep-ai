@@ -296,13 +296,6 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {mistakes?.narrative && (
-        <div className="mt-5 rounded-2xl border-l-4 border-l-green-500 bg-green-50/60 px-5 py-4 text-sm font-medium text-green-800"
-          data-testid="progress-narrative">
-          {mistakes.narrative}
-        </div>
-      )}
-
       {/* WEAK POINTS + RECURRING — the original 2/3 + 1/3 split, kept. */}
       <div className="mt-5 grid gap-5 lg:grid-cols-3">
         <section className="card p-6 lg:col-span-2">
