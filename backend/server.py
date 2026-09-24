@@ -7703,32 +7703,6 @@ async def mistakes_summary(user: User = Depends(get_current_user),
     weak = sorted(((c, n) for c, n in per_cat.items() if n > 0),
                   key=lambda x: -x[1])[:3]
 
-    # "Category X down N% over your last 5 submissions" — needs the ten newest
-    # attempts, and only their error arrays and word counts.
-    narrative = None
-    subs = (await db.execute(
-        select(Submission.errors, Submission.word_count)
-        .where(Submission.user_id == user.user_id)
-        .order_by(Submission.created_at.desc()).limit(10))).all()
-    if len(subs) >= 6:
-        def rate(group, cat):
-            errs = sum(len([e for e in (errors or [])
-                            if e.get("category") == cat]) for errors, _ in group)
-            words = sum(wc or 1 for _, wc in group) or 1
-            return errs / words
-        recent, older = subs[:5], subs[5:]
-        best_cat, best_drop = None, 0
-        for cat in per_cat:
-            r_new, r_old = rate(recent, cat), rate(older, cat)
-            if r_old > 0:
-                drop = (r_old - r_new) / r_old
-                if drop > best_drop:
-                    best_cat, best_drop = cat, drop
-        if best_cat and best_drop >= 0.1:
-            narrative = (f"{CATEGORY_LABELS_FR[best_cat]} errors down "
-                         f"{round(best_drop * 100)}% over your last 5 "
-                         f"submissions. Keep going!")
-
     return {
         "per_category": per_cat,
         "status_counts": status_counts,
@@ -7738,7 +7712,6 @@ async def mistakes_summary(user: User = Depends(get_current_user),
         "weak_points": [{"category": c, "count": n,
                          "label": CATEGORY_LABELS_FR.get(c, c),
                          "tip": CATEGORY_TIPS.get(c, "")} for c, n in weak],
-        "narrative": narrative,
     }
 
 
