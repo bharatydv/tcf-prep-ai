@@ -114,6 +114,19 @@ function renderContent(src) {
   }
 }
 
+/* Three other posts, those sharing the most tags first, then the index's own
+   order. Posts only ever linked from /blog were the least-linked pages on the
+   site; this gives every post a link from every other one. */
+function pickRelated(posts, current) {
+  const tags = new Set(current?.tags || []);
+  return posts
+    .filter((p) => p.slug && p.slug !== current?.slug)
+    .map((p, i) => ({ p, i, shared: (p.tags || []).filter((tag) => tags.has(tag)).length }))
+    .sort((a, b) => b.shared - a.shared || a.i - b.i)
+    .slice(0, 3)
+    .map(({ p }) => p);
+}
+
 export default function BlogPost() {
   const t = useT();
   const { slug } = useParams();
@@ -121,6 +134,7 @@ export default function BlogPost() {
   const [post, setPost] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [allPosts, setAllPosts] = useState([]);
 
   useEffect(() => {
     setLoading(true);
@@ -129,6 +143,14 @@ export default function BlogPost() {
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
   }, [slug]);
+
+  useEffect(() => {
+    api.get('/api/blog')
+      .then(({ data }) => setAllPosts(data.posts || []))
+      .catch(() => setAllPosts([]));
+  }, []);
+
+  const related = useMemo(() => pickRelated(allPosts, post), [allPosts, post]);
 
   // Metadata and Article markup for one post. The <Seo> component owns the
   // tags it sets, emits a canonical URL and Open Graph pair that this page
@@ -214,6 +236,23 @@ export default function BlogPost() {
         className="prose-blog mx-auto max-w-3xl px-4 py-12 sm:px-6"
         dangerouslySetInnerHTML={{ __html: renderContent(post.content) }}
       />
+
+      {related.length > 0 && (
+        <section className="mx-auto max-w-3xl px-4 pb-12 sm:px-6" data-testid="related-posts">
+          <h2 className="font-heading text-2xl font-extrabold text-gray-900">{t('blog.related')}</h2>
+          <ul className="mt-5 grid gap-4 sm:grid-cols-3">
+            {related.map((p) => (
+              <li key={p.slug}>
+                <Link to={`/blog/${p.slug}`}
+                  className="group flex h-full flex-col rounded-2xl border border-violet-100 bg-white p-4 shadow-soft transition hover:border-violet-300">
+                  <span className="font-heading text-sm font-bold leading-snug text-gray-900 group-hover:text-primary">{p.title}</span>
+                  {p.excerpt && <span className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-gray-600">{p.excerpt}</span>}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* FOOTER CTA */}
       <section className="mx-auto max-w-3xl px-4 pb-16 sm:px-6">

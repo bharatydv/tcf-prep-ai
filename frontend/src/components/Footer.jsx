@@ -118,7 +118,7 @@ export default function Footer() {
 
   return (
     <footer className="bg-ink text-violet-200/70" style={{ background: '#120822' }}>
-      <div className="mx-auto grid max-w-7xl gap-x-8 gap-y-8 px-4 py-10 sm:grid-cols-2 sm:px-6 lg:grid-cols-[1.4fr_1fr_1fr_1fr_1.2fr]">
+      <div className="mx-auto grid max-w-7xl gap-x-8 gap-y-8 px-4 py-10 sm:grid-cols-2 sm:px-6 lg:grid-cols-[1.4fr_1fr_1fr_1fr_1fr_1.2fr]">
         <div className="sm:col-span-2 lg:col-span-1">
           <Wordmark />
           <p className="mt-3 text-sm font-semibold text-violet-100">{t('land.footerTag')}</p>
@@ -150,6 +150,17 @@ export default function Footer() {
           ['/listening', t('land.footListening')],
           ['/combinations', t('land.footCombos')],
           ['/pricing', t('nav.pricing')],
+        ]} />
+
+        {/* On every page, so each of these gets a link from all of them. They
+            were the least-linked pages on the site - one or two links each -
+            and Google had left them "Discovered - currently not indexed". */}
+        <Column title={t('land.footPopular')} links={[
+          ['/blog/tcf-canada-complete-guide', t('land.footCompleteGuide')],
+          ['/blog/tcf-canada-clb-chart', t('land.footClbChart')],
+          ['/blog/tcf-vs-tef-canada', t('land.footTcfVsTef')],
+          ['/blog/free-tcf-canada-practice-test', t('land.footFreeTest')],
+          ['/tcf-canada-vocabulary', t('land.footVocab')],
         ]} />
 
         <div>
