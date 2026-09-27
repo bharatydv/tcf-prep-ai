@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  ClockCountdown, CheckCircle, CaretRight, Microphone, Handshake,
+  ClockCountdown, CheckCircle, Microphone, Handshake,
   Scales, ArrowClockwise, Lock, MagnifyingGlass,
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
@@ -14,7 +14,8 @@ import { SpeakingResult } from '../components/SpeakingResult';
 import { useSpeak } from '../lib/speak';
 import { trackPracticeStart, trackPracticeComplete } from '../lib/analytics';
 import { speakingPaperMark, displayMark } from '../lib/tcf';
-import { readSitting, writeSitting, TASKS } from '../lib/speakingExam';
+import { readSitting, writeSitting, TASKS, setLabel, monthLabel } from '../lib/speakingExam';
+import ExamSetRow from '../components/ExamSetRow';
 import AttemptHistory, { useAttempts } from '../components/AttemptHistory';
 
 /* Test Mode for Expression orale: one numbered sitting, the three tâches in the
@@ -60,6 +61,23 @@ export default function SpeakingExam() {
       .catch(() => setSets([]))
       .finally(() => setLoading(false));
   }, []);
+
+  /* The bank, by group: the official series of each month, newest month
+     first, and the general practice sets after them. The server sends a flat
+     list carrying each set's month, so the order of the page is decided here
+     and a fourth month appears on its own the day the bank gains one. */
+  const groups = useMemo(() => {
+    const byMonth = new Map();
+    const general = [];
+    sets.forEach((s) => {
+      if (!s.month) { general.push(s); return; }
+      if (!byMonth.has(s.month)) byMonth.set(s.month, []);
+      byMonth.get(s.month).push(s);
+    });
+    const months = [...byMonth.keys()].sort().reverse()
+      .map((m) => ({ key: m, month: m, sets: byMonth.get(m) }));
+    return general.length ? [...months, { key: 'general', month: null, sets: general }] : months;
+  }, [sets]);
 
   // Tâche 3 is graded on the recorder's own route, so the results survive in
   // sessionStorage rather than in state alone; coming back finishes the paper.
@@ -332,18 +350,21 @@ export default function SpeakingExam() {
   if (!setNumber) {
     return (
       <main className="overflow-x-clip bg-white">
-        <section className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
-          <BackLink to="/speaking" className="!mb-6" testid="back-to-speaking" />
-          <div className="mb-3 text-center">
-            <h1 className="font-heading text-3xl font-extrabold text-gray-900">{t('sexam.title')}</h1>
-          </div>
-          <div className="mb-8 flex flex-wrap justify-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-pink-100 px-4 py-1.5 text-xs font-bold text-pink-700">
-              <ClockCountdown size={14} weight="fill" /> {t('sexam.badgeTimed')}
-            </span>
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-4 py-1.5 text-xs font-bold text-green-700">
-              <CheckCircle size={14} weight="fill" /> {t('sexam.badgeFree')}
-            </span>
+        <section className="mx-auto max-w-6xl px-4 py-7 sm:px-6">
+          {/* One header line, not three stacked: the four groups below are
+              the page, and they should all sit on the first screen with the
+              footer in sight under them. */}
+          <div className="mb-7 flex flex-col items-center gap-2 sm:grid sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+            <BackLink to="/speaking" className="!mb-0 self-start sm:justify-self-start" testid="back-to-speaking" />
+            <h1 className="font-heading text-2xl font-extrabold text-gray-900">{t('sexam.title')}</h1>
+            <div className="flex flex-wrap justify-center gap-2 sm:justify-self-end">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-pink-100 px-3 py-1 text-xs font-bold text-pink-700">
+                <ClockCountdown size={14} weight="fill" /> {t('sexam.badgeTimed')}
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1 text-xs font-bold text-green-700">
+                <CheckCircle size={14} weight="fill" /> {t('sexam.badgeFree')}
+              </span>
+            </div>
           </div>
 
           {loading ? (
@@ -351,32 +372,18 @@ export default function SpeakingExam() {
               <div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-primary" />
             </div>
           ) : (
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-              {sets.map((s) => (
-                <button key={s.set_number} onClick={() => open(s.set_number)}
-                  data-testid={`speaking-set-${s.set_number}`}
-                  className="group flex flex-col overflow-hidden rounded-3xl border border-pink-100 bg-white text-left shadow-soft transition hover:-translate-y-1 hover:shadow-xl hover:shadow-pink-200/50">
-                  <div className="h-1.5 w-full bg-gradient-to-r from-pink-600 to-fuchsia-600" />
-                  <div className="flex flex-1 flex-col p-6">
-                    <div className="flex items-start justify-between">
-                      <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-pink-100 font-heading text-lg font-extrabold text-pink-700">
-                        {s.set_number}
-                      </span>
-                      <CaretRight size={18} className="text-gray-300 transition group-hover:translate-x-0.5" />
-                    </div>
-                    <h3 className="mt-4 flex-1 font-heading text-base font-bold text-gray-900">
-                      {t('sexam.setN', { n: s.set_number })}
-                    </h3>
-                    {/* Nothing about the paper itself — not the subject,
-                        not the domain it is drawn from. A theme is a strong
-                        hint: "Environnement" is most of the preparation for a
-                        question about it, and a candidate who can read the
-                        themes will sit the paper they already have opinions
-                        about rather than the one they were given. */}
-                  </div>
-                </button>
-              ))}
-            </div>
+            groups.map((g) => (
+              <ExamSetRow key={g.key} testid={`speaking-group-${g.key}`}
+                title={g.month ? monthLabel(g.month) : t('sexam.general')}
+                subtitle={g.month
+                  ? t('sexam.monthSub', { month: monthLabel(g.month) })
+                  : t('sexam.generalSub')}
+                sets={g.sets}
+                cardTitle={(s) => (g.month
+                  ? t('sexam.testN', { n: s.index })
+                  : t('sexam.setN', { n: s.index || s.set_number }))}
+                onOpen={open} />
+            ))
           )}
         </section>
       </main>
@@ -424,7 +431,7 @@ export default function SpeakingExam() {
         <div className="overflow-hidden rounded-3xl border border-pink-100 shadow-soft">
           <div className="bg-gradient-to-r from-pink-600 to-fuchsia-600 px-6 py-5 text-white">
             <p className="text-xs font-bold uppercase tracking-wide text-white/80">{t('sexam.testMode')}</p>
-            <p className="mt-1 font-heading text-2xl font-extrabold">{t('sexam.setN', { n: paper.set_number })}</p>
+            <p className="mt-1 font-heading text-2xl font-extrabold">{setLabel(t, paper)}</p>
             <p className="mt-1 text-sm text-white/90">{t('sexam.progress', { done, total: 3 })}</p>
             {!finished && (
               <p className="mt-1 text-xs text-white/70" data-testid="marks-held">

@@ -8115,8 +8115,11 @@ async def speaking_exam_sets():
     #
     # The set's own content is served by /api/speaking/exam-sets/{n}, when the
     # candidate opens it, and each tâche reveals its subject as it is sat.
-    return {"sets": [{"set_number": n}
-                     for n in range(1, len(exam_sets.SPEAKING_EXAM_SETS) + 1)]}
+    #
+    # Each row also says which group it belongs to — a month of the official
+    # 2026 series, or none for the general practice sets — so the chooser can
+    # lay the bank out by month. `index` is the number within that group.
+    return {"sets": exam_sets.speaking_set_list()}
 
 
 @app.get("/api/speaking/exam-sets/attempts")
@@ -8157,7 +8160,7 @@ async def speaking_exam_sittings(user: User = Depends(get_current_user),
     sittings = {}
     for r in rows:
         sitting = sittings.setdefault(r["exam_set"], {
-            "set_number": r["exam_set"], "tasks": {}, "last_activity": None})
+            "set_number": r["exam_set"], **meta, "tasks": {}, "last_activity": None})
         sitting["tasks"][str(r["task_type"])] = {
             "submission_id": r["submission_id"],
             "tcf_level": r["tcf_level"],
@@ -8428,6 +8431,12 @@ async def reading_check_one(reading_question_id: str, body: ReadingCheckIn,
     return {"correction": _reading_correction(q, body.picked)}
 
 
+        # The group the set belongs to, so the dashboard can name it the way
+        # the exam page does ("September 2026 · Test 3", not "Set 23"). A
+        # number past the end of the bank — a set since removed — gets none.
+        meta = (exam_sets.SPEAKING_SET_META[r["exam_set"] - 1]
+                if 1 <= r["exam_set"] <= len(exam_sets.SPEAKING_SET_META)
+                else {"month": None, "month_label": None, "index": r["exam_set"]})
 @app.post("/api/reading/tests/{test_number}/submit")
 async def reading_submit(test_number: int, body: ReadingSubmitIn,
                          user: User = Depends(get_current_user),

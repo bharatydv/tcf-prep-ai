@@ -9,9 +9,18 @@ SPEAKING_EXAM_SETS entries are (tache1, tache2, tache3):
   tache1 — the guided interview brief; the candidate speaks about themselves.
   tache2 — {"theme", "situation", "hints"} : the roleplay the candidate leads.
   tache3 — {"theme", "question"} : the opinion the candidate defends.
+
+The bank is in two parts. The twenty sets written here first are the general
+practice series; after them come the monthly exam series of 2026 (September,
+August, July), transcribed in speaking_series_2026.py. Set numbers are
+positional and run across both parts, because a candidate's attempts are filed
+under that number in the database — so nothing here is ever reordered or
+removed, only appended.
 """
 
-SPEAKING_EXAM_SETS = [
+from speaking_series_2026 import SPEAKING_SERIES_2026
+
+SPEAKING_PRACTICE_SETS = [
     # 01
     ("Présentation du candidat — introduction personnelle.",
      {"theme": "Immigration et Intégration",
@@ -155,6 +164,33 @@ SPEAKING_EXAM_SETS = [
 ]
 
 
+# The monthly series, in the tuple shape the rest of this module reads.
+_SERIES_SETS = [(x["tache1"], x["tache2"], x["tache3"]) for x in SPEAKING_SERIES_2026]
+
+SPEAKING_EXAM_SETS = SPEAKING_PRACTICE_SETS + _SERIES_SETS
+
+# Which month each set belongs to, aligned with SPEAKING_EXAM_SETS by position.
+# `month` is None for the general practice series; `index` is the number the
+# page prints — the set's place within its own group, not the global number.
+SPEAKING_SET_META = (
+    [{"month": None, "month_label": None, "index": n}
+     for n in range(1, len(SPEAKING_PRACTICE_SETS) + 1)]
+    + [{"month": x["month"], "month_label": x["month_label"], "index": x["index"]}
+       for x in SPEAKING_SERIES_2026]
+)
+
+
+def speaking_set_list() -> list:
+    """The chooser's rows: number and group, and nothing of the paper itself.
+
+    A theme is a strong hint ("Environnement" is most of the preparation for a
+    question about it), so the subjects stay behind the set number until it is
+    opened and each tâche is sat.
+    """
+    return [{"set_number": n, **meta}
+            for n, meta in enumerate(SPEAKING_SET_META, start=1)]
+
+
 T3_QUESTION = "Comparez les deux points de vue et donnez votre opinion."
 
 # WRITING_EXAM_SETS entries are (tache1, tache2, {doc_1, doc_2}).
@@ -284,13 +320,18 @@ def writing_set(number: int) -> dict:
 def speaking_set(number: int) -> dict:
     """One numbered sitting, shaped for the API."""
     t1, t2, t3 = SPEAKING_EXAM_SETS[number - 1]
+    # A few of the monthly series give the roleplay with no list of points to
+    # cover; the agent then gets the situation alone rather than "( )".
+    hints = (t2.get("hints") or "").strip()
+    consigne = f"{t2['situation']} ({hints})" if hints else t2["situation"]
     return {
         "set_number": number,
+        **SPEAKING_SET_META[number - 1],
         "task1": {"task_type": 1, "brief": t1},
         "task2": {"task_type": 2, "theme": t2["theme"],
-                  "situation": t2["situation"], "hints": t2["hints"],
+                  "situation": t2["situation"], "hints": hints,
                   # What the roleplay agent is handed as the scenario.
-                  "consigne": f"{t2['situation']} ({t2['hints']})"},
+                  "consigne": consigne},
         "task3": {"task_type": 3, "theme": t3["theme"],
                   "question": t3["question"]},
     }
@@ -315,6 +356,8 @@ def validate() -> list:
         # would leave nothing to compare, which is the whole task.
         if t3.get("doc_1") == t3.get("doc_2"):
             problems.append(f"writing set {i}: tâche 3 documents are identical")
+    if len(SPEAKING_SET_META) != len(SPEAKING_EXAM_SETS):
+        problems.append("speaking sets: metadata and bank differ in length")
     for i, entry in enumerate(SPEAKING_EXAM_SETS, start=1):
         if len(entry) != 3:
             problems.append(f"speaking set {i}: expected 3 tâches")
@@ -322,7 +365,9 @@ def validate() -> list:
         t1, t2, t3 = entry
         if not str(t1).strip():
             problems.append(f"speaking set {i}: tâche 1 brief is empty")
-        for field in ("theme", "situation", "hints"):
+        # Hints are optional: the official series sometimes give the roleplay
+        # without a list of points to cover.
+        for field in ("theme", "situation"):
             if not str(t2.get(field, "")).strip():
                 problems.append(f"speaking set {i}: tâche 2 missing {field}")
         for field in ("theme", "question"):

@@ -47,3 +47,29 @@ export const TASKS = [1, 2, 3];
 
 export const sittingComplete = (sitting) =>
   TASKS.every((n) => sitting && sitting[n]);
+
+/* How a set is named on screen.
+ *
+ * The bank is in groups: the general practice series, and the official
+ * Expression orale series of each month of 2026. A set carries its global
+ * number (what the URL and the database use) and its `index` within its
+ * group (what the candidate reads). "Test 3" under "September 2026" is what
+ * the page prints; "Exam set 23" would be a number nobody chose.
+ *
+ * `month` is a "YYYY-MM" key from the server, turned into an English month
+ * name here so the dictionary does not need a row per month. */
+export function monthLabel(month) {
+  if (!month) return '';
+  const [y, m] = String(month).split('-').map(Number);
+  if (!y || !m) return String(month);
+  return new Date(y, m - 1, 1).toLocaleString('en', { month: 'long', year: 'numeric' });
+}
+
+/* t is the page's translator; `set` is a row from /api/speaking/exam-sets or
+   the sitting itself. Falls back to the plain set number for rows that carry
+   no group — older API shapes, or a general set. */
+export function setLabel(t, set) {
+  if (!set) return '';
+  if (set.month) return `${monthLabel(set.month)} · ${t('sexam.testN', { n: set.index })}`;
+  return t('sexam.setN', { n: set.index || set.set_number });
+}
