@@ -234,3 +234,59 @@ describe('the recording', () => {
     modal.unmount();
   }, 10000);
 });
+
+/* The examiner's voice must be off before the microphone is on.
+ *
+ * A fake speech engine whose voice keeps coming out of the speakers after
+ * each utterance reports that it ended — which is what a slow voice, or an
+ * end event that fires early, looks like from the page. The microphone used
+ * to open on the end event and heard the examiner's last words as the
+ * candidate's.
+ */
+describe("the examiner's voice", () => {
+  let synth;
+  beforeEach(() => {
+    synth = {
+      speaking: false,
+      pending: false,
+      speak(u) { this.speaking = true; setTimeout(() => u.onend && u.onend(), 5); },
+      cancel() { this.speaking = false; },
+      resume() {},
+      getVoices() { return []; },
+    };
+    window.speechSynthesis = synth;
+    window.SpeechSynthesisUtterance = function SpeechSynthesisUtterance(text) { this.text = text; };
+  });
+  afterEach(() => {
+    delete window.speechSynthesis;
+    delete window.SpeechSynthesisUtterance;
+  });
+
+  it('is finished before the microphone opens, echo tail included', async () => {
+    const before = FakeRecognition.last;
+    const modal = await openTache1();
+    // Every utterance has reported its end, but the voice is still playing.
+    await act(async () => { await sleep(1500); });
+    expect(FakeRecognition.last).toBe(before);
+    // The speakers go quiet; a moment is still left for the room.
+    synth.speaking = false;
+    await act(async () => { await sleep(200); });
+    expect(FakeRecognition.last).toBe(before);
+    await act(async () => { await sleep(500); });
+    expect(FakeRecognition.last).not.toBe(before);
+    await modal.finish();
+    modal.unmount();
+  }, 10000);
+
+  it("cuts the examiner's echo off the start of the candidate's turn", async () => {
+    synth.speak = function speak(u) { setTimeout(() => u.onend && u.onend(), 5); };
+    const modal = await openTache1();
+    await act(async () => { await sleep(1200); });
+    act(() => {
+      FakeRecognition.last.hear("s'il vous plaît bonjour je m'appelle Anna");
+    });
+    await modal.finish();
+    expect(candidateLines(graded())).toEqual(["bonjour je m'appelle Anna"]);
+    modal.unmount();
+  }, 10000);
+});

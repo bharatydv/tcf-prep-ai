@@ -8,6 +8,7 @@ import { api, errMsg } from '../lib/api';
 import { startRecording as startCapture, appendAudio, isRecordingSupported } from '../lib/recorder';
 import { SPEAKING_TASKS } from '../lib/tcf';
 import { pickFrenchVoice } from '../lib/speak';
+import { stripEcho } from '../lib/echo';
 import { useT } from '../i18n';
 
 /* Tache 2 is a live roleplay: the candidate asks, an examiner answers. This
@@ -67,6 +68,17 @@ const TACHE1_OPENING = "Bonjour. Présentez-vous, s’il vous plaît.";
    on every reply, since every reply cancels the last. Queue after it has
    settled, and only pay the delay when there was something to cancel. */
 const CANCEL_SETTLE = 300;
+
+/* The examiner has finished speaking when the speakers are quiet, not when
+   the last utterance reports that it ended. The end event can come early, or
+   the per-chunk deadline can move on while a slow voice is still talking, and
+   the microphone opening then heard the examiner's last words and handed them
+   to the grader as the candidate's. So the engine is asked until it says it is
+   silent, for at most QUIET_MAX_MS — after which it is cancelled, so the voice
+   is certainly off before the microphone is on — and ECHO_TAIL_MS more is left
+   for the sound still leaving the speakers and the room. */
+const QUIET_MAX_MS = 8000;
+const ECHO_TAIL_MS = 450;
 
 // Voices differ wildly in quality and the first French one in the list is
 // usually the flat local fallback, and a French locale alone does not pick the
@@ -230,6 +242,19 @@ export default function ConversationModal({
     segIdxRef.current = segIdx;
   }, [segment, consigne, segIdx]);
   useEffect(() => { turnsRef.current = turns; }, [turns]);
+
+  /* What the examiner said last, for cutting its echo off the start of the
+     candidate's next turn. See lib/echo. */
+  // Reads only a ref, so it never changes and the callbacks using it do not
+  // rebuild.
+  const withoutEcho = useCallback((text) => {
+    const all = turnsRef.current;
+    let agent = '';
+    for (let i = all.length - 1; i >= 0 && !agent; i -= 1) {
+      if (all[i].role === 'agent') agent = all[i].text;
+    }
+    return stripEcho(text, agent);
+  }, []);
   useEffect(() => { mutedRef.current = muted; }, [muted]);
 
   // The voice list loads asynchronously in Chrome, and picking before it
@@ -299,11 +324,27 @@ export default function ConversationModal({
     if (!voiceRef.current) voiceRef.current = pickFrenchVoice();
     const chunks = splitForSpeech(text);
 
+    /* Every chunk has been said: wait for real silence before handing the
+       turn back. See QUIET_MAX_MS. */
+    const finished = () => {
+      const since = Date.now();
+      const check = () => {
+        if (seq !== speakSeqRef.current || doneRef.current || mutedRef.current) return resolve();
+        let busy = false;
+        try { busy = synth.speaking || synth.pending; } catch (e) { /* no engine left */ }
+        if (busy && Date.now() - since < QUIET_MAX_MS) { setTimeout(check, 100); return undefined; }
+        if (busy) { try { synth.cancel(); } catch (e) { /* already stopped */ } }
+        setTimeout(resolve, ECHO_TAIL_MS);
+        return undefined;
+      };
+      check();
+    };
+
     let i = 0;
     const sayNext = () => {
       // Superseded, muted or closed: stop here and let the caller move on.
-      if (seq !== speakSeqRef.current || doneRef.current || mutedRef.current
-          || i >= chunks.length) return resolve();
+      if (seq !== speakSeqRef.current || doneRef.current || mutedRef.current) return resolve();
+      if (i >= chunks.length) return finished();
       const chunk = chunks[i];
       i += 1;
       const endsSentence = /[.!?…]$/.test(chunk);
@@ -371,11 +412,12 @@ export default function ConversationModal({
         if (fallback) { clearTimeout(fallback); fallback = null; }
       };
 
-      const hand = (text) => {
+      const hand = (heard) => {
         if (handed) return;
         handed = true;
         clearSilence();
         setInterim('');
+        const text = withoutEcho(heard);
         // finish() is collecting these words itself; leave them for it.
         if (doneRef.current) return;
         pendingRef.current = '';
@@ -452,7 +494,7 @@ export default function ConversationModal({
     // language switch — which is exactly when the error copy must change.
     // `manualTurns` comes off the mode prop and never changes for a mounted
     // modal; it is declared so the check above cannot go stale.
-  }, [t, manualTurns]);
+  }, [t, manualTurns, withoutEcho]);
   useEffect(() => { listenRef.current = listen; }, [listen]);
 
   /* ---------------- one exchange ---------------- */
@@ -528,7 +570,7 @@ export default function ConversationModal({
       const { data } = await api.post('/api/speaking/turn/transcribe',
         appendAudio(new FormData(), recorded),
         { headers: { 'Content-Type': 'multipart/form-data' } });
-      const text = (data?.text || '').trim();
+      const text = withoutEcho((data?.text || '').trim());
       if (turnSegRef.current !== segIdxRef.current) {
         if (text) setTurns((prev) => [...prev, { role: 'candidate', text }]);
         return;                       // the tâche moved on while this uploaded
@@ -628,11 +670,11 @@ export default function ConversationModal({
       const { data } = await api.post('/api/speaking/turn/transcribe',
         appendAudio(new FormData(), recorded),
         { headers: { 'Content-Type': 'multipart/form-data' } });
-      return (data?.text || '').trim();
+      return withoutEcho((data?.text || '').trim());
     } catch (e) {
       return '';
     }
-  }, []);
+  }, [withoutEcho]);
 
   /* The tâche's recording, finished. Null when there is none: a browser that
      cannot record, or a recording with nothing in it. */
@@ -655,7 +697,8 @@ export default function ConversationModal({
     // Nothing more is answered from here; the words already spoken are
     // collected before the microphone is closed.
     doneRef.current = true;
-    const last = (await flushSpeech()) || (await flushRecording());
+    const heard = await flushSpeech();
+    const last = heard ? withoutEcho(heard) : await flushRecording();
     const session = (await stopSession()) || lastSessionRef.current;
     lastSessionRef.current = session;
     teardown();
