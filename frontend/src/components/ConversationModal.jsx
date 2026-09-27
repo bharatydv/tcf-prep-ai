@@ -182,6 +182,23 @@ export default function ConversationModal({
   const [clockHeld, setClockHeld] = useState(false);
 
   const turnsRef = useRef([]);
+  /* What the candidate has said in the turn still being heard, final words
+     and the recogniser's current guess together. A turn only becomes a turn at
+     a pause, so without this everything since the last pause was thrown away
+     when the tâche ended — in a two-minute monologue that can be most of it,
+     which is how a transcript came back missing half the answer. */
+  const pendingRef = useRef('');
+  // Set while finish() waits for the recogniser's last words.
+  const flushRef = useRef(null);
+  const finishingRef = useRef(false);
+  /* The candidate's voice for the whole tâche, as one recording, sent with
+     the answer and kept with the result so every correction can be played
+     back as they actually said it. Paused whenever it is not the candidate's
+     turn, so the examiner's voice through the speakers is never in it — and
+     the recording and its transcript are the candidate alone. */
+  const sessionRef = useRef(null);
+  // Kept after a failed grade, so pressing Finish again still sends it.
+  const lastSessionRef = useRef(null);
   const mutedRef = useRef(false);
   const doneRef = useRef(false);
   const recRef = useRef(null);
@@ -247,6 +264,8 @@ export default function ConversationModal({
     // closing the modal mid-turn never leaves the mic indicator lit.
     try { captureRef.current?.cancel(); } catch (e) {}
     captureRef.current = null;
+    try { sessionRef.current?.cancel(); } catch (e) {}
+    sessionRef.current = null;
   }, []);
 
   const cancel = () => { teardown(); onCancel(); };
@@ -336,13 +355,20 @@ export default function ConversationModal({
       rec.continuous = true;
 
       let finalText = '';
+      let lastLive = '';
+      // Both halves: what the recogniser has settled on, and what it is still
+      // deciding. The second is a guess, but a guessed word is closer to what
+      // was said than a missing one.
+      const current = () => `${finalText} ${lastLive}`.replace(/\s+/g, ' ').trim();
       let silence = null;
+      let fallback = null;
       // The silence timer and onend can both decide the turn is over. Whoever
       // gets there first wins; without this the turn was sent twice.
       let handed = false;
 
       const clearSilence = () => {
         if (silence) { clearTimeout(silence); silence = null; }
+        if (fallback) { clearTimeout(fallback); fallback = null; }
       };
 
       const hand = (text) => {
@@ -350,12 +376,17 @@ export default function ConversationModal({
         handed = true;
         clearSilence();
         setInterim('');
+        // finish() is collecting these words itself; leave them for it.
         if (doneRef.current) return;
+        pendingRef.current = '';
         if (segAtStart !== segIdxRef.current) {
           // The tâche ran out mid-turn. What the candidate managed to say still
           // belongs in the transcript the grader reads; the answer to it does
           // not, because the next tâche is already opening.
-          if (text) setTurns((prev) => [...prev, { role: 'candidate', text }]);
+          if (text) {
+            turnsRef.current = [...turnsRef.current, { role: 'candidate', text }];
+            setTurns(turnsRef.current);
+          }
           return;
         }
         if (text) sendTurnRef.current?.(text);
@@ -367,10 +398,13 @@ export default function ConversationModal({
       const armSilence = () => {
         clearSilence();
         silence = setTimeout(() => {
-          const text = finalText.trim();
-          if (!text) return;                 // nothing said yet — keep waiting
+          if (!current()) return;            // nothing said yet — keep waiting
+          /* Stopped, then handed over when the recogniser has finished. It
+             settles the last phrase only as it stops, and handing the turn
+             over first — as this did — dropped those words every time. The
+             fallback covers an engine that never reports the end. */
           try { rec.stop(); } catch (e) { /* already stopping */ }
-          hand(text);
+          fallback = setTimeout(() => hand(current()), 1500);
         }, SILENCE_MS);
       };
 
@@ -381,6 +415,8 @@ export default function ConversationModal({
           if (r.isFinal) finalText += r[0].transcript;
           else live += r[0].transcript;
         }
+        lastLive = live;
+        pendingRef.current = current();
         setInterim(live);
         armSilence();
       };
@@ -395,9 +431,11 @@ export default function ConversationModal({
       };
       rec.onend = () => {
         clearSilence();
+        // finish() asked for the last words: they are in pendingRef now.
+        if (flushRef.current) flushRef.current();
         // Continuous sessions still end on their own — a network blip, or the
         // mobile engine's own limit. Whatever was captured is the turn.
-        hand(finalText.trim());
+        hand(current());
       };
       // The status used to be set before start(), so the panel said "listening"
       // while the audio stream was still opening and the first word went into
@@ -427,6 +465,7 @@ export default function ConversationModal({
       const reply = (data?.reply || '').trim();
       if (!reply) throw new Error('empty reply');
       const after = [...history, { role: 'agent', text: reply }];
+      turnsRef.current = after;
       setTurns(after);
       if (doneRef.current) return;
       setStatus('speaking');
@@ -440,6 +479,7 @@ export default function ConversationModal({
 
   const sendTurn = useCallback((text) => {
     const next = [...turnsRef.current, { role: 'candidate', text }];
+    turnsRef.current = next;
     setTurns(next);
     /* Tâche 1 has no second speaker. A two-second breath is a breath, not an
        invitation — answering into it broke the candidate's presentation in
@@ -505,8 +545,24 @@ export default function ConversationModal({
   const begin = async () => {
     setChecking(true);
     try {
-      const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
-      probe.getTracks().forEach((track) => track.stop());
+      if (isRecordingSupported()) {
+        /* Opening the recording is also the microphone check. Started here,
+           inside the press, because some browsers only open a microphone
+           from a gesture — and paused at once: nothing is kept until the
+           candidate's first turn. */
+        const capture = await startCapture({ basename: 'session' });
+        try {
+          capture.recorder.pause();
+          sessionRef.current = capture;
+        } catch (e) {
+          // A recorder that cannot pause would keep the examiner's voice too.
+          // No recording is better than one that is not the candidate's.
+          capture.cancel();
+        }
+      } else {
+        const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+        probe.getTracks().forEach((track) => track.stop());
+      }
     } catch (err) {
       setChecking(false);
       return toast.error(t('conv.micDenied'));
@@ -538,23 +594,100 @@ export default function ConversationModal({
   }, [exchange, isMonologue, speak]);
   useEffect(() => { goLiveRef.current = goLive; }, [goLive]);
 
+  /* The words of the turn still in progress, once the recogniser has let go
+     of them. Waits for its end event, which is when the last phrase is
+     settled, and no more than a second and a bit for an engine that never
+     sends one. */
+  const flushSpeech = useCallback(() => new Promise((resolve) => {
+    let done = false;
+    const take = () => {
+      if (done) return;
+      done = true;
+      flushRef.current = null;
+      const text = pendingRef.current.trim();
+      pendingRef.current = '';
+      resolve(text);
+    };
+    const rec = recRef.current;
+    if (!rec || !pendingRef.current.trim()) { take(); return; }
+    flushRef.current = take;
+    setTimeout(take, 1200);
+    try { rec.stop(); } catch (e) { take(); }
+  }), []);
+
+  /* The push-to-talk turn still recording, transcribed rather than thrown
+     away. Pressing Finish mid-sentence used to cancel the recording. */
+  const flushRecording = useCallback(async () => {
+    const capture = captureRef.current;
+    if (!capture) return '';
+    captureRef.current = null;
+    setRecording(false);
+    try {
+      const recorded = await capture.stop();
+      if (!recorded.blob.size) return '';
+      const { data } = await api.post('/api/speaking/turn/transcribe',
+        appendAudio(new FormData(), recorded),
+        { headers: { 'Content-Type': 'multipart/form-data' } });
+      return (data?.text || '').trim();
+    } catch (e) {
+      return '';
+    }
+  }, []);
+
+  /* The tâche's recording, finished. Null when there is none: a browser that
+     cannot record, or a recording with nothing in it. */
+  const stopSession = useCallback(async () => {
+    const capture = sessionRef.current;
+    sessionRef.current = null;
+    if (!capture) return null;
+    try {
+      const recorded = await capture.stop();
+      return recorded.blob.size ? recorded : null;
+    } catch (e) {
+      return null;
+    }
+  }, []);
+
   const finish = useCallback(async () => {
     if (doneRef.current && phase === 'grading') return;
+    if (finishingRef.current) return;
+    finishingRef.current = true;
+    // Nothing more is answered from here; the words already spoken are
+    // collected before the microphone is closed.
+    doneRef.current = true;
+    const last = (await flushSpeech()) || (await flushRecording());
+    const session = (await stopSession()) || lastSessionRef.current;
+    lastSessionRef.current = session;
     teardown();
+    if (last) {
+      turnsRef.current = [...turnsRef.current, { role: 'candidate', text: last }];
+      setTurns(turnsRef.current);
+    }
+    finishingRef.current = false;
     const body = {
       consigne, history: turnsRef.current, mode,
       ...(examSet ? { exam_set: examSet } : {}),
+    };
+    /* With the recording when there is one: the server transcribes it, keeps
+       it with the result and times every word, which is what lets each
+       correction play the candidate's own voice. */
+    const send = () => {
+      if (!session) return api.post('/api/speaking/converse/grade', body);
+      const form = appendAudio(new FormData(), session);
+      form.append('payload', JSON.stringify(body));
+      return api.post('/api/speaking/converse/grade-audio', form,
+        { headers: { 'Content-Type': 'multipart/form-data' } });
     };
     /* Handed over in flight, and this modal is done. The request is already
        on its way, so the marking is not skipped — it simply stops being
        something the candidate sits and watches between two tâches. */
     if (onSubmitted) {
-      onSubmitted(api.post('/api/speaking/converse/grade', body));
+      onSubmitted(send());
       return;
     }
     setPhase('grading');
     try {
-      const { data } = await api.post('/api/speaking/converse/grade', body);
+      const { data } = await send();
       onGraded(data);
     } catch (err) {
       if (err?.response?.status === 402) {
@@ -568,7 +701,23 @@ export default function ConversationModal({
       setPhase('live');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [consigne, onGraded, onSubmitted, onCancel, phase, teardown]);
+  }, [consigne, onGraded, onSubmitted, onCancel, phase, teardown, flushSpeech, flushRecording, stopSession]);
+
+  /* The recording runs only on the candidate's turn. Listening covers both
+     ways of speaking — the live recogniser and the record button — and a
+     monologue also records the moments between two of its own turns, when
+     the recogniser restarts after a pause, because nobody else speaks in
+     tâche 1. The examiner speaking or thinking is never recorded. */
+  useEffect(() => {
+    const recorder = sessionRef.current?.recorder;
+    if (!recorder || phase !== 'live') return;
+    const candidateTurn = status === 'listening' || status === 'starting'
+      || (isMonologue && status === 'idle');
+    try {
+      if (candidateTurn && recorder.state === 'paused') recorder.resume();
+      else if (!candidateTurn && recorder.state === 'recording') recorder.pause();
+    } catch (e) { /* the recorder has already stopped */ }
+  }, [status, phase, isMonologue]);
 
   // Wall-clock deadlines: the official 2 minutes of preparation and 3 min 30
   // of interaction must not stretch because the tab lost focus.

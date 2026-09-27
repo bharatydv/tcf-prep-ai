@@ -25,3 +25,8 @@ __pycache__/
 # reaches the container as a read-only bind mount from docker-compose instead,
 # or is not served by the container at all when MEDIA_BASE_URL names a bucket.
 media/
+
+# Learners' own recordings. They reach the container through the `recordings`
+# volume in docker-compose, and a developer's local test recordings must never
+# be baked into an image.
+recordings/

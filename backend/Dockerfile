@@ -8,7 +8,11 @@ COPY . .
 # host. Nothing here needs to write to the image or bind a privileged port, so
 # nothing here needs root. Ownership is set on /app so the reloader and any
 # temporary file still work if someone runs this stack in development mode.
+# /app/recordings is created here so the named volume mounted over it starts
+# out owned by appuser; a volume over a missing directory is owned by root and
+# every recording would fail to save.
 RUN useradd --create-home --uid 10001 appuser \
+    && mkdir -p /app/recordings \
     && chown -R appuser:appuser /app
 USER appuser
 

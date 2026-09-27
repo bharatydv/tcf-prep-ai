@@ -22,20 +22,20 @@
  * right, what should I fix first, have I done this before, am I improving.
  *
  * So: the result, then what went well, then the three things to fix, then the
- * corrections, then the mistakes that are not new, then the stronger version,
- * then what to practise, then the examiner's grid. The grid did not move
- * because it stopped mattering; it moved because it is the detail, and detail
- * belongs after the answer to "what now".
+ * corrections, the transcript, the mistakes that are not new, the stronger
+ * version, the questions a tâche 2 could also have asked, the vocabulary, the
+ * suggestions, and what to practise.
  *
- * Nothing that was on this page has been taken off it.
+ * The examiner's grid used to close the page. It was taken off: the three
+ * numbers at the top are the result, and a second block of criterion scores
+ * under everything else read as a second, different result.
  */
 import { useMemo, useState } from 'react';
-import { CheckCircle, XCircle, Sparkle } from '@phosphor-icons/react';
+import { CheckCircle, XCircle, Sparkle, Question } from '@phosphor-icons/react';
 import { SpeakButton } from './SpeakButton';
 import { OwnVoiceButton } from './OwnVoiceButton';
 import { CorrectionText } from './CorrectionText';
-import { SpeakingGrid } from './SpeakingGrid';
-import { TranscriptDiff } from './TranscriptDiff';
+import { TranscriptDiff, candidateText } from './TranscriptDiff';
 import {
   ResultHero, DidWell, Priorities, Recurring, Progress, Vocabulary,
   NextStep, PracticeCta, Panel, TOKENS, CAT_LABELS, KIND_TONE,
@@ -146,6 +146,17 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
   if (!result) return null;
 
   const history = result.history || {};
+  /* What the candidate said, and only that. A roleplay transcript carries the
+     agent's lines too, and "Your answer" beside the stronger version is the
+     candidate's answer, not the conversation. */
+  const answer = candidateText(result.transcript || result.original_text);
+  /* Suggestions were saved under the writing flow's name before the full
+     grade was kept, so an older result still has them there. */
+  const suggestions = [result.suggestions, result.improvement_suggestions]
+    .find((list) => Array.isArray(list) && list.some((x) => String(x || '').trim())) || [];
+  const questions = Array.isArray(result.missed_questions)
+    ? result.missed_questions.filter((q) => String(q?.question || '').trim())
+    : [];
   const rows = showAll ? ranked : ranked.slice(0, IMPORTANT_COUNT);
   const hasMore = ranked.length > IMPORTANT_COUNT;
   /* Over every correction rather than the five on screen, so the table does
@@ -345,7 +356,7 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
         <p className="font-heading text-sm font-bold text-gray-900">{t('speak.transcript')}</p>
         <div className="mt-3">
           <TranscriptDiff
-            transcript={result.transcript}
+            transcript={result.transcript || result.original_text}
             corrected={result.corrected_version}
             errors={result.errors || []}
             action={(result.corrected_version || '').trim()
@@ -375,12 +386,12 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
           tone="border-emerald-100 bg-emerald-50/40" testId="enhanced-version"
           aside={<SpeakButton text={result.enhanced_version} id={`${idPrefix}enhanced`} {...tts} />}>
           <div className="grid gap-4 sm:grid-cols-2">
-            {showTranscript && (result.transcript || '').trim() && (
+            {showTranscript && answer && (
               <div className="rounded-2xl border border-emerald-100 bg-white p-4">
                 <p className="text-[10px] font-black uppercase tracking-wider text-gray-400">
                   {t('report.yourAnswer')}
                 </p>
-                <p className="mt-2 text-sm leading-relaxed text-gray-600">{result.transcript}</p>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-gray-600">{answer}</p>
               </div>
             )}
             <div className="rounded-2xl border border-emerald-100 bg-white p-4">
@@ -398,20 +409,49 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
         </Panel>
       )}
 
+      {/* Tâche 2 only: the grader returns these for the roleplay and nothing
+          else. In French and ready to say, each with the English note on what
+          it would have found out. */}
+      {questions.length > 0 && (
+        <Panel title={t('report.moreQuestions')} description={t('report.moreQuestionsSub')}
+          tone="!border-[#f4dfae] !bg-[#fffaf0]" testId="more-questions">
+          <ol className="grid gap-[9px]">
+            {questions.map((q, i) => (
+              <li key={i} className="flex items-start gap-[10px] rounded-[11px] border border-[#f0e2bf] bg-white px-[12px] py-[10px]">
+                <Question size={16} weight="fill" className="mt-[2px] shrink-0 text-amber-600" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13px] font-extrabold text-[#171322]">{q.question}</span>
+                  {q.why && <span className="mt-[2px] block text-[11px] leading-[1.45] text-[#64748b]">{q.why}</span>}
+                </span>
+                <SpeakButton text={q.question} id={`${idPrefix}ask-${i}`} {...tts} />
+              </li>
+            ))}
+          </ol>
+        </Panel>
+      )}
+
       <Vocabulary items={result.vocabulary_suggestions} />
+
+      {/* On every tâche. It used to show only where the grade had just come
+          back, because a reopened result had lost it. */}
+      {suggestions.length > 0 && (
+        <Panel title={t('speak.suggestions')} description={t('report.suggestionsSub')}
+          testId="suggestions">
+          <ul className="grid gap-[8px]">
+            {suggestions.filter((x) => String(x || '').trim()).map((x, i) => (
+              <li key={i} className="flex items-start gap-[8px] text-[13px] leading-[1.45] text-[#334155]">
+                <CheckCircle size={16} weight="fill" className="mt-[2px] shrink-0 text-[#7c3aed]" /> {x}
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      )}
 
       <PracticeCta practiceHref={PRACTICE_HREF} />
 
       <Progress previous={history.previous} result={result} />
 
       <NextStep focusAreas={result.focus_areas} practiceHref={PRACTICE_HREF} />
-
-      {/* The examiner's grid. The detail behind the number at the top, which
-          is why it reads after the answer to "what should I do now". Shown on
-          its own now, without the "Your speaking profile" card and the
-          summary cards that used to sit above it: those repeated, in miniature,
-          exactly what the grid already says below them. */}
-      <SpeakingGrid result={result} showNarrative={false} />
 
       {Array.isArray(result.pronunciation_errors) && result.pronunciation_errors.length > 0 && (
         <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft"
@@ -434,18 +474,6 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
         </div>
       )}
 
-      {Array.isArray(result.suggestions) && result.suggestions.length > 0 && (
-        <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft">
-          <p className="font-heading text-sm font-bold text-gray-900">{t('speak.suggestions')}</p>
-          <ul className="mt-3 space-y-2">
-            {result.suggestions.map((s, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
-                <CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-primary" /> {s}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }
