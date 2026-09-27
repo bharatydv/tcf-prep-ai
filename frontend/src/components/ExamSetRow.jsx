@@ -19,27 +19,69 @@ const ARROW = 'flex h-9 w-9 items-center justify-center rounded-full bg-white te
   + 'hover:bg-pink-600 hover:text-white hover:ring-pink-600 '
   + 'disabled:cursor-default disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-gray-700 disabled:hover:ring-pink-100';
 
-/* One set. The whole card is the button: the accent bar and the filled arrow
-   say so at rest, and on hover the arrow goes solid and the card lifts. */
-export function ExamSetCard({ set, title, onOpen }) {
+/* How a card looks for where the candidate stands on it: not started, part
+   way through, or finished with a CLB level. The accent bar carries the state
+   so a row of cards can be read at a glance — green done, amber started. */
+const ACCENT = {
+  done: 'bg-gradient-to-b from-emerald-400 to-emerald-600',
+  partial: 'bg-gradient-to-b from-amber-300 to-amber-500',
+  none: 'bg-gradient-to-b from-pink-500 to-fuchsia-600',
+};
+
+/* The line under the title. A finished paper shows its CLB level and its mark
+   out of 20 — the two numbers the real Expression orale result gives. */
+function CardStatus({ result }) {
   const t = useT();
+  if (result?.state === 'done') {
+    return (
+      <span className="mt-1 flex items-center gap-1.5 text-xs" data-testid="set-result">
+        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-extrabold text-emerald-700">
+          {result.nclc ? t('sexam.cardClb', { n: result.nclc })
+            : result.mark != null ? t('sexam.cardBelow') : t('sexam.cardCompleted')}
+        </span>
+        {result.mark != null && (
+          <span className="font-semibold text-gray-500">{result.mark}/20</span>
+        )}
+      </span>
+    );
+  }
+  if (result?.state === 'partial') {
+    return (
+      <span className="mt-1 flex items-center gap-1.5 text-xs" data-testid="set-progress">
+        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-extrabold text-amber-700">
+          {t('sexam.cardPartial', { n: result.done })}
+        </span>
+      </span>
+    );
+  }
+  /* Nothing about the paper itself — not the subject, not the domain it is
+     drawn from. A theme is most of the preparation for a question about it,
+     and a candidate who can read the themes will sit the paper they already
+     have opinions about. */
+  return (
+    <span className="mt-0.5 flex items-center gap-1.5 text-xs font-medium text-gray-400">
+      <Microphone size={12} weight="fill" className="text-pink-500" />
+      <span className="truncate">{t('sexam.cardMeta')}</span>
+    </span>
+  );
+}
+
+/* One set. The whole card is the button: the accent bar and the filled arrow
+   say so at rest, and on hover the arrow goes solid and the card lifts.
+   `result` is where this candidate stands on the set, when they have sat it. */
+export function ExamSetCard({ set, title, onOpen, result = null }) {
+  const state = result?.state || 'none';
   return (
     <button onClick={() => onOpen(set.set_number)}
       data-testid={`speaking-set-${set.set_number}`}
+      data-state={state}
       className="group relative flex h-full w-full items-center gap-3 overflow-hidden rounded-2xl border border-white bg-white py-3.5 pl-5 pr-4 text-left shadow-sm transition
         hover:-translate-y-0.5 hover:border-pink-200 hover:shadow-lg hover:shadow-pink-200/40
         focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400">
-      <span className="absolute inset-y-0 left-0 w-1.5 bg-gradient-to-b from-pink-500 to-fuchsia-600" />
+      <span className={`absolute inset-y-0 left-0 w-1.5 ${ACCENT[state]}`} />
       <span className="min-w-0 flex-1">
         <h3 className="truncate font-heading text-[15px] font-extrabold text-gray-900">{title}</h3>
-        {/* Nothing about the paper itself — not the subject, not the domain
-            it is drawn from. A theme is most of the preparation for a
-            question about it, and a candidate who can read the themes will
-            sit the paper they already have opinions about. */}
-        <span className="mt-0.5 flex items-center gap-1.5 text-xs font-medium text-gray-400">
-          <Microphone size={12} weight="fill" className="text-pink-500" />
-          <span className="truncate">{t('sexam.cardMeta')}</span>
-        </span>
+        <CardStatus result={result} />
       </span>
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pink-50 text-pink-600 transition group-hover:bg-pink-600 group-hover:text-white">
         <CaretRight size={14} weight="bold" />
@@ -48,7 +90,22 @@ export function ExamSetCard({ set, title, onOpen }) {
   );
 }
 
-export default function ExamSetRow({ title, subtitle, sets, cardTitle, onOpen, testid }) {
+/* A sitting from /api/speaking/exam-sets/attempts, as a card's result. The
+   mark is worked out by the caller's `paperMark` — speakingPaperMark, the one
+   conversion the exam page and the dashboard use — so the three can never
+   show different levels for the same paper. */
+export function sittingResult(sitting, paperMark) {
+  const tasks = [1, 2, 3].map((n) => sitting?.tasks?.[String(n)] || null);
+  const done = tasks.filter(Boolean).length;
+  if (!done) return null;
+  if (done < 3) return { state: 'partial', done };
+  const paper = paperMark(tasks);
+  return { state: 'done', mark: paper ? paper.mark : null, nclc: paper ? paper.nclc : null };
+}
+
+export default function ExamSetRow({
+  title, subtitle, sets, cardTitle, onOpen, testid, results = {},
+}) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const scroller = useRef(null);
@@ -118,7 +175,8 @@ export default function ExamSetRow({ title, subtitle, sets, cardTitle, onOpen, t
       {open ? (
         <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5" data-testid={`${testid}-grid`}>
           {sets.map((s) => (
-            <ExamSetCard key={s.set_number} set={s} title={cardTitle(s)} onOpen={onOpen} />
+            <ExamSetCard key={s.set_number} set={s} title={cardTitle(s)} onOpen={onOpen}
+              result={results[s.set_number] || null} />
           ))}
         </div>
       ) : (
@@ -131,7 +189,8 @@ export default function ExamSetRow({ title, subtitle, sets, cardTitle, onOpen, t
           {sets.map((s) => (
             <div key={s.set_number}
               className="w-[70%] shrink-0 snap-start sm:w-[calc(50%-0.375rem)] md:w-[calc(33.333%-0.5rem)] lg:w-[calc(20%-0.6rem)]">
-              <ExamSetCard set={s} title={cardTitle(s)} onOpen={onOpen} />
+              <ExamSetCard set={s} title={cardTitle(s)} onOpen={onOpen}
+                result={results[s.set_number] || null} />
             </div>
           ))}
         </div>
