@@ -5,7 +5,7 @@
  * candidate reads the wrong half of their sentence as the mistake and nothing
  * anywhere says otherwise.
  */
-import { markSpans } from './TranscriptDiff';
+import { markSpans, candidateText, diffWords } from './TranscriptDiff';
 
 const marked = (parts) => parts.filter((p) => p.marked).map((p) => p.text);
 const rebuild = (parts) => parts.map((p) => p.text).join('');
@@ -72,5 +72,60 @@ describe('markSpans', () => {
     expect(marked(markSpans('alpha beta', ['alpha']))).toEqual(['alpha']);
     expect(marked(markSpans('alpha beta', ['beta']))).toEqual(['beta']);
     expect(markSpans('alpha', ['alpha'])).toEqual([{ text: 'alpha', marked: true }]);
+  });
+});
+
+describe('candidateText', () => {
+  it("keeps only the candidate's lines of a dialogue", () => {
+    const dialogue = [
+      'Agent : Bonjour, je vous écoute.',
+      'Candidat : Bonjour, je voudrais des informations.',
+      'Agent : Bien sûr.',
+      'Candidat : Quel est le prix ?',
+    ].join('\n');
+    expect(candidateText(dialogue)).toBe(
+      ['Bonjour, je voudrais des informations.', 'Quel est le prix ?'].join('\n'));
+  });
+
+  it('leaves a monologue as it is', () => {
+    expect(candidateText('Je pense que le stress motive.')).toBe('Je pense que le stress motive.');
+  });
+
+  it('is empty for nothing', () => {
+    expect(candidateText(null)).toBe('');
+  });
+});
+
+describe('diffWords', () => {
+  it('marks the changed words on both sides and nothing else', () => {
+    const d = diffWords("J'ai allé à Paris hier.", 'Je suis allé à Paris hier.');
+    expect(marked(d.said)).toEqual(["J'ai"]);
+    expect(marked(d.fixed)).toEqual(['Je suis']);
+  });
+
+  it('never loses or duplicates a character on either side', () => {
+    const said = 'Je habite au Toronto depuis deux ans,  et je travaille.';
+    const fixed = "J'habite à Toronto depuis deux ans, et je travaille.";
+    const d = diffWords(said, fixed);
+    expect(rebuild(d.said)).toBe(said);
+    expect(rebuild(d.fixed)).toBe(fixed);
+  });
+
+  it('does not mark case or punctuation differences', () => {
+    const d = diffWords('bonjour madame', 'Bonjour, madame.');
+    expect(marked(d.said)).toEqual([]);
+    expect(marked(d.fixed)).toEqual([]);
+  });
+
+  it('marks words that were added', () => {
+    const d = diffWords('je vais Paris', 'je vais à Paris');
+    expect(marked(d.said)).toEqual([]);
+    expect(marked(d.fixed)).toEqual(['à']);
+  });
+
+  it('marks nothing when the answer was already right', () => {
+    const d = diffWords('Tout va bien.', 'Tout va bien.');
+    expect(marked(d.said)).toEqual([]);
+    expect(marked(d.fixed)).toEqual([]);
   });
 });

@@ -715,6 +715,13 @@ class Submission(Base):
     # practice, every written submission, and every speaking answer graded
     # before this column existed. A sitting made up of those cannot be
     # reconstructed, and the history honestly begins at the first tagged one.
+    # The rest of a spoken answer's grade: the transcript, the corrected and
+    # stronger versions, the suggestions, the follow-up questions and the
+    # examiner's comments. None of these had a column, so a result reopened
+    # from history came back as a score and a list of errors — the transcript,
+    # the corrected version and everything written for the candidate were
+    # gone the moment they left the page. NULL on anything graded before this.
+    analysis: Mapped[Optional[Any]] = mapped_column(JSONB, nullable=True)
     exam_set: Mapped[Optional[int]] = mapped_column(Integer, nullable=True,
                                                     index=True)
     task_type: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -3154,6 +3161,24 @@ async def learning_history(db: AsyncSession, user_id: str,
         return {"recurring": [], "previous": None}
 
 
+# What of a speaking grade is kept with the submission, beyond its columns.
+#
+# A whitelist, not "everything but": the analysis also carries the provider
+# and model that produced it, the learner's history (which is recomputed on
+# every read and would be stale if stored), and whatever a future grader adds.
+STORED_ANALYSIS_KEYS = (
+    "transcript", "corrected_version", "enhanced_version", "suggestions",
+    "strengths", "focus_areas", "criteria", "missed_questions",
+    "language_mix", "relevance_comment", "answers_question", "no_speech",
+    "pronunciation_errors", "delivery", "delivery_metrics", "speech_words",
+)
+
+
+def stored_analysis(analysis: dict) -> dict:
+    """The part of a speaking grade worth reading again later."""
+    return {k: analysis[k] for k in STORED_ANALYSIS_KEYS if k in analysis}
+
+
 async def persist_submission(db: AsyncSession, user: User, text: str,
                              prompt_id: Optional[str], analysis: dict,
                              source: str = "practice",
@@ -3180,6 +3205,8 @@ async def persist_submission(db: AsyncSession, user: User, text: str,
         theme_id=(theme_id or "")[:64],
         exam_set=exam_set,
         task_type=task_type,
+        analysis=(stored_analysis(analysis)
+                  if source in ("speaking", "conversation") else None),
         created_at=now_utc(),
     )
     db.add(sub)
@@ -3304,7 +3331,7 @@ Cap the score at B1 if the candidate asked fewer than three real questions or mi
 
 suggestions: 3-5 concrete English tips for THIS conversation. vocabulary_suggestions: 4-8 French phrases that would have made the asking more idiomatic, EVERY one an object {"phrase", "meaning"} with a short English meaning - never a bare string.
 
-missed_questions - "What more could you have asked?". List 2 to 5 questions, WORD FOR WORD IN FRENCH and ready to speak, that the candidate did not ask but should have. Draw them first from the points the consigne lists and the candidate skipped, then from the openings the agent left unexplored (a price mentioned without conditions, a date without a deadline). Never repeat a question the candidate already asked, even in other words. If the candidate genuinely covered everything, return the questions that would have deepened the exchange rather than an empty list.
+missed_questions - "What more could you have asked?". List AT LEAST 5 and at most 8 questions, WORD FOR WORD IN FRENCH and ready to speak, in addition to the ones the candidate asked. Draw them first from the points the consigne lists and the candidate skipped, then from the openings the agent left unexplored (a price mentioned without conditions, a date without a deadline). Never repeat a question the candidate already asked, even in other words. If the candidate genuinely covered everything, the rest of the five are questions that would have deepened the exchange - never fewer than five, and never an empty list.
 
 You are grading a transcript, so do NOT comment on pronunciation or accent.
 
@@ -3434,6 +3461,57 @@ async def interaction_reply(consigne: str, history: list, db=None,
     return reply[:600]
 
 
+def _said_words(text: str) -> list:
+    """The words of a text, for comparing what was said with what is quoted.
+
+    Case, punctuation and apostrophes are dropped, so "J'ai" matches "j' ai"
+    and a quote that lost its full stop still matches the sentence it came
+    from. Accents are kept: "a" and "à" are exactly the mistakes being quoted.
+    """
+    return re.findall(r"\w+", str(text or "").lower())
+
+
+def _quoted_in(quote: list, said: list, slack: int = 2) -> bool:
+    """Whether the quoted words appear in what was said, in order.
+
+    Allows up to `slack` unquoted words between two quoted ones, because a
+    grader quoting "je suis allé Paris" out of "je suis allé à Paris" is
+    quoting the candidate, not inventing them.
+    """
+    if not quote:
+        return False
+    for start, word in enumerate(said):
+        if word != quote[0]:
+            continue
+        at, ok = start, True
+        for q in quote[1:]:
+            window = said[at + 1: at + 2 + slack]
+            if q not in window:
+                ok = False
+                break
+            at = at + 1 + window.index(q)
+        if ok:
+            return True
+    return False
+
+
+def ground_errors(errors: list, spoken: str) -> list:
+    """Only the corrections of things the candidate actually said.
+
+    A correction quotes the candidate. When the quote is nowhere in the
+    transcript, the grader has corrected a sentence it imagined — and the
+    result page then shows a mistake the candidate cannot find in their own
+    words, which is worse than no correction at all.
+    """
+    said = _said_words(spoken)
+    kept = [e for e in (errors or [])
+            if _quoted_in(_said_words(e.get("error", "")), said)]
+    if len(kept) != len(errors or []):
+        log.info("Dropped %d correction(s) quoting words not in the transcript",
+                 len(errors or []) - len(kept))
+    return kept
+
+
 async def grade_interaction(consigne: str, history: list, db=None,
                             task_type: Optional[int] = 2) -> dict:
     """Grade a finished spoken dialogue, returning the same shape as
@@ -3472,6 +3550,7 @@ async def grade_interaction(consigne: str, history: list, db=None,
 
     def build(data: dict) -> dict:
         result = _validate_speaking(data)
+        result["errors"] = ground_errors(result.get("errors"), spoken)
         if task_type != 2:
             # "What more could you have asked?" is a tâche 2 idea: there is
             # nothing to ask in a self-presentation or in free practice.
@@ -3967,7 +4046,7 @@ def _validate_speaking(data: dict) -> dict:
     # sometimes return bare strings instead of the {question, why} object, so
     # both shapes are accepted rather than dropping the whole section.
     missed = []
-    for item in (data.get("missed_questions") or [])[:5]:
+    for item in (data.get("missed_questions") or [])[:8]:
         if isinstance(item, dict):
             question = str(item.get("question", "")).strip()
             why = str(item.get("why", "")).strip()
@@ -4087,8 +4166,9 @@ async def analyze_speaking_with_ai(transcript: str, question: str, db=None,
     provider = (await get_provider("speaking_grader_provider")) if db is not None else SPEAKING_GRADER_PROVIDER
 
     def build(data: dict) -> dict:
-        return apply_speaking_caps(_validate_speaking(data), transcript,
-                                   task_type)
+        result = _validate_speaking(data)
+        result["errors"] = ground_errors(result.get("errors"), transcript)
+        return apply_speaking_caps(result, transcript, task_type)
 
     result, reason = await _graded_json(provider, SPEAKING_GRADER_SYSTEM,
                                         prompt, build)
@@ -5747,6 +5827,8 @@ MIGRATIONS = [
     # recorded it, and nothing can honestly backfill it.
     "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS exam_set INTEGER",
     "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS task_type INTEGER",
+    # The full speaking grade, kept so a reopened result is the whole result.
+    "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS analysis JSONB",
     "CREATE INDEX IF NOT EXISTS ix_submissions_exam_set "
     "ON submissions (user_id, exam_set, created_at DESC)",
     # The free trial, split by skill. Deliberately added WITHOUT a default, so
@@ -7232,8 +7314,17 @@ async def get_submission(submission_id: str,
         raise HTTPException(status_code=404, detail="Submission not found")
     if sub.user_id != user.user_id and user.role != "admin":
         raise HTTPException(status_code=403, detail="Access denied")
-    out = _row_to_dict(sub, drop=("audio_path",))
+    out = _row_to_dict(sub, drop=("audio_path", "analysis"))
     out["has_audio"] = bool((sub.audio_path or "").strip())
+    # The stored grade fills in what the columns do not hold. A column always
+    # wins over it: the columns are what the rest of the product reads, and
+    # the two must never disagree on screen.
+    for key, value in (sub.analysis or {}).items():
+        out.setdefault(key, value)
+    # Graded before the analysis was kept: the transcript was always stored,
+    # only under the name the writing flow gave it.
+    if sub.source in ("speaking", "conversation") and not out.get("transcript"):
+        out["transcript"] = sub.original_text or ""
     return {"submission": out}
 
 
@@ -8986,7 +9077,46 @@ async def speaking_converse_grade(body: ConverseGradeIn,
                                   db: AsyncSession = Depends(get_db),
                                   _rl=Depends(ai_rate_limit)):
     """Grade a finished conversation. Tache 2 spends one AI credit; open-ended
-    practice draws on the separate free-conversation allowance."""
+    practice draws on the separate free-conversation allowance.
+
+    The text-only route, for a browser that could not record. A browser that
+    could sends the recording to /api/speaking/converse/grade-audio instead."""
+    return await grade_conversation(body, user, db)
+
+
+def _spoken_by_candidate(history: list) -> str:
+    return " ".join(str(t.get("text", "")) for t in history
+                    if t.get("role") == "candidate")
+
+
+@app.post("/api/speaking/converse/grade-audio")
+async def speaking_converse_grade_audio(payload: str = Form(...),
+                                        audio: UploadFile = File(...),
+                                        mime_type: Optional[str] = Form(None),
+                                        user: User = Depends(get_current_user),
+                                        db: AsyncSession = Depends(get_db),
+                                        _rl=Depends(ai_rate_limit)):
+    """Grade a finished conversation together with the candidate's recording.
+
+    The recording holds only the candidate: the browser pauses it whenever the
+    examiner is speaking. It is kept with the result, like a tâche 3 answer,
+    so every correction can be played back in the candidate's own voice.
+    """
+    try:
+        body = ConverseGradeIn.model_validate_json(payload)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid conversation")
+    audio_bytes = await read_audio_upload(audio)
+    filename = audio.filename or "session.webm"
+    mime = resolve_audio_mime(filename, mime_type or audio.content_type)
+    return await grade_conversation(body, user, db, audio_bytes=audio_bytes,
+                                    filename=filename, mime=mime)
+
+
+async def grade_conversation(body: ConverseGradeIn, user: User, db: AsyncSession,
+                             audio_bytes: bytes = b"", filename: str = "",
+                             mime: str = "") -> dict:
+    """Grade a roleplay or interview, with its recording when there is one."""
     free_mode = body.mode == "free"
     # The roleplay is the one tâche the trial hands out only once.
     is_tache2 = body.mode == "tache2"
@@ -8998,6 +9128,30 @@ async def speaking_converse_grade(body: ConverseGradeIn,
     # The mode was validated on the way in and then thrown away, so a tâche 1
     # interview reached the tâche 2 examiner. Carry it through.
     task_type = {"tache1": 1, "tache2": 2}.get(body.mode)
+    # The recording, transcribed once with word timings. The timings are what
+    # let a correction play the candidate's own voice. A failure here costs
+    # the playback, never the grade: the turns the browser heard are still
+    # there to mark.
+    heard = {"text": "", "words": []}
+    if audio_bytes:
+        try:
+            heard = await asyncio.wait_for(
+                transcribe_audio_detailed(audio_bytes, filename, db=db, mime=mime),
+                timeout=SPEAKING_MAX_WAIT_SECONDS)
+        except Exception:  # noqa: BLE001
+            log.warning("Could not transcribe the conversation recording",
+                        exc_info=True)
+    # Tâche 1 is one candidate speaking, so the recording's transcript IS the
+    # answer — and a better one than the browser's live recogniser, which
+    # misses words and cannot be matched to the audio. Used only when it is
+    # at least most of what the browser heard, so a recording cut short can
+    # never replace a fuller answer.
+    recorded = str(heard.get("text") or "").strip()
+    if body.mode == "tache1" and recorded:
+        browser = _spoken_by_candidate(history)
+        if len(recorded.split()) >= 0.6 * len(browser.split()):
+            history = ([t for t in history if t.get("role") != "candidate"]
+                       + [{"role": "candidate", "text": recorded}])
     try:
         analysis = await asyncio.wait_for(
             grade_interaction(body.consigne, history, db=db,
@@ -9021,6 +9175,14 @@ async def speaking_converse_grade(body: ConverseGradeIn,
         f"{'Candidat' if t['role'] == 'candidate' else 'Agent'} : {t['text']}"
         for t in history if str(t.get("text", "")).strip())
     analysis["transcript"] = transcript
+    # Same shape as a tâche 3 answer's, so the result page finds each
+    # correction in the recording the same way.
+    analysis["speech_words"] = [
+        {"t": str(w.get("text") or ""), "s": int(w["start"]), "e": int(w["end"])}
+        for w in (heard.get("words") or [])
+        if isinstance(w, dict) and str(w.get("text") or "").strip()
+        and w.get("start") is not None and w.get("end") is not None
+    ]
     sub = await persist_submission(
         db, user, transcript or "(no speech detected)", None, analysis,
         source="conversation" if free_mode else "speaking",
@@ -9028,6 +9190,9 @@ async def speaking_converse_grade(body: ConverseGradeIn,
         # Free practice is not part of a paper, whatever the client sends.
         exam_set=None if free_mode else body.exam_set,
         task_type=None if free_mode else task_type)
+    if audio_bytes:
+        analysis["has_audio"] = bool(await store_recording(
+            db, sub["submission_id"], user.user_id, audio_bytes, mime))
     analysis["submission_id"] = sub.get("submission_id")
     analysis["streak"] = sub.get("streak")
     # Read after the submission is saved, because saving it is also what

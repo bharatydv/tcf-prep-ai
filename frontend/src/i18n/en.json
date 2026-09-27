@@ -1156,7 +1156,7 @@
     "h7": "Contact",
     "intro": "prepfrancais helps you prepare for the TEF and TCF Canada exams. To do that it stores what you write and say, because reviewing your own mistakes is the whole point of the product. This page says exactly what is kept, why, and how to get rid of it.",
     "p1": "Your name and email address, set when you register. A password, stored only as a bcrypt hash — nobody at prepfrancais can read it. The French you submit for correction: essays, pasted text, and the transcripts of your spoken answers. The corrections themselves, including every error found and the CEFR level awarded. Your practice history: streaks, XP, badges, review results and the timezone used to bucket them.",
-    "p2": "A speaking answer is sent to a transcription provider, turned into text, and the text is what we store. The audio itself is not written to our database or kept on our servers after the transcript comes back.",
+    "p2": "Your spoken answers are recorded, in every speaking task. Only your own voice is recorded: the recording pauses while the AI examiner is speaking. The recording is sent to a transcription provider to turn it into text, and it is kept with your result so you can replay your own voice beside each correction. Only you can play it back, and our team only when handling your account. To have your recordings deleted, write to the address below.",
     "p3": "Your text or transcript is sent to the AI provider that grades it — currently one of Anthropic, OpenAI, Google, Groq or DeepSeek, and one of OpenAI, Google, Groq or AssemblyAI for transcription. They process it to produce the correction. We do not sell your data, and we do not share it with advertisers.",
     "p4": "For as long as your account exists, because your mistake history is what the review games are built from. Delete your account and the submissions, mistakes and review sessions attached to it go with it.",
     "p5": "You can ask for a copy of everything held about you, ask for corrections, or ask for the account and its contents to be deleted. Write to the address below and we will act on it within 30 days. If you are in Quebec, Law 25 gives you these rights explicitly; elsewhere in Canada, PIPEDA does.",
@@ -1274,7 +1274,7 @@
     "strongerSub": "How your answer could be more natural and more precise. These changes are not all mistakes.",
     "yourAnswer": "Your answer",
     "strongerVersion": "Stronger version",
-    "vocab": "What more you can ask?",
+    "vocab": "More precise vocabulary you could use",
     "vocabSub": "A short list chosen from your topic and your mistakes.",
     "practiceTitle": "Practice your mistakes",
     "practiceBody": "Turn today's mistakes into a short personalised exercise.",
@@ -1291,7 +1291,10 @@
     "nextStepBody": "Accuracy first. Once the recurring grammar mistakes drop away, work on developing your ideas and on more precise connectors and vocabulary.",
     "startPractice": "Start recommended practice",
     "profile": "Your speaking profile",
-    "profileSub": "The criteria an examiner marks, and where this answer sits on each."
+    "profileSub": "The criteria an examiner marks, and where this answer sits on each.",
+    "moreQuestions": "More questions you could have asked",
+    "moreQuestionsSub": "Five or more questions for this situation that you did not ask, in French and ready to say.",
+    "suggestionsSub": "Concrete ways to make this answer better."
   },
   "res": {
     "badge": "Resources",

@@ -705,3 +705,52 @@ class TestVocabularyIsGlossed:
                                                task_type=3)
         assert out["vocabulary_suggestions"] == ["néanmoins"]
         assert "ai_unavailable" not in out
+
+
+class TestGroundErrors:
+    """A correction must quote something the candidate actually said."""
+
+    SAID = "Bonjour. J'ai allé à Paris avec mes amis, et nous avons mangé beaucoup."
+
+    def test_keeps_a_quote_from_the_transcript(self):
+        errs = [{"error": "j'ai allé", "correction": "je suis allé"}]
+        assert m.ground_errors(errs, self.SAID) == errs
+
+    def test_ignores_case_punctuation_and_apostrophes(self):
+        errs = [{"error": "J' ai allé à paris", "correction": "x"}]
+        assert m.ground_errors(errs, self.SAID) == errs
+
+    def test_allows_a_word_the_grader_left_out(self):
+        errs = [{"error": "allé Paris", "correction": "x"}]
+        assert m.ground_errors(errs, self.SAID) == errs
+
+    def test_drops_a_sentence_the_candidate_never_said(self):
+        errs = [{"error": "je suis parti en vacances", "correction": "x"}]
+        assert m.ground_errors(errs, self.SAID) == []
+
+    def test_accents_still_count(self):
+        # "a" is not "à": that difference is the mistake being quoted.
+        errs = [{"error": "allé a Paris", "correction": "x"}]
+        assert m.ground_errors(errs, self.SAID) == []
+
+    def test_empty_quote_is_dropped(self):
+        assert m.ground_errors([{"error": "", "correction": "x"}], self.SAID) == []
+
+
+class TestStoredAnalysis:
+    def test_keeps_what_the_result_page_shows(self):
+        stored = m.stored_analysis({
+            "transcript": "t", "corrected_version": "c", "enhanced_version": "e",
+            "suggestions": ["s"], "missed_questions": [{"question": "q"}],
+            "ai_provider": "openai", "ai_model": "x", "history": {"a": 1},
+        })
+        assert set(stored) == {"transcript", "corrected_version",
+                               "enhanced_version", "suggestions",
+                               "missed_questions"}
+
+
+class TestMissedQuestions:
+    def test_keeps_up_to_eight(self):
+        data = {"errors": [], "overall_score": 50, "tcf_level": "B1",
+                "missed_questions": [{"question": f"Q{i} ?"} for i in range(10)]}
+        assert len(m._validate_speaking(data)["missed_questions"]) == 8

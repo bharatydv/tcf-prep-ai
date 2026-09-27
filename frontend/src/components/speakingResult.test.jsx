@@ -233,6 +233,62 @@ describe('SpeakingResult', () => {
     expect(host.querySelector('[data-testid="transcript-withheld"]')).toBeNull();
     act(() => root.unmount());
   });
+
+  it('no longer closes with the examiner grid', () => {
+    const page = mount(RESULT);
+    expect(page.find('speaking-grid')).toBeNull();
+    page.unmount();
+  });
+
+  it('names the vocabulary as vocabulary', () => {
+    const page = mount(RESULT);
+    expect(page.find('vocabulary').textContent).toContain('More precise vocabulary you could use');
+    page.unmount();
+  });
+
+  it("shows only the candidate's lines of a roleplay as their answer", () => {
+    const page = mount({
+      ...RESULT,
+      transcript: 'Agent : Bonjour, que puis-je faire pour vous ?\nCandidat : Je voudrais louer un vélo.',
+      corrected_version: 'Je voudrais louer un vélo.',
+    });
+    expect(page.find('transcript-diff').textContent).not.toContain('que puis-je faire');
+    expect(page.find('enhanced-version').textContent).not.toContain('que puis-je faire');
+    expect(page.find('enhanced-version').textContent).toContain('Je voudrais louer un vélo.');
+    page.unmount();
+  });
+
+  it('lists the questions a roleplay could also have asked', () => {
+    const page = mount({
+      ...RESULT,
+      missed_questions: [
+        { question: 'Quels sont les horaires ?', why: 'Opening times.' },
+        { question: 'Faut-il réserver ?', why: '' },
+      ],
+    });
+    expect(page.find('more-questions').textContent).toContain('Quels sont les horaires ?');
+    expect(page.find('more-questions').textContent).toContain('Faut-il réserver ?');
+    page.unmount();
+  });
+
+  it('leaves the questions out where there are none', () => {
+    const page = mount(RESULT);
+    expect(page.find('more-questions')).toBeNull();
+    page.unmount();
+  });
+
+  it('shows suggestions saved under their older name', () => {
+    const page = mount({ ...RESULT, suggestions: [], improvement_suggestions: ['Link your ideas.'] });
+    expect(page.find('suggestions').textContent).toContain('Link your ideas.');
+    page.unmount();
+  });
+
+  it('reads the transcript from original_text on a reopened older result', () => {
+    const { transcript, ...older } = RESULT;
+    const page = mount({ ...older, original_text: transcript });
+    expect(page.find('transcript-diff').textContent).toContain('clients');
+    page.unmount();
+  });
 });
 
 /* ProfileCards no longer appears on the speaking result page — the grid

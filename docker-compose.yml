@@ -75,6 +75,10 @@ services:
       # Unnecessary when MEDIA_BASE_URL points at a bucket — the browser then
       # fetches audio from that origin and the container never serves a byte.
       - ./backend/media:/app/media:ro
+      # Learners' own speaking recordings. A named volume, because without one
+      # they lived in the container's own filesystem and every rebuild of the
+      # backend deleted all of them.
+      - recordings:/app/recordings
     # Published on loopback so a host nginx can reach it. The port is a
     # variable because the GCP VM already runs one on :80 that proxies to
     # 3000/5000 — hardcoding the ports here meant every deploy pulled a
@@ -155,3 +159,4 @@ services:
 
 volumes:
   db_data:
+  recordings:

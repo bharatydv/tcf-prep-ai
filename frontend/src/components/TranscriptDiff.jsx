@@ -11,9 +11,8 @@
  * react-router, whose exports map CRA's Jest cannot resolve, and anything
  * that imports it becomes untestable by association.
  *
- * Only for tâche 3 and free practice. Tâches 1 and 2 are practised and marked
- * without the words on screen — see SpeakingResult — so there is nothing here
- * to render for them and the caller does not ask.
+ * Used for every tâche. Tâches 1 and 2 are dialogues, so their transcript is
+ * cut down to the candidate's own lines first — see candidateText.
  */
 import { useT } from '../i18n';
 
@@ -25,8 +24,8 @@ import { useT } from '../i18n';
  * appears twice must not mark both occurrences — the grader was talking about
  * one of them and has no way to say which, so the first is the honest guess.
  *
- * Exported for the tests: this is the whole of the logic, and it is the kind
- * of thing that silently marks the wrong half of a sentence.
+ * Used when there is no corrected version to compare against, which is the
+ * case for a result graded before the corrected version existed.
  */
 export function markSpans(text, needles) {
   const source = String(text || '');
@@ -60,8 +59,97 @@ export function markSpans(text, needles) {
   return parts;
 }
 
-function Marked({ text, needles, tone }) {
-  const parts = markSpans(text, needles);
+/* The candidate's half of a dialogue.
+ *
+ * A roleplay is saved as "Candidat : …" and "Agent : …" lines. The agent's
+ * lines are not the candidate's French and were never corrected, so comparing
+ * them against the corrected version marked every word the agent said as a
+ * mistake. The candidate's lines are kept one per line, as they were spoken.
+ * A monologue has no such lines and comes back untouched. */
+const SPEAKER = /^\s*(Candidat|Agent)\s*:\s*/i;
+
+export function candidateText(transcript) {
+  const text = String(transcript || '');
+  const lines = text.split('\n');
+  if (!lines.some((l) => SPEAKER.test(l))) return text.trim();
+  return lines
+    .filter((l) => /^\s*Candidat\s*:/i.test(l))
+    .map((l) => l.replace(SPEAKER, '').trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+/* A word for comparing, not for showing: case and punctuation are not what a
+   correction is about, and marking "Paris." against "Paris" as a change
+   would put red on a word that was right. */
+const key = (word) => word.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+
+/* Words and the spaces between them, so the text can be put back exactly. */
+const tokens = (text) => String(text || '').split(/(\s+)/).filter((x) => x !== '');
+
+/* Which words changed between what was said and the corrected version.
+ *
+ * A longest-common-subsequence over the words: whatever is in both, in order,
+ * is unchanged, and everything else is marked — red on the left for what was
+ * said wrongly or should not have been said, green on the right for what
+ * replaced it. Finding the grader's quotes by searching for them marked only
+ * the ones it quoted character for character, which left most of the changes
+ * in the corrected version unmarked.
+ *
+ * Returns both sides as runs, adjacent changed words merged into one mark. */
+export function diffWords(said, fixed) {
+  const a = tokens(said);
+  const b = tokens(fixed);
+  const aw = a.map((x, i) => [x, i]).filter(([x]) => !/^\s+$/.test(x));
+  const bw = b.map((x, i) => [x, i]).filter(([x]) => !/^\s+$/.test(x));
+  const n = aw.length;
+  const m = bw.length;
+
+  // Lengths of the common subsequence from each pair of positions onwards.
+  const lcs = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i -= 1) {
+    for (let j = m - 1; j >= 0; j -= 1) {
+      lcs[i][j] = key(aw[i][0]) === key(bw[j][0]) && key(aw[i][0])
+        ? lcs[i + 1][j + 1] + 1
+        : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+    }
+  }
+  const keepA = new Set();
+  const keepB = new Set();
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (key(aw[i][0]) && key(aw[i][0]) === key(bw[j][0])) {
+      keepA.add(aw[i][1]); keepB.add(bw[j][1]); i += 1; j += 1;
+    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
+      i += 1;
+    } else {
+      j += 1;
+    }
+  }
+  // Punctuation on its own ("—", "?") is never a change worth marking.
+  a.forEach((x, idx) => { if (!/\s/.test(x) && !key(x)) keepA.add(idx); });
+  b.forEach((x, idx) => { if (!/\s/.test(x) && !key(x)) keepB.add(idx); });
+
+  const runs = (toks, keep) => {
+    const out = [];
+    toks.forEach((tok, idx) => {
+      const space = /^\s+$/.test(tok);
+      // A space belongs to a mark only when the words either side of it are
+      // both marked, so "je suis" is one mark rather than two with a gap.
+      const marked = space
+        ? !keep.has(idx - 1) && idx > 0 && idx < toks.length - 1 && !keep.has(idx + 1)
+        : !keep.has(idx);
+      const last = out[out.length - 1];
+      if (last && last.marked === marked) last.text += tok;
+      else out.push({ text: tok, marked });
+    });
+    return out;
+  };
+  return { said: runs(a, keepA), fixed: runs(b, keepB) };
+}
+
+function Runs({ parts, tone }) {
   const mark = tone === 'wrong'
     ? 'rounded bg-rose-100 px-0.5 font-semibold text-red-700 underline decoration-red-400 decoration-wavy underline-offset-2'
     : 'rounded bg-green-100 px-0.5 font-semibold text-green-800';
@@ -76,12 +164,17 @@ function Marked({ text, needles, tone }) {
 
 export function TranscriptDiff({ transcript, corrected, errors = [], action = null }) {
   const t = useT();
-  const said = String(transcript || '');
-  const fixed = String(corrected || '');
+  const said = candidateText(transcript);
+  const fixed = String(corrected || '').trim();
   if (!said && !fixed) return null;
 
-  const wrong = errors.map((e) => e.error).filter(Boolean);
-  const right = errors.map((e) => e.correction).filter(Boolean);
+  /* With a corrected version, the two are compared word by word. Without one
+     — an older result — only the grader's quotes can be marked. */
+  const diff = said && fixed ? diffWords(said, fixed) : null;
+  const saidParts = diff ? diff.said
+    : markSpans(said, errors.map((e) => e.error).filter(Boolean));
+  const fixedParts = diff ? diff.fixed
+    : markSpans(fixed, errors.map((e) => e.correction).filter(Boolean));
 
   return (
     /* Side by side from md up, stacked below it. Two columns of French at
@@ -95,7 +188,7 @@ export function TranscriptDiff({ transcript, corrected, errors = [], action = nu
         </p>
         <div className="mt-3">
           {said
-            ? <Marked text={said} needles={wrong} tone="wrong" />
+            ? <Runs parts={saidParts} tone="wrong" />
             : <p className="text-sm italic text-gray-400">{t('speak.noSpeechLine')}</p>}
         </div>
       </div>
@@ -110,7 +203,7 @@ export function TranscriptDiff({ transcript, corrected, errors = [], action = nu
         </div>
         <div className="mt-3">
           {fixed
-            ? <Marked text={fixed} needles={right} tone="fix" />
+            ? <Runs parts={fixedParts} tone="fix" />
             : <p className="text-sm italic text-gray-400">{t('speak.diffNoCorrections')}</p>}
         </div>
       </div>
