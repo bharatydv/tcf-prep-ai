@@ -50,8 +50,14 @@ const chunkDeadline = (chunk) => 2000 + chunk.length * 140;
    finished. The recogniser's own end-of-speech detection fires at the first
    breath, which handed half-finished questions to the examiner and had it
    answer over the top of the learner. Two seconds is long enough to think of
-   the next word and short enough not to feel like a dead line. */
+   the next word and short enough not to feel like a dead line.
+
+   Where the examiner answers back, every millisecond of it is added to the
+   wait before the reply, and two seconds on top of the reply itself read as
+   the examiner being slow. 1.2 s still covers a breath. The monologue keeps
+   the full two: nothing answers it, and the only cost of waiting is none. */
 const SILENCE_MS = 2000;
+const REPLY_SILENCE_MS = 1200;
 
 /* Tâche 1 is not a roleplay, and treating it as one cost the candidate the
    thing being measured. The agent was asked to open the scene, so the two
@@ -447,7 +453,7 @@ export default function ConversationModal({
              fallback covers an engine that never reports the end. */
           try { rec.stop(); } catch (e) { /* already stopping */ }
           fallback = setTimeout(() => hand(current()), 1500);
-        }, SILENCE_MS);
+        }, isMonologue ? SILENCE_MS : REPLY_SILENCE_MS);
       };
 
       rec.onresult = (e) => {
@@ -494,7 +500,7 @@ export default function ConversationModal({
     // language switch — which is exactly when the error copy must change.
     // `manualTurns` comes off the mode prop and never changes for a mounted
     // modal; it is declared so the check above cannot go stale.
-  }, [t, manualTurns, withoutEcho]);
+  }, [t, manualTurns, withoutEcho, isMonologue]);
   useEffect(() => { listenRef.current = listen; }, [listen]);
 
   /* ---------------- one exchange ---------------- */
