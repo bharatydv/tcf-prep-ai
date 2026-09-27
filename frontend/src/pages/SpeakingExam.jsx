@@ -15,7 +15,7 @@ import { useSpeak } from '../lib/speak';
 import { trackPracticeStart, trackPracticeComplete } from '../lib/analytics';
 import { speakingPaperMark, displayMark } from '../lib/tcf';
 import { readSitting, writeSitting, TASKS, setLabel, monthLabel } from '../lib/speakingExam';
-import ExamSetRow from '../components/ExamSetRow';
+import ExamSetRow, { sittingResult } from '../components/ExamSetRow';
 import AttemptHistory, { useAttempts } from '../components/AttemptHistory';
 
 /* Test Mode for Expression orale: one numbered sitting, the three tâches in the
@@ -61,6 +61,27 @@ export default function SpeakingExam() {
       .catch(() => setSets([]))
       .finally(() => setLoading(false));
   }, []);
+
+  /* Where this candidate stands on every set they have sat, so each card on
+     the chooser can show its CLB level. Fetched again on every return to the
+     chooser, because the sitting just left may be the one that changed. */
+  const [sittings, setSittings] = useState([]);
+  useEffect(() => {
+    if (!user || setNumber) return undefined;
+    let live = true;
+    api.get('/api/speaking/exam-sets/attempts')
+      .then(({ data }) => { if (live) setSittings(data.sittings || []); })
+      .catch(() => { if (live) setSittings([]); });
+    return () => { live = false; };
+  }, [user, setNumber]);
+  const cardResults = useMemo(() => {
+    const out = {};
+    sittings.forEach((sit) => {
+      const result = sittingResult(sit, speakingPaperMark);
+      if (result) out[sit.set_number] = result;
+    });
+    return out;
+  }, [sittings]);
 
   /* The bank, by group: the official series of each month, newest month
      first, and the general practice sets after them. The server sends a flat
@@ -382,6 +403,7 @@ export default function SpeakingExam() {
                 cardTitle={(s) => (g.month
                   ? t('sexam.testN', { n: s.index })
                   : t('sexam.setN', { n: s.index || s.set_number }))}
+                results={cardResults}
                 onOpen={open} />
             ))
           )}
