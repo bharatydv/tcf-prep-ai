@@ -393,3 +393,8 @@ h1, h2, h3, h4 { @apply font-heading; }
   white-space: nowrap;
 }
 .prose-blog tbody tr:nth-child(even) { background: #FAFAFA; }
+
+/* A row that slides with its own arrow buttons has no use for a scrollbar
+   under it; the row still scrolls by touch, wheel and keyboard. */
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

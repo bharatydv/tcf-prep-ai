@@ -9,6 +9,7 @@ import { RecordingPlayer } from '../components/RecordingPlayer';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
 import { displayMark, markFromCorrect, speakingPaperMark } from '../lib/tcf';
+import { setLabel } from '../lib/speakingExam';
 
 /* The four papers, each with a hue of its own so the current selection is
    readable at a glance rather than only from which pill is filled. The hues
@@ -374,11 +375,11 @@ export default function Dashboard() {
                   data-testid={`dash-sitting-${sit.set_number}`}
                   className="flex flex-wrap items-center gap-3 rounded-2xl border border-gray-100 px-4 py-3 transition hover:border-violet-200 hover:bg-violet-50/40">
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-pink-100 font-heading text-sm font-extrabold text-pink-700">
-                    {sit.set_number}
+                    {sit.index || sit.set_number}
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block font-heading text-sm font-bold text-gray-900">
-                      {t('dash.speakingSet', { n: sit.set_number })}
+                      {t('dash.speakingSet', { n: setLabel(t, sit) })}
                     </span>
                     <span className="block text-[11px] text-gray-500">
                       {tasks.map((task, i) => (
