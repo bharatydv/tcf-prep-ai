@@ -116,3 +116,66 @@ async def test_a_failed_transcription_still_grades_what_the_browser_heard(seen, 
     assert candidate_lines(seen["history"]) == ["Bonjour, je m'appelle Anna."]
     assert out["has_audio"] is True    # the voice is still kept for replay
     assert out["speech_words"] == []
+
+
+AGENT = "Très bien. Nous avons des vélos de ville, des vélos électriques et des VTT."
+OPENING = "Bonjour. Présentez-vous, s’il vous plaît."
+
+
+class TestStripEcho:
+    """Same cases as frontend/src/lib/echo.test.js: the two must agree."""
+
+    def test_cuts_the_end_of_the_examiners_line(self):
+        assert m.strip_echo("des vélos électriques et des VTT d'accord et combien ça coûte",
+                            AGENT) == "d'accord et combien ça coûte"
+
+    def test_cuts_the_tail_of_the_tache1_instruction(self):
+        assert m.strip_echo("s'il vous plaît bonjour je m'appelle Dana", OPENING) \
+            == "bonjour je m'appelle Dana"
+
+    def test_a_turn_that_was_only_echo_is_empty(self):
+        assert m.strip_echo("des vélos électriques et des VTT.", AGENT) == ""
+
+    def test_a_long_run_is_cut_even_mid_line(self):
+        assert m.strip_echo("nous avons des vélos de ville je voudrais un vélo", AGENT) \
+            == "je voudrais un vélo"
+
+    def test_a_candidate_reusing_a_few_words_keeps_them(self):
+        assert m.strip_echo("des vélos de ville, s’il vous plaît", AGENT) \
+            == "des vélos de ville, s’il vous plaît"
+        assert m.strip_echo("nous avons besoin de deux vélos", AGENT) \
+            == "nous avons besoin de deux vélos"
+
+    def test_hello_back_is_kept(self):
+        assert m.strip_echo("Bonjour, je m'appelle Anna.", OPENING) == "Bonjour, je m'appelle Anna."
+
+    def test_only_the_start_is_examined(self):
+        assert m.strip_echo("je voudrais des vélos électriques et des VTT", AGENT) \
+            == "je voudrais des vélos électriques et des VTT"
+
+
+async def test_the_examiners_echo_is_not_graded_as_the_candidate(seen):
+    history = m.ConverseGradeIn(consigne="Location de vélo.", mode="tache2", history=[
+        {"role": "agent", "text": AGENT},
+        {"role": "candidate", "text": "des vélos électriques et des VTT et combien ça coûte ?"},
+        {"role": "agent", "text": "Vingt-cinq dollars par jour."},
+        # Three of the examiner's last words and nothing else: pure echo.
+        {"role": "candidate", "text": "dollars par jour."},
+        # Two words the candidate repeats to check them: an answer, kept.
+        {"role": "agent", "text": "Le casque est inclus par jour."},
+        {"role": "candidate", "text": "par jour ? D'accord, merci."},
+    ])
+    await m.grade_conversation(history, USER, None)
+    assert candidate_lines(seen["history"]) == ["et combien ça coûte ?",
+                                                 "par jour ? D'accord, merci."]
+
+
+async def test_the_tache1_recording_loses_the_instructions_echo(seen):
+    seen["recorded"] = "s'il vous plaît. Je m'appelle Anna et j'habite à Toronto."
+    turns = [{"role": "agent", "text": OPENING},
+             {"role": "candidate", "text": "je m'appelle Anna et j'habite à Toronto"}]
+    await m.grade_conversation(m.ConverseGradeIn(consigne="Présentez-vous.", mode="tache1",
+                                                 history=turns),
+                               USER, None, audio_bytes=b"voice", filename="s.webm",
+                               mime="audio/webm")
+    assert candidate_lines(seen["history"]) == ["Je m'appelle Anna et j'habite à Toronto."]

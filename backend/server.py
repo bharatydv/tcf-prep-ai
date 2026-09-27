@@ -9084,6 +9084,66 @@ async def speaking_converse_grade(body: ConverseGradeIn,
     return await grade_conversation(body, user, db)
 
 
+_ECHO_WORD = re.compile(r"[^\W_]+")
+
+
+def strip_echo(text: str, agent_text: str) -> str:
+    """The candidate's turn without the examiner's echo at its start.
+
+    The examiner speaks through the computer's speakers and the browser's echo
+    cancellation does not cover speech synthesis, so a microphone that opens
+    while the examiner is still finishing hears them — and their words were
+    then graded as the candidate's French. The browser now waits for silence
+    before it listens; this is the second line, and it also covers a client
+    that has not been updated.
+
+    Only the start of the turn is examined, and only a run the examiner said:
+    their last words (at least 3), or at least 5 of their words in a row. A
+    candidate reusing a few of the examiner's words is answering, not echoing.
+    Mirrors stripEcho in frontend/src/lib/echo.js; change both.
+    """
+    source = str(text or "")
+    said = [(m.group(0).lower(), m.end()) for m in _ECHO_WORD.finditer(source)]
+    agent = [m.group(0).lower() for m in _ECHO_WORD.finditer(str(agent_text or ""))]
+    if not said or not agent:
+        return source.strip()
+    length, to_end = 0, False
+    for start in range(len(agent)):
+        n = 0
+        while (n < len(said) and start + n < len(agent)
+               and said[n][0] == agent[start + n]):
+            n += 1
+        ends = start + n == len(agent)
+        if n > length or (n == length and ends):
+            length, to_end = n, ends
+    if not ((to_end and length >= 3) or length >= 5):
+        return source.strip()
+    rest = source[said[length - 1][1]:]
+    return re.sub(r"^[\s.,;:!?…»«\"'’)\-]+", "", rest).strip()
+
+
+def without_echo(history: list) -> list:
+    """Each candidate turn with the echo of the examiner's line before it cut
+    off; a turn that was nothing but echo is dropped."""
+    out, last_agent = [], ""
+    for turn in history:
+        if turn.get("role") != "candidate":
+            last_agent = str(turn.get("text", ""))
+            out.append(turn)
+            continue
+        cleaned = strip_echo(turn.get("text", ""), last_agent)
+        if cleaned:
+            out.append({**turn, "text": cleaned})
+    return out
+
+
+def _last_agent_line(history: list) -> str:
+    for turn in reversed(history):
+        if turn.get("role") != "candidate":
+            return str(turn.get("text", ""))
+    return ""
+
+
 def _spoken_by_candidate(history: list) -> str:
     return " ".join(str(t.get("text", "")) for t in history
                     if t.get("role") == "candidate")
@@ -9124,7 +9184,9 @@ async def grade_conversation(body: ConverseGradeIn, user: User, db: AsyncSession
         user = await enforce_free_conversation_limit(db, user)
     else:
         user = await reserve_credit(db, user, "speaking", tache2=is_tache2)
-    history = [t.model_dump() for t in body.history]
+    # The examiner's own words, heard back through the microphone, are not
+    # the candidate's French. See strip_echo.
+    history = without_echo([t.model_dump() for t in body.history])
     # The mode was validated on the way in and then thrown away, so a tâche 1
     # interview reached the tâche 2 examiner. Carry it through.
     task_type = {"tache1": 1, "tache2": 2}.get(body.mode)
@@ -9146,7 +9208,7 @@ async def grade_conversation(body: ConverseGradeIn, user: User, db: AsyncSession
     # misses words and cannot be matched to the audio. Used only when it is
     # at least most of what the browser heard, so a recording cut short can
     # never replace a fuller answer.
-    recorded = str(heard.get("text") or "").strip()
+    recorded = strip_echo(str(heard.get("text") or ""), _last_agent_line(history))
     if body.mode == "tache1" and recorded:
         browser = _spoken_by_candidate(history)
         if len(recorded.split()) >= 0.6 * len(browser.split()):
