@@ -1621,7 +1621,7 @@
     "colSaid": "You said",
     "colType": "Type",
     "colWhy": "Why",
-    "correctedNote": "Only your mistakes have been fixed — the words and ideas are still yours. Every difference from the transcript above is something to look at.",
+    "correctedNote": "Every correction from the table above, applied to your own words. Red is what you said, green is what it should be, and blue is correct French you could say better.",
     "correctedTitle": "The same answer, corrected",
     "corrections": "Corrections",
     "diffCorrected": "Corrected",
