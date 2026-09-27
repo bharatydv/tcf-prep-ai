@@ -149,32 +149,155 @@ export function diffWords(said, fixed) {
   return { said: runs(a, keepA), fixed: runs(b, keepB) };
 }
 
+/* Words with where they sit in the text, for finding a quote and replacing
+   exactly the characters it covers. Apostrophes split words ("j'habite" is
+   "j" and "habite"), so a quote that spelt the elision differently still
+   lines up. */
+const WORD = /[\p{L}\p{N}]+/gu;
+
+function wordsAt(text) {
+  return [...String(text || '').matchAll(WORD)]
+    .map((m) => ({ key: m[0].toLowerCase(), start: m.index, end: m.index + m[0].length }));
+}
+
+/* Where a correction's quote was said, as a character span, or null.
+ *
+ * The same rule the server uses to decide a quote is real: the quoted words
+ * in order, with at most two unquoted words between two quoted ones, because
+ * a grader quoting "allé Paris" out of "allé à Paris" is still quoting the
+ * candidate. A span another correction already claimed is skipped, so two
+ * corrections never rewrite the same words. */
+function locate(words, quote, taken, slack = 2) {
+  const wanted = (String(quote || '').match(WORD) || []).map((w) => w.toLowerCase());
+  if (!wanted.length) return null;
+  for (let i = 0; i < words.length; i += 1) {
+    if (words[i].key !== wanted[0]) continue; // eslint-disable-line no-continue
+    let at = i;
+    let ok = true;
+    for (let j = 1; j < wanted.length && ok; j += 1) {
+      const limit = Math.min(words.length - 1, at + 1 + slack);
+      let found = -1;
+      for (let x = at + 1; x <= limit; x += 1) {
+        if (words[x].key === wanted[j]) { found = x; break; }
+      }
+      if (found < 0) ok = false;
+      else at = found;
+    }
+    const start = words[i].start;
+    const end = words[at].end;
+    if (ok && !taken.some(([s, e]) => start < e && end > s)) return [start, end];
+  }
+  return null;
+}
+
+/* The candidate's own words with every correction from the table applied
+ * where it was said.
+ *
+ * The right-hand column used to be the grader's separate "corrected version".
+ * That was a second text written by the model: it could fix things the table
+ * never mentioned, skip things the table did, and it did not exist at all on
+ * a result graded before it was saved — which left "Nothing to correct here"
+ * beside a table of eleven corrections. Built from the table instead, the two
+ * cannot disagree: every row is a mark in the transcript, and every mark is a
+ * row.
+ *
+ * Returns both sides as runs, each mark carrying the row's kind so an
+ * "upgrade" — correct French, said better — is not painted as a mistake. */
+export function applyCorrections(text, errors) {
+  const source = String(text || '');
+  const words = wordsAt(source);
+  const taken = [];
+  const edits = [];
+  (errors || []).forEach((e) => {
+    let correction = String(e?.correction || '').trim();
+    if (!correction) return;
+    const span = locate(words, e?.error, taken);
+    if (!span) return;
+    taken.push(span);
+    // A correction of a sentence's first words keeps its capital letter.
+    const first = source[span[0]];
+    if (first !== first.toLowerCase() && correction[0] === correction[0].toLowerCase()) {
+      correction = correction[0].toUpperCase() + correction.slice(1);
+    }
+    edits.push({ start: span[0], end: span[1], correction, kind: e.kind || 'error' });
+  });
+  edits.sort((a, b) => a.start - b.start);
+
+  const said = [];
+  const fixed = [];
+  let cursor = 0;
+  edits.forEach((edit) => {
+    if (edit.start > cursor) {
+      const plain = source.slice(cursor, edit.start);
+      said.push({ text: plain, marked: false });
+      fixed.push({ text: plain, marked: false });
+    }
+    said.push({ text: source.slice(edit.start, edit.end), marked: true, kind: edit.kind });
+    fixed.push({ text: edit.correction, marked: true, kind: edit.kind });
+    cursor = edit.end;
+  });
+  if (cursor < source.length) {
+    const rest = source.slice(cursor);
+    said.push({ text: rest, marked: false });
+    fixed.push({ text: rest, marked: false });
+  }
+  return { applied: edits.length, said, fixed, text: fixed.map((p) => p.text).join('') };
+}
+
+const MARK = {
+  wrong: 'rounded bg-rose-100 px-0.5 font-semibold text-red-700 underline decoration-red-400 decoration-wavy underline-offset-2',
+  fix: 'rounded bg-green-100 px-0.5 font-semibold text-green-800',
+  // An upgrade was correct French; it is marked as a suggestion, not an error.
+  upgradeWrong: 'rounded bg-blue-50 px-0.5 text-blue-800 underline decoration-blue-300 decoration-dotted underline-offset-2',
+  upgradeFix: 'rounded bg-blue-100 px-0.5 font-semibold text-blue-800',
+};
+
 function Runs({ parts, tone }) {
-  const mark = tone === 'wrong'
-    ? 'rounded bg-rose-100 px-0.5 font-semibold text-red-700 underline decoration-red-400 decoration-wavy underline-offset-2'
-    : 'rounded bg-green-100 px-0.5 font-semibold text-green-800';
+  const style = (part) => (part.kind === 'upgrade'
+    ? (tone === 'wrong' ? MARK.upgradeWrong : MARK.upgradeFix)
+    : MARK[tone]);
   return (
     <p className="whitespace-pre-wrap text-sm leading-7 text-gray-700">
       {parts.map((part, i) => (part.marked
-        ? <mark key={i} className={mark} data-testid={`diff-${tone}-${i}`}>{part.text}</mark>
+        ? <mark key={i} className={style(part)} data-testid={`diff-${tone}-${i}`}>{part.text}</mark>
         : <span key={i}>{part.text}</span>))}
     </p>
   );
 }
 
-export function TranscriptDiff({ transcript, corrected, errors = [], action = null }) {
+/* `action` is given the corrected text, so a play button reads out exactly
+   what is on screen. `saidAction` sits beside "What you said": the
+   candidate's own recording, when one was kept. */
+export function TranscriptDiff({
+  transcript, corrected, errors = [], action = null, saidAction = null,
+}) {
   const t = useT();
   const said = candidateText(transcript);
-  const fixed = String(corrected || '').trim();
-  if (!said && !fixed) return null;
+  const graderFixed = String(corrected || '').trim();
+  if (!said && !graderFixed) return null;
 
-  /* With a corrected version, the two are compared word by word. Without one
-     — an older result — only the grader's quotes can be marked. */
-  const diff = said && fixed ? diffWords(said, fixed) : null;
-  const saidParts = diff ? diff.said
-    : markSpans(said, errors.map((e) => e.error).filter(Boolean));
-  const fixedParts = diff ? diff.fixed
-    : markSpans(fixed, errors.map((e) => e.correction).filter(Boolean));
+  /* The table's corrections, applied in place, whenever any of them can be
+     found in what was said. Only when none can — a result with no
+     corrections, or quotes the transcript does not contain — does the
+     grader's own corrected version stand in, compared word by word. */
+  const applied = said ? applyCorrections(said, errors) : null;
+  const diff = !applied?.applied && said && graderFixed ? diffWords(said, graderFixed) : null;
+  let saidParts;
+  let fixedParts;
+  let fixed;
+  if (applied?.applied) {
+    saidParts = applied.said;
+    fixedParts = applied.fixed;
+    fixed = applied.text;
+  } else if (diff) {
+    saidParts = diff.said;
+    fixedParts = diff.fixed;
+    fixed = graderFixed;
+  } else {
+    saidParts = markSpans(said, errors.map((e) => e.error).filter(Boolean));
+    fixed = graderFixed;
+    fixedParts = markSpans(fixed, errors.map((e) => e.correction).filter(Boolean));
+  }
 
   return (
     /* Side by side from md up, stacked below it. Two columns of French at
@@ -182,10 +305,13 @@ export function TranscriptDiff({ transcript, corrected, errors = [], action = nu
        reading them in sequence. */
     <div className="grid gap-px overflow-hidden rounded-2xl bg-violet-100 md:grid-cols-2">
       <div className="bg-white p-5">
-        <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-red-600">
-          <span className="h-2 w-2 rounded-full bg-red-500" />
-          {t('speak.diffSaid')}
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-red-600">
+            <span className="h-2 w-2 rounded-full bg-red-500" />
+            {t('speak.diffSaid')}
+          </p>
+          {saidAction}
+        </div>
         <div className="mt-3">
           {said
             ? <Runs parts={saidParts} tone="wrong" />
@@ -199,7 +325,7 @@ export function TranscriptDiff({ transcript, corrected, errors = [], action = nu
             <span className="h-2 w-2 rounded-full bg-green-500" />
             {t('speak.diffCorrected')}
           </p>
-          {action}
+          {typeof action === 'function' ? action(fixed) : action}
         </div>
         <div className="mt-3">
           {fixed

@@ -359,11 +359,17 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
             transcript={result.transcript || result.original_text}
             corrected={result.corrected_version}
             errors={result.errors || []}
-            action={(result.corrected_version || '').trim()
-              ? <SpeakButton text={result.corrected_version} id={`${idPrefix}corrected`} {...tts} />
-              : null} />
+            /* The whole answer in the candidate's own voice. The player
+               clamps the end to the recording's length, so "to the end" is
+               simply a very late end. */
+            saidAction={(
+              <OwnVoiceButton clip={{ start: 0, end: 36000 }} id={`${idPrefix}said-all`} {...own} />
+            )}
+            action={(fixed) => (fixed
+              ? <SpeakButton text={fixed} id={`${idPrefix}corrected`} {...tts} />
+              : null)} />
         </div>
-        {(result.corrected_version || '').trim() && (
+        {(ranked.length > 0 || (result.corrected_version || '').trim()) && (
           <p className="mt-3 text-xs leading-relaxed text-gray-400">
             {t('speak.correctedNote')}
           </p>

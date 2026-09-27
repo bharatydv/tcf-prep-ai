@@ -234,6 +234,32 @@ describe('SpeakingResult', () => {
     act(() => root.unmount());
   });
 
+  it('fills the corrected column from the table on a result with no corrected version', () => {
+    // An older result: no corrected version was saved, so this used to say
+    // "Nothing to correct here" beside a table full of corrections.
+    const page = mount({ ...RESULT, corrected_version: '' });
+    const diff = page.find('transcript-diff');
+    expect(diff.textContent).not.toContain('Nothing to correct here');
+    const green = [...diff.querySelectorAll('[data-testid^="diff-fix"]')].map((m) => m.textContent);
+    expect(green).toEqual(expect.arrayContaining(["j'habite à Toronto", 'je réponds']));
+    page.unmount();
+  });
+
+  it("plays the candidate's own recording beside what they said", () => {
+    const saved = window.AudioContext;
+    window.AudioContext = function AudioContext() {};
+    try {
+      const page = mount({ ...RESULT, has_audio: true });
+      expect(page.find('own-voice-said-all')).not.toBeNull();
+      page.unmount();
+      const silent = mount({ ...RESULT, has_audio: false });
+      expect(silent.find('own-voice-said-all')).toBeNull();
+      silent.unmount();
+    } finally {
+      window.AudioContext = saved;
+    }
+  });
+
   it('no longer closes with the examiner grid', () => {
     const page = mount(RESULT);
     expect(page.find('speaking-grid')).toBeNull();

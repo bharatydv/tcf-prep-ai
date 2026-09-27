@@ -5,7 +5,7 @@
  * candidate reads the wrong half of their sentence as the mistake and nothing
  * anywhere says otherwise.
  */
-import { markSpans, candidateText, diffWords } from './TranscriptDiff';
+import { markSpans, candidateText, diffWords, applyCorrections } from './TranscriptDiff';
 
 const marked = (parts) => parts.filter((p) => p.marked).map((p) => p.text);
 const rebuild = (parts) => parts.map((p) => p.text).join('');
@@ -127,5 +127,79 @@ describe('diffWords', () => {
     const d = diffWords('Tout va bien.', 'Tout va bien.');
     expect(marked(d.said)).toEqual([]);
     expect(marked(d.fixed)).toEqual([]);
+  });
+});
+
+/* A real tâche 1 answer as the browser heard it — lower case, no punctuation,
+   two turns — with the corrections the grader returned for it. On a result
+   graded before the corrected version was saved, the right-hand column said
+   "Nothing to correct here" beside a table of eleven corrections. */
+const DANA = [
+  "bonjour je m'appelle Dana j'ai 27 ans et je suis origine au monde actuellement j'habite au Toronto au Canada depuis quelques années",
+  "on travaille et très variés et m'a permis de gérer plusieurs responsabilités quotidiens par exemple et je vais répondre aux questions des clients je coordonne certaines tâches administrative j'ai je prépare des documents pour le réunion et je demande mon responsable avec ses activités quotidiens j'ai appris au particulièrement cette postale compétente en communication et en gestion du temps en ce qui concerne mes études j'ai obtenu de plombs en réseaux sociaux",
+].join('\n');
+
+const DANA_ERRORS = [
+  { error: 'je suis origine au monde', correction: "je suis originaire d'un autre pays", kind: 'error' },
+  { error: 'on travaille et très variés', correction: 'mon travail est très varié', kind: 'error' },
+  { error: 'je demande mon responsable avec ses activités quotidiens',
+    correction: "j'aide mon responsable dans ses activités quotidiennes", kind: 'error' },
+  { error: 'cette postale compétente', correction: 'dans ce poste à être compétente', kind: 'error' },
+  { error: "j'ai obtenu de plombs en réseaux sociaux",
+    correction: "j'ai obtenu un diplôme en réseaux sociaux", kind: 'error' },
+  { error: 'a sentence nobody said', correction: 'x', kind: 'error' },
+];
+
+describe('applyCorrections', () => {
+  it('puts every correction from the table into the corrected text, where it was said', () => {
+    const out = applyCorrections(DANA, DANA_ERRORS);
+    expect(out.applied).toBe(5);
+    expect(marked(out.said)).toEqual([
+      'je suis origine au monde',
+      'on travaille et très variés',
+      'je demande mon responsable avec ses activités quotidiens',
+      'cette postale compétente',
+      "j'ai obtenu de plombs en réseaux sociaux",
+    ]);
+    expect(marked(out.fixed)).toEqual(DANA_ERRORS.slice(0, 5).map((e) => e.correction));
+    expect(out.text).toContain("je suis originaire d'un autre pays actuellement");
+    expect(out.text).toContain("j'ai obtenu un diplôme en réseaux sociaux");
+  });
+
+  it('leaves the rest of what was said exactly as it was', () => {
+    const out = applyCorrections(DANA, DANA_ERRORS);
+    expect(rebuild(out.said)).toBe(DANA);
+    expect(out.text.startsWith("bonjour je m'appelle Dana j'ai 27 ans et ")).toBe(true);
+  });
+
+  it('finds a quote regardless of case, punctuation or a word the grader left out', () => {
+    const out = applyCorrections("Je suis allé à Paris, hier.", [
+      { error: 'je suis allé Paris', correction: 'je suis allé à Paris' },
+    ]);
+    expect(marked(out.said)).toEqual(['Je suis allé à Paris']);
+    // The capital at the start of the sentence survives the correction.
+    expect(out.text).toBe('Je suis allé à Paris, hier.');
+  });
+
+  it('never lets two corrections rewrite the same words', () => {
+    const out = applyCorrections('le chat est noir', [
+      { error: 'le chat est', correction: 'le chien est' },
+      { error: 'chat est noir', correction: 'chat est blanc' },
+    ]);
+    expect(out.applied).toBe(1);
+    expect(out.text).toBe('le chien est noir');
+  });
+
+  it('keeps the kind, so an upgrade is not painted as a mistake', () => {
+    const out = applyCorrections('ça coûte combien', [
+      { error: 'ça coûte combien', correction: 'combien cela coûte-t-il', kind: 'upgrade' },
+    ]);
+    expect(out.fixed.find((p) => p.marked).kind).toBe('upgrade');
+  });
+
+  it('applies nothing when there is nothing to find', () => {
+    const out = applyCorrections('bonjour', [{ error: 'au revoir', correction: 'x' }]);
+    expect(out.applied).toBe(0);
+    expect(out.text).toBe('bonjour');
   });
 });
