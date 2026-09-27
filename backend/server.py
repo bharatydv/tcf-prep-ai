@@ -241,6 +241,23 @@ GEMINI_AUDIO_MODEL = os.environ.get("GEMINI_AUDIO_MODEL", "gemini-2.5-flash")
 GROQ_GRADER_MODEL = os.environ.get("GROQ_GRADER_MODEL", "openai/gpt-oss-120b")
 GROQ_TRANSCRIBE_MODEL = os.environ.get("GROQ_TRANSCRIBE_MODEL", "whisper-large-v3")
 GROQ_BASE_URL = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+# The live roleplay, tuned for speed rather than depth.
+#
+# A turn is two waits back to back — the candidate's words transcribed, then
+# the examiner's reply written — and both used the grading setup: the admin's
+# transcription provider (AssemblyAI polls for its result) and the grader's
+# model with an 8,000-token budget. That was most of the six to ten seconds
+# between the candidate stopping and the examiner speaking. A turn needs
+# neither: its transcript is not kept or timed, and a reply is two sentences.
+# Groq is used for both when there is a Groq key; anything that fails falls
+# back to the grading setup, so the worst case is the old speed, never an
+# unanswered turn.
+GROQ_TURN_TRANSCRIBE_MODEL = os.environ.get("GROQ_TURN_TRANSCRIBE_MODEL",
+                                            "whisper-large-v3-turbo")
+GROQ_CONVERSE_MODEL = os.environ.get("GROQ_CONVERSE_MODEL", "openai/gpt-oss-120b")
+CONVERSE_MAX_TOKENS = int(os.environ.get("CONVERSE_MAX_TOKENS", "600"))
+# How long the fast path may take before the fallback is tried instead.
+FAST_TURN_TIMEOUT_SECONDS = float(os.environ.get("FAST_TURN_TIMEOUT_SECONDS", "8"))
 # DeepSeek: text grading only (OpenAI-compatible API, no transcription)
 DEEPSEEK_GRADER_MODEL = os.environ.get("DEEPSEEK_GRADER_MODEL", "deepseek-v4-flash")
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
@@ -2503,6 +2520,29 @@ def _call_groq(model: str, system_prompt: str, user_text: str) -> str:
                                    system_prompt, user_text)
 
 
+def _call_groq_converse(system_prompt: str, user_text: str) -> str:
+    """The examiner's next line, from Groq, as fast as it will come.
+
+    gpt-oss thinks before it answers; "low" keeps that to a sentence or two,
+    which is all a roleplay line needs. Passed through extra_body so an SDK
+    that does not know the parameter still sends it. Returns "" rather than
+    raising on an empty answer: the caller falls back to the grader's model.
+    """
+    client = _openai_client(f"compat:{GROQ_BASE_URL}", GROQ_API_KEY, GROQ_BASE_URL)
+    extra = ({"reasoning_effort": "low"}
+             if GROQ_CONVERSE_MODEL.startswith("openai/gpt-oss") else {})
+    resp = client.chat.completions.create(
+        model=GROQ_CONVERSE_MODEL,
+        max_tokens=CONVERSE_MAX_TOKENS,
+        temperature=0.7,
+        messages=[{"role": "system", "content": system_prompt},
+                  {"role": "user", "content": user_text}],
+        extra_body=extra or None,
+    )
+    _log_usage(GROQ_CONVERSE_MODEL, resp)
+    return (resp.choices[0].message.content or "").strip()
+
+
 def _call_deepseek(model: str, system_prompt: str, user_text: str) -> str:
     return _call_openai_compatible(DEEPSEEK_BASE_URL, DEEPSEEK_API_KEY, model,
                                    system_prompt, user_text)
@@ -3450,7 +3490,19 @@ async def interaction_reply(consigne: str, history: list, db=None,
               "\n\nDonne maintenant la prochaine réplique de l'Agent, et rien d'autre.")
     provider = (await get_provider("speaking_grader_provider")) if db is not None else SPEAKING_GRADER_PROVIDER
     system = INTERACTION_AGENT_SYSTEM + (INTERACTION_AGENT_TACHE2_EXTRA if mode == "tache2" else "")
-    raw = await _grade_with_provider(provider, system, prompt)
+    raw = ""
+    if _key_is_usable(GROQ_API_KEY):
+        started = time.monotonic()
+        try:
+            raw = await asyncio.wait_for(run_ai(_call_groq_converse, system, prompt),
+                                         timeout=FAST_TURN_TIMEOUT_SECONDS)
+            log.info("Examiner replied with groq/%s in %.1fs",
+                     GROQ_CONVERSE_MODEL, time.monotonic() - started)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Fast examiner reply failed after %.1fs (%s); using %s",
+                        time.monotonic() - started, exc, provider)
+    if not raw:
+        raw = await _grade_with_provider(provider, system, prompt)
     if not raw:
         return ""
     reply = _strip_fences(raw).strip()
@@ -3727,6 +3779,43 @@ async def transcribe_audio(audio_bytes: bytes, filename: str, db=None,
     detailed = await transcribe_audio_detailed(audio_bytes, filename, db=db,
                                                mime=mime)
     return detailed["text"]
+
+
+def _transcribe_groq_turn(audio_bytes: bytes, filename: str) -> str:
+    """Just the words of one roleplay turn, from Groq's fastest Whisper.
+
+    No word timings: a turn's transcript is only what the examiner answers,
+    and asking for timings makes the reply bigger and the wait longer."""
+    import io
+    client = _openai_client(f"compat:{GROQ_BASE_URL}", GROQ_API_KEY, GROQ_BASE_URL)
+    buf = io.BytesIO(audio_bytes)
+    buf.name = filename or "turn.webm"
+    resp = client.audio.transcriptions.create(
+        model=GROQ_TURN_TRANSCRIBE_MODEL, file=buf, language="fr",
+        response_format="json")
+    return str(getattr(resp, "text", "") or "").strip()
+
+
+async def transcribe_turn(audio_bytes: bytes, filename: str, db=None,
+                          mime: str = "") -> str:
+    """One live roleplay turn, as fast as possible. See GROQ_TURN_TRANSCRIBE_MODEL.
+
+    Falls back to the admin's transcription provider when there is no Groq
+    key, or when Groq fails or hears nothing."""
+    if _key_is_usable(GROQ_API_KEY):
+        started = time.monotonic()
+        try:
+            text = await asyncio.wait_for(
+                run_ai(_transcribe_groq_turn, audio_bytes, filename),
+                timeout=FAST_TURN_TIMEOUT_SECONDS)
+            log.info("Turn transcribed with groq/%s in %.1fs",
+                     GROQ_TURN_TRANSCRIBE_MODEL, time.monotonic() - started)
+            if text:
+                return text
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Fast turn transcription failed after %.1fs (%s)",
+                        time.monotonic() - started, exc)
+    return await transcribe_audio(audio_bytes, filename, db=db, mime=mime)
 
 
 async def transcribe_audio_detailed(audio_bytes: bytes, filename: str, db=None,
@@ -9044,7 +9133,7 @@ async def speaking_turn_transcribe(audio: UploadFile = File(...),
     mime = resolve_audio_mime(filename, mime_type or audio.content_type)
     try:
         text = await asyncio.wait_for(
-            transcribe_audio(audio_bytes, filename, db=db, mime=mime),
+            transcribe_turn(audio_bytes, filename, db=db, mime=mime),
             timeout=SPEAKING_MAX_WAIT_SECONDS)
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail=AI_TIMEOUT_DETAIL)
