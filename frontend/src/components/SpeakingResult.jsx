@@ -35,6 +35,7 @@ import { CheckCircle, XCircle, Sparkle, Question } from '@phosphor-icons/react';
 import { SpeakButton } from './SpeakButton';
 import { OwnVoiceButton } from './OwnVoiceButton';
 import { CorrectionText } from './CorrectionText';
+import { RecordingPlayer } from './RecordingPlayer';
 import { TranscriptDiff, candidateText } from './TranscriptDiff';
 import {
   ResultHero, DidWell, Priorities, Recurring, Progress, Vocabulary,
@@ -93,6 +94,24 @@ const PRACTICE_HREF = '/review';
    reading, few enough that the page does not open with twenty rows. */
 const IMPORTANT_COUNT = 5;
 
+/* The whole answer, played back as it was actually spoken.
+ *
+ * The corrections already play the candidate's own voice a phrase at a time,
+ * which is the right unit for fixing one mistake and the wrong one for
+ * hearing yourself: fluency, hesitation, the pace of a two-minute answer and
+ * whether it was finished are all things you can only judge over the whole
+ * take. The file is already kept and already served — the result page simply
+ * never offered it, so the only way to reach your own recording was the
+ * attempt list on another page.
+ *
+ * Tâches 1 and 3 are the candidate speaking for a fixed window, so their
+ * recording IS the answer, end to end. Tâche 2's is the same file with the
+ * examiner's half cut out of it — the recorder pauses whenever it is not the
+ * candidate's turn — so it is still kept and still marked, but it is a
+ * stitched-together thing rather than a take to sit and listen to.
+ */
+const FULL_RECORDING_TACHES = [1, 3];
+
 /* Highest-impact first.
  *
  * The grader returns its errors in the order they were said, which is the one
@@ -120,8 +139,9 @@ export function rankErrors(errors) {
     });
 }
 
-// `taskType` is still accepted so callers need not change; nothing reads it now.
-export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) { // eslint-disable-line no-unused-vars
+// `taskType` says which tâche this is, which decides whether the whole
+// recording is offered below. See FULL_RECORDING_TACHES.
+export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) {
   const t = useT();
   /* The transcript is shown for every tâche. It was withheld for tâches 1
      and 2 for a while (heard, not read, like the exam), but a correction of a
@@ -157,6 +177,13 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
   const questions = Array.isArray(result.missed_questions)
     ? result.missed_questions.filter((q) => String(q?.question || '').trim())
     : [];
+  /* Three things have to be true: the tâche is one whose recording is a whole
+     answer, the recording was kept (nothing before this feature was, and an
+     admin can delete one), and there is a submission to fetch it from. The
+     player handles a file that has gone missing since; this only decides
+     whether to ask for it at all. */
+  const playWholeAnswer = Boolean(result.has_audio) && Boolean(result.submission_id)
+    && FULL_RECORDING_TACHES.includes(Number(taskType));
   const rows = showAll ? ranked : ranked.slice(0, IMPORTANT_COUNT);
   const hasMore = ranked.length > IMPORTANT_COUNT;
   /* Over every correction rather than the five on screen, so the table does
@@ -350,6 +377,12 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
           mistake that was made. Marked in place too — red on what was said,
           green on what replaced it — so a correction can be found in its own
           sentence rather than only in the table above. */}
+      {/* Above the transcript, because the two are the same answer: what was
+          said, and what it sounded like being said. */}
+      {playWholeAnswer && (
+        <RecordingPlayer submissionId={result.submission_id} />
+      )}
+
       {showTranscript && (
       <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-soft"
         data-testid="transcript-diff">

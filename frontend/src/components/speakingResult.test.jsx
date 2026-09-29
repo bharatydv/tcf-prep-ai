@@ -64,14 +64,14 @@ const RESULT = {
   },
 };
 
-function mount(result) {
+function mount(result, taskType = null) {
   const host = document.createElement('div');
   document.body.appendChild(host);
   const root = createRoot(host);
   act(() => {
     root.render(
       <I18nProvider>
-        <SpeakingResult result={result} tts={TTS} />
+        <SpeakingResult result={result} tts={TTS} taskType={taskType} />
       </I18nProvider>,
     );
   });
@@ -258,6 +258,25 @@ describe('SpeakingResult', () => {
     } finally {
       window.AudioContext = saved;
     }
+  });
+
+  it('offers the whole recording back on the tâches that are one take', () => {
+    // Tâches 1 and 3 are the candidate speaking for a fixed window, so the
+    // file IS the answer. Tâche 2's is the same file with the examiner's half
+    // paused out of it, and a sitting reviewed before this feature — or with
+    // its recording deleted — has nothing to play at all.
+    const withAudio = { ...RESULT, has_audio: true };
+    [1, 3].forEach((tache) => {
+      const page = mount(withAudio, tache);
+      expect(page.find('recording-player')).not.toBeNull();
+      page.unmount();
+    });
+    const roleplay = mount(withAudio, 2);
+    expect(roleplay.find('recording-player')).toBeNull();
+    roleplay.unmount();
+    const silent = mount({ ...RESULT, has_audio: false }, 3);
+    expect(silent.find('recording-player')).toBeNull();
+    silent.unmount();
   });
 
   it('no longer closes with the examiner grid', () => {
