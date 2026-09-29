@@ -235,6 +235,75 @@ describe('the recording', () => {
   }, 10000);
 });
 
+/* Tâche 2: one turn, one request.
+ *
+ * The candidate drives the turn here — press to switch the microphone on,
+ * press again to switch it off — and what used to follow was two round trips
+ * in a row: the audio to be transcribed, then the dialogue to be answered,
+ * with the examiner silent through both. /api/speaking/turn/reply does both
+ * in one, so the old transcription endpoint must not be called on this path
+ * at all.
+ */
+describe('a tâche 2 turn', () => {
+  beforeEach(() => {
+    FakeMediaRecorder.made = [];
+    window.MediaRecorder = FakeMediaRecorder;
+  });
+  afterEach(() => { delete window.MediaRecorder; });
+
+  const openTache2 = async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() => {
+      root.render(
+        <I18nProvider>
+          <ConversationModal mode="tache2" tacheTitle="Tâche 2"
+            consigne="Vous téléphonez à un hôtel." onCancel={() => {}} onGraded={() => {}} />
+        </I18nProvider>,
+      );
+    });
+    const button = (label) => [...host.querySelectorAll('button')]
+      .find((b) => b.textContent.includes(label));
+    await act(async () => { button('Start preparation').click(); await sleep(30); });
+    await act(async () => { button('Start the conversation').click(); await sleep(400); });
+    return { host, button, unmount: () => act(() => root.unmount()) };
+  };
+
+  it('asks for the words and the reply together', async () => {
+    api.post.mockImplementation((url) => Promise.resolve({
+      data: url === '/api/speaking/turn/reply'
+        ? { text: 'Bonjour, vous avez des chambres libres ?', reply: 'Oui, pour quelle date ?' }
+        : { reply: 'Bonjour, je vous écoute.' },
+    }));
+    const modal = await openTache2();
+
+    // The microphone is off, and the button says so before it is pressed.
+    const off = modal.host.querySelector('[data-testid="conv-start-speaking"]');
+    expect(off).toBeTruthy();
+    expect(off.textContent).toContain('Mic off');
+    expect(off.getAttribute('aria-pressed')).toBe('false');
+
+    await act(async () => { off.click(); await sleep(30); });
+    const on = modal.host.querySelector('[data-testid="conv-stop-speaking"]');
+    expect(on).toBeTruthy();
+    expect(on.textContent).toContain('Mic on');
+    expect(on.getAttribute('aria-pressed')).toBe('true');
+
+    await act(async () => { on.click(); await sleep(200); });
+    const turn = api.post.mock.calls.find(([url]) => url === '/api/speaking/turn/reply');
+    expect(turn).toBeTruthy();
+    const payload = JSON.parse(turn[1].get('payload'));
+    expect(payload.mode).toBe('tache2');
+    expect(payload.consigne).toBe('Vous téléphonez à un hôtel.');
+    expect(turn[1].get('audio')).toBeInstanceOf(Blob);
+    // Neither of the two calls it replaces is made as well.
+    expect(api.post.mock.calls.some(([url]) => url === '/api/speaking/turn/transcribe')).toBe(false);
+    expect(api.post.mock.calls.filter(([url]) => url === '/api/speaking/converse').length).toBe(1);
+    modal.unmount();
+  }, 10000);
+});
+
 /* The examiner's voice must be off before the microphone is on.
  *
  * A fake speech engine whose voice keeps coming out of the speakers after

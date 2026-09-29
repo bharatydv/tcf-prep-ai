@@ -72,18 +72,31 @@ export function pickMimeType() {
  * Start recording. Resolves with a handle whose stop() returns
  * { blob, filename, mimeType } — all three describing the same bytes.
  *
+ * `audioBitsPerSecond` is for a recording that is uploaded and then thrown
+ * away — one roleplay turn, which exists only to be transcribed. Left at the
+ * browser's default a turn is recorded at broadcast quality, and on a phone
+ * uplink the candidate then waits on the upload of a file several times
+ * larger than anything the transcriber needs: Whisper works from 16 kHz mono
+ * whatever it is handed. A recording that is KEPT — a tâche's own voice, which
+ * is played back and marked for pronunciation — passes nothing and stays at
+ * full quality.
+ *
  * @param {object} options
  * @param {string} options.basename filename stem, e.g. 'answer' or 'turn'
+ * @param {number} [options.audioBitsPerSecond] bitrate cap; 0 leaves the default
  * @returns {Promise<{stop: () => Promise<object>, cancel: () => void, mimeType: string}>}
  */
-export async function startRecording({ basename = 'answer' } = {}) {
+export async function startRecording({ basename = 'answer', audioBitsPerSecond = 0 } = {}) {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const preferred = pickMimeType();
+  const options = {};
+  if (preferred) options.mimeType = preferred;
+  if (audioBitsPerSecond) options.audioBitsPerSecond = audioBitsPerSecond;
 
   let recorder;
   try {
-    recorder = preferred
-      ? new MediaRecorder(stream, { mimeType: preferred })
+    recorder = Object.keys(options).length
+      ? new MediaRecorder(stream, options)
       : new MediaRecorder(stream);
   } catch {
     // A browser can advertise support for a type and still refuse it for this

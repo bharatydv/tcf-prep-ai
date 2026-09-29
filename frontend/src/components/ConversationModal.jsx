@@ -113,6 +113,33 @@ const splitForSpeech = (text) => {
   return out;
 };
 
+/* One roleplay turn is recorded only to be transcribed and then thrown away,
+   and the candidate waits on its upload before the examiner can say anything.
+   The browser's default bitrate records it at a quality nothing downstream
+   uses — Whisper works from 16 kHz mono — so on a phone uplink that default
+   is seconds of silence bought for nothing. 32 kb/s of Opus is transparent
+   for speech and roughly a fifth of the bytes. The tâche's own recording,
+   which is kept, played back and marked for pronunciation, is untouched. */
+const TURN_BITRATE = 32000;
+
+/* The microphone as a switch, not as an instruction.
+   ---------------------------------------------------
+   In tâche 2 the candidate owns both ends of their turn: the microphone is
+   off until they turn it on, and the examiner does not answer until they turn
+   it off again. A button that only ever said what to press next never said
+   which of those two states the room was in, so a candidate who had missed a
+   press talked into a microphone that was not listening. The switch is the
+   state — thrown to the right and red while the mic is live — and the words
+   beside it stay the instruction. */
+const MicSwitch = ({ on }) => (
+  <span aria-hidden="true"
+    className={`inline-flex h-[18px] w-8 shrink-0 items-center rounded-full border border-white/60 p-[2px] transition-colors ${
+      on ? 'bg-white' : 'bg-white/25'}`}>
+    <span className={`h-3 w-3 rounded-full transition-transform ${
+      on ? 'translate-x-[14px] bg-rose-600' : 'translate-x-0 bg-white'}`} />
+  </span>
+);
+
 // Chrome and Edge expose live recognition; elsewhere we record each turn and
 // send it to the backend to be transcribed instead.
 const SpeechRec = typeof window !== 'undefined'
@@ -549,7 +576,8 @@ export default function ConversationModal({
       // The container is negotiated rather than assumed: Safari records MP4,
       // and labelling that as audio/webm made every iOS turn fail to
       // transcribe. See lib/recorder.js.
-      captureRef.current = await startCapture({ basename: 'turn' });
+      captureRef.current = await startCapture({ basename: 'turn',
+                                                audioBitsPerSecond: TURN_BITRATE });
       turnSegRef.current = segIdxRef.current;
       setRecording(true);
       setStatus('listening');
@@ -558,6 +586,15 @@ export default function ConversationModal({
     }
   };
 
+  /* The finished turn, transcribed and — where somebody answers it — answered
+     in the SAME request. See /api/speaking/turn/reply.
+
+     This used to be two: the audio went up to be transcribed, the words came
+     back, and only then did the dialogue go up to be answered. The candidate
+     waited through both round trips with the examiner silent, and the second
+     one re-did everything the first had already done — the session, the
+     budget check, the trip itself — to add nothing but the reply. Tâche 1
+     still asks for the words alone, because nothing answers a monologue. */
   const stopPushToTalk = async () => {
     const capture = captureRef.current;
     if (!capture) return;
@@ -572,17 +609,54 @@ export default function ConversationModal({
     }
     if (!recorded.blob.size || doneRef.current) { setStatus('idle'); return; }
     setStatus('thinking');
+    // Cleared here rather than in exchange(), which this path no longer goes
+    // through: a warning left over from a failed turn must not sit above a
+    // turn that is going fine.
+    setError('');
+    const form = appendAudio(new FormData(), recorded);
+    const headers = { 'Content-Type': 'multipart/form-data' };
     try {
-      const { data } = await api.post('/api/speaking/turn/transcribe',
-        appendAudio(new FormData(), recorded),
-        { headers: { 'Content-Type': 'multipart/form-data' } });
-      const text = withoutEcho((data?.text || '').trim());
-      if (turnSegRef.current !== segIdxRef.current) {
-        if (text) setTurns((prev) => [...prev, { role: 'candidate', text }]);
-        return;                       // the tâche moved on while this uploaded
+      if (isMonologue) {
+        const { data } = await api.post('/api/speaking/turn/transcribe', form, { headers });
+        const text = withoutEcho((data?.text || '').trim());
+        if (turnSegRef.current !== segIdxRef.current) {
+          if (text) setTurns((prev) => [...prev, { role: 'candidate', text }]);
+          return;                     // the tâche moved on while this uploaded
+        }
+        if (text) sendTurnRef.current?.(text);
+        else { setStatus('idle'); toast.error(t('conv.noSpeech')); }
+        return;
       }
-      if (text) sendTurnRef.current?.(text);
-      else { setStatus('idle'); toast.error(t('conv.noSpeech')); }
+      form.append('payload', JSON.stringify({
+        consigne: consigneRef.current, history: turnsRef.current, mode,
+      }));
+      const { data } = await api.post('/api/speaking/turn/reply', form, { headers });
+      // The examiner's echo is cut off server-side on this route: the reply is
+      // written from these words, so they have to be the candidate's before
+      // the model reads them rather than after it has answered them.
+      const text = (data?.text || '').trim();
+      const reply = (data?.reply || '').trim();
+      if (doneRef.current) return;
+      if (!text) { setStatus('idle'); toast.error(t('conv.noSpeech')); return; }
+      const said = [...turnsRef.current, { role: 'candidate', text }];
+      turnsRef.current = said;
+      setTurns(said);
+      if (turnSegRef.current !== segIdxRef.current) return;
+      if (!reply) {
+        /* Heard, but unanswered. The words stay in the transcript and the
+           error bar's "Try again" asks for the reply on its own — losing a
+           spoken turn because the examiner failed would cost the candidate
+           more than the reply did. */
+        setStatus('idle');
+        setError(t('conv.errNoReply'));
+        return;
+      }
+      const after = [...said, { role: 'agent', text: reply }];
+      turnsRef.current = after;
+      setTurns(after);
+      setStatus('speaking');
+      await speak(reply);
+      if (!doneRef.current) listenRef.current?.();
     } catch (err) {
       setStatus('idle');
       setError(errMsg(err, t('conv.errTranscription')));
@@ -1064,12 +1138,17 @@ export default function ConversationModal({
             {/* controls */}
             <div className="flex flex-col gap-2 border-t border-gray-100 px-6 py-4 sm:flex-row">
               {recording ? (
-                /* The same button, pressed a second time. It says what it
-                   does rather than what it sends: a candidate mid-sentence
-                   needs to know this is the one that ends their turn. */
+                /* The same button, pressed a second time — and it carries the
+                   switch, so the candidate can see the microphone is live as
+                   well as read what pressing it will do. */
                 <button onClick={stopPushToTalk}
                   data-testid="conv-stop-speaking"
+                  aria-pressed="true"
                   className="btn-primary flex-1 justify-center !bg-gradient-to-r !from-red-500 !to-rose-600">
+                  <MicSwitch on />
+                  <span className="text-[10px] font-black uppercase tracking-[0.08em]">
+                    {t('conv.micOn')}
+                  </span>
                   <Stop size={16} weight="fill" /> {t('conv.pressWhenDone')}
                 </button>
               ) : pressToTalk ? (
@@ -1077,7 +1156,12 @@ export default function ConversationModal({
                    thing the real room does not let you do is speak over them. */
                 <button onClick={startPushToTalk} disabled={status === 'thinking' || status === 'speaking'}
                   data-testid="conv-start-speaking"
+                  aria-pressed="false"
                   className="btn-primary flex-1 justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600 disabled:opacity-50">
+                  <MicSwitch on={false} />
+                  <span className="text-[10px] font-black uppercase tracking-[0.08em]">
+                    {t('conv.micOff')}
+                  </span>
                   <Microphone size={16} weight="fill" /> {t('conv.pressToSpeak')}
                 </button>
               ) : status === 'idle' ? (

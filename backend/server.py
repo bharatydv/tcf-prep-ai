@@ -9160,6 +9160,64 @@ async def speaking_converse(body: ConverseIn,
     return {"reply": reply}
 
 
+@app.post("/api/speaking/turn/reply")
+async def speaking_turn_reply(payload: str = Form(...),
+                              audio: UploadFile = File(...),
+                              mime_type: Optional[str] = Form(None),
+                              user: User = Depends(get_current_user),
+                              db: AsyncSession = Depends(get_db),
+                              _rl=Depends(turn_rate_limit)):
+    """One roleplay turn — what the candidate just said and the answer to it —
+    in a single request.
+
+    The browser used to make two: POST the audio to be transcribed, wait for
+    the words to come back, then POST the dialogue to be answered. The
+    candidate sat through both, and the second leg bought nothing the first
+    had not already paid for — the same round trip, the same session lookup,
+    the same budget check — while the examiner stayed silent through all of
+    it. Doing both here removes one of each.
+
+    Neither provider call changes, and neither does what comes back from them.
+    The two endpoints this stands in front of are still there, for the flows
+    that genuinely need only one: the examiner's opening line, which has no
+    audio behind it, and tâche 1, where nobody answers the candidate.
+
+    An empty `text` means nothing was heard; a `reply` that is empty beside a
+    `text` that is not means the examiner failed, not the microphone. Both are
+    200: the candidate's words have been transcribed either way, and losing
+    them to a 503 would make the second case cost more than the first.
+    """
+    try:
+        body = ConverseIn.model_validate_json(payload)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid conversation")
+    await enforce_turn_budget(db, user)
+    audio_bytes = await read_audio_upload(audio)
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio upload")
+    filename = audio.filename or "turn.webm"
+    mime = resolve_audio_mime(filename, mime_type or audio.content_type)
+    try:
+        heard = await asyncio.wait_for(
+            transcribe_turn(audio_bytes, filename, db=db, mime=mime),
+            timeout=SPEAKING_MAX_WAIT_SECONDS)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail=AI_TIMEOUT_DETAIL)
+    history = [t.model_dump() for t in body.history]
+    # The examiner's own voice, heard back through the microphone, is cut off
+    # the front of the turn here rather than in the browser — the reply is
+    # written from this text, so it has to be the candidate's words by the
+    # time the model sees it. See strip_echo.
+    last_agent = next((t["text"] for t in reversed(history)
+                       if t.get("role") == "agent"), "")
+    text = strip_echo(heard, last_agent)
+    if not text:
+        return {"text": "", "reply": ""}
+    said = history + [{"role": "candidate", "text": text}]
+    reply = await interaction_reply(body.consigne, said, db=db, mode=body.mode)
+    return {"text": text, "reply": reply}
+
+
 @app.post("/api/speaking/converse/grade")
 async def speaking_converse_grade(body: ConverseGradeIn,
                                   user: User = Depends(get_current_user),
