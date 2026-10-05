@@ -60,6 +60,13 @@ export function useAttempts(url, { enabled = true } = {}) {
 export default function AttemptHistory({
   attempts, onOpen, onRetake, opening = null, busy = false,
   className = '', testid = 'attempt-history',
+  /* Which row's result is on screen under this list, when the page shows one
+     there. A list of identical Review buttons cannot say which attempt is
+     being read, so a candidate comparing two of them loses their place after
+     one click. */
+  selectedId = null,
+  // "Retake" is a paper; a practice question is practised again.
+  retakeLabel = null,
   /* Only the newest few are worth the room; the rest are one click away.
      A candidate with thirty sittings wants the last one, not a ledger. */
   collapseAfter = 3,
@@ -82,8 +89,8 @@ export default function AttemptHistory({
         {onRetake && (
           <button type="button" onClick={onRetake} disabled={busy}
             data-testid={`${testid}-retake`}
-            className="ml-auto inline-flex items-center gap-1.5 text-xs font-semibold text-primary underline disabled:opacity-50">
-            <ArrowClockwise size={13} weight="bold" />{t('hist.retake')}
+            className="ml-auto inline-flex min-h-[40px] items-center gap-1.5 px-1 text-xs font-semibold text-primary underline disabled:opacity-50">
+            <ArrowClockwise size={13} weight="bold" />{retakeLabel || t('hist.retake')}
           </button>
         )}
       </div>
@@ -91,8 +98,11 @@ export default function AttemptHistory({
       <ul className="divide-y divide-violet-50">
         {shown.map((a) => {
           const pct = a.total ? Math.round((a.score / a.total) * 100) : null;
+          const on = selectedId != null && a.id === selectedId;
           return (
-            <li key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-5 py-3">
+            <li key={a.id} aria-current={on ? 'true' : undefined}
+              className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 px-5 py-3 ${
+                on ? 'bg-violet-50/60' : ''}`}>
               <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${
                 pct == null ? 'bg-violet-100 text-primary' : toneFor(pct)}`}>
                 {a.label}
@@ -101,9 +111,11 @@ export default function AttemptHistory({
               {a.note && <span className="text-xs text-gray-400">{a.note}</span>}
               <button type="button" onClick={() => onOpen(a)} disabled={busy}
                 data-testid={`${testid}-open-${a.id}`}
-                className="ml-auto inline-flex items-center gap-1.5 text-xs font-semibold text-primary underline disabled:opacity-50">
+                className="ml-auto inline-flex min-h-[40px] items-center gap-1.5 px-1 text-xs font-semibold text-primary underline disabled:opacity-50">
                 <MagnifyingGlass size={12} weight="bold" />
-                {opening === a.id ? t('hist.opening') : t('hist.review')}
+                {opening === a.id
+                  ? t('hist.opening')
+                  : on ? t('hist.showing') : t('hist.review')}
               </button>
             </li>
           );

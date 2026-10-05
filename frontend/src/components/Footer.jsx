@@ -10,11 +10,12 @@
  */
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { PaperPlaneTilt } from '@phosphor-icons/react';
+import { CaretDown, PaperPlaneTilt } from '@phosphor-icons/react';
 import { reopenConsent } from './ConsentBanner';
 import { toast } from 'sonner';
 import { api, errMsg } from '../lib/api';
 import { useT } from '../i18n';
+import { useAuth } from '../context/AuthContext';
 
 export const SUPPORT_EMAIL = 'contact@prepfrancais.com';
 
@@ -73,6 +74,7 @@ function Wordmark() {
  * links under the newsletter form made that column twice the height of the
  * other four, and the footer as tall as the empty space beside them. */
 const COMPANY_LINKS = [
+  ['/reviews', 'land.footReviews'],
   ['/contact', 'land.footContact'],
   ['/privacy', 'land.footPrivacy'],
   ['/terms', 'land.footTerms'],
@@ -80,11 +82,20 @@ const COMPANY_LINKS = [
   ['/shipping', 'land.footShipping'],
 ];
 
-function Column({ title, links }) {
+/* On a phone the five columns stacked into a thousand pixels of links under
+   every page. Each column folds behind its title there; the Product column
+   stays open because it is the way back into the app. Desktop is unchanged:
+   the title is inert and the list is always shown. */
+function Column({ title, links, openOnPhone = false }) {
+  const [open, setOpen] = useState(openOnPhone);
   return (
-    <div>
-      <p className="font-heading text-sm font-bold text-white">{title}</p>
-      <ul className="mt-3 space-y-1.5 text-xs">
+    <div className="border-b border-white/10 pb-3 sm:border-0 sm:pb-0">
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+        className="flex min-h-[44px] w-full items-center justify-between text-left font-heading text-sm font-bold text-white sm:pointer-events-none sm:min-h-0">
+        {title}
+        <CaretDown size={14} weight="bold" className={`transition sm:hidden ${open ? 'rotate-180' : ''}`} />
+      </button>
+      <ul className={`${open ? 'block' : 'hidden'} mt-1 space-y-1.5 text-xs sm:mt-3 sm:block`}>
         {links.map(([to, label]) => (
           <li key={to}>
             <Link to={to} className="inline-block py-1.5 transition hover:text-white">{label}</Link>
@@ -96,6 +107,9 @@ function Column({ title, links }) {
 }
 
 export default function Footer() {
+  // Reviews are for visitors deciding whether to sign up, so a signed-in
+  // learner's dashboard does not carry the link.
+  const { user } = useAuth() || {};
   const t = useT();
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
@@ -118,14 +132,14 @@ export default function Footer() {
 
   return (
     <footer className="bg-ink text-violet-200/70" style={{ background: '#120822' }}>
-      <div className="mx-auto grid max-w-7xl gap-x-8 gap-y-8 px-4 py-10 sm:grid-cols-2 sm:px-6 lg:grid-cols-[1.4fr_1fr_1fr_1fr_1fr_1.2fr]">
+      <div className="mx-auto grid max-w-7xl gap-x-8 gap-y-3 px-4 py-8 sm:gap-y-8 sm:px-6 sm:py-10 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1fr_1fr_1.2fr]">
         <div className="sm:col-span-2 lg:col-span-1">
           <Wordmark />
           <p className="mt-3 text-sm font-semibold text-violet-100">{t('land.footerTag')}</p>
-          <p className="mt-3 max-w-xs text-xs leading-relaxed">{t('land.footerBlurb')}</p>
+          <p className="mt-3 hidden max-w-xs text-xs leading-relaxed sm:block">{t('land.footerBlurb')}</p>
         </div>
 
-        <Column title={t('land.footProduct')} links={[
+        <Column title={t('land.footProduct')} openOnPhone links={[
           ['/practice', t('land.footWriting')],
           ['/speaking', t('land.footSpeaking')],
           ['/exam-simulator', t('land.footSimulator')],
@@ -163,9 +177,9 @@ export default function Footer() {
           ['/tcf-canada-vocabulary', t('land.footVocab')],
         ]} />
 
-        <div>
+        <div className="pt-3 sm:pt-0">
           <p className="font-heading text-sm font-bold text-white">{t('land.newsletter')}</p>
-          <p className="mt-4 text-xs">{t('land.newsletterSub')}</p>
+          <p className="mt-2 text-xs sm:mt-4">{t('land.newsletterSub')}</p>
           <form className="mt-3 flex overflow-hidden rounded-xl bg-white/10 ring-1 ring-white/15"
             onSubmit={subscribe}>
             <label className="sr-only" htmlFor="newsletter-email">{t('land.emailPlaceholder')}</label>
@@ -185,7 +199,7 @@ export default function Footer() {
       <div className="border-t border-white/10 px-4 py-4 text-[11px] text-violet-300/75 sm:px-6">
         <nav aria-label={t('land.footCompany')}
           className="mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-x-5">
-          {COMPANY_LINKS.map(([to, key]) => (
+          {COMPANY_LINKS.filter(([to]) => !(user && to === '/reviews')).map(([to, key]) => (
             <Link key={to} to={to} className="py-1.5 transition hover:text-white">{t(key)}</Link>
           ))}
           {/* Withdrawing consent is the half a one-time banner usually leaves

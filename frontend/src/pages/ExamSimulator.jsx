@@ -247,10 +247,10 @@ export default function ExamSimulator() {
             {t('hist.reviewing', { when: formatDateTime(pastAttempt.created_at) })}
           </p>
         )}
-        <div className="card mt-6 flex flex-wrap items-center justify-around gap-6 p-8 text-center">
-          <div><p className="text-sm text-gray-500">{t('sim.combined')}</p><p className="font-heading text-5xl font-bold text-primary">{displayMark(attempt.combined_score, attempt.tcf_level) ?? '—'}</p></div>
-          <div><p className="text-sm text-gray-500">{t('sim.cefr')}</p><p className="font-heading text-5xl font-bold">{attempt.tcf_level}</p></div>
-          <div><p className="text-sm text-gray-500">{t('sim.timeUsed')}</p><p className="font-heading text-3xl font-bold">{t('sim.minutes', { n: Math.floor(attempt.time_used_seconds / 60) })}</p></div>
+        <div className="card mt-6 flex flex-wrap items-center justify-around gap-6 p-5 text-center sm:p-8">
+          <div><p className="text-sm text-gray-500">{t('sim.combined')}</p><p className="font-heading text-4xl font-bold text-primary sm:text-5xl">{displayMark(attempt.combined_score, attempt.tcf_level) ?? '—'}</p></div>
+          <div><p className="text-sm text-gray-500">{t('sim.cefr')}</p><p className="font-heading text-4xl font-bold sm:text-5xl">{attempt.tcf_level}</p></div>
+          <div><p className="text-sm text-gray-500">{t('sim.timeUsed')}</p><p className="font-heading text-2xl font-bold sm:text-3xl">{t('sim.minutes', { n: Math.floor(attempt.time_used_seconds / 60) })}</p></div>
         </div>
         {[1, 2, 3].map((i) => {
           const task = attempt[`task${i}`];
@@ -375,7 +375,7 @@ export default function ExamSimulator() {
       <main className="mx-auto max-w-3xl px-4 py-12">
         <BackLink />
         <h1 className="text-3xl font-bold">{t('sim.title')}</h1>
-        <div className="card mt-6 space-y-4 p-8">
+        <div className="card mt-6 space-y-4 p-5 sm:p-8">
           <p className="text-gray-700">{t('sim.conditions')}</p>
           <ul className="space-y-2 text-sm text-gray-600">
             <li>⏱️ <strong>{t('sim.rule1Bold')}</strong> {t('sim.rule1')}</li>
@@ -421,20 +421,23 @@ export default function ExamSimulator() {
   const low = seconds <= 120;
 
   return (
-    <main className="fixed inset-0 z-40 overflow-y-auto bg-white">
+    <main className="fixed inset-0 z-[55] overflow-y-auto bg-white">
       {confirmDialog}
       <div className="mx-auto max-w-4xl px-4 py-6">
         <button onClick={quitExam} data-testid="quit-exam"
-          className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-gray-400 hover:text-red-600 hover:underline">
+          className="mb-4 inline-flex min-h-[40px] items-center gap-1.5 px-1 py-2 text-sm font-semibold text-gray-400 hover:text-red-600 hover:underline">
           <SignOut size={16} /> {t('sim.quit')}
         </button>
-        <div className="flex items-center justify-between">
-          <div className="flex gap-2">
+        {/* Phones: the tabs and the clock stay pinned at the top of the
+            overlay's scroll while the paper scrolls under them. */}
+        <div className="sticky top-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-2 bg-white px-4 py-2 sm:static sm:mx-0 sm:bg-transparent sm:px-0 sm:py-0">
+          <div className="flex flex-wrap gap-2">
             {[1, 2, 3].map((i) => (
               <button key={i} onClick={() => setCurrent(i)}
-                className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${current === i ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}
+                className={`rounded-xl px-3 py-2 text-sm font-semibold transition sm:px-4 ${current === i ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'}`}
                 data-testid={`task-tab-${i}`}>
-                {t('sim.taskTab', { n: i })}
+                <span className="sm:hidden">T{i}</span>
+                <span className="hidden sm:inline">{t('sim.taskTab', { n: i })}</span>
               </button>
             ))}
           </div>
@@ -449,7 +452,7 @@ export default function ExamSimulator() {
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               {[task.doc_1, task.doc_2].map((doc, i) => (
                 <div key={i} className="rounded-2xl border border-violet-100 bg-violet-50/40 p-3.5" data-testid={`sim-document-${i + 1}`}>
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-primary">
+                  <p className="text-xs font-bold uppercase tracking-wide text-primary">
                     {t('sim.documentN', { n: i + 1 })}
                   </p>
                   <p className="mt-1 text-xs leading-relaxed text-gray-700">{doc}</p>
@@ -459,17 +462,25 @@ export default function ExamSimulator() {
           )}
           <p className="mt-3 text-sm leading-relaxed text-gray-700">{task?.text || t('sim.noConsigne')}</p>
           {task?.doc_1 && (
-            <p className="mt-1.5 text-[11px] italic text-gray-500">{t('sim.docsNotCounted')}</p>
+            <p className="mt-1.5 text-xs italic text-gray-500">{t('sim.docsNotCounted')}</p>
           )}
         </div>
 
         <div className="mt-4">
           <AccentToolbar textareaRef={taRef} onInsert={(_c, next) => setTexts({ ...texts, [current]: next })} />
         </div>
+        {/* Paste is allowed. It was blocked to keep the sitting honest, and
+            what it actually blocked was the candidate: a draft written in
+            Notes or on a phone could not be brought in, an accented character
+            copied from the toolbar's own output was refused, and a text lost
+            to a crash had to be typed again from scratch. The clock, the word
+            counts and the sealed subjects are what make this a sitting; the
+            paper is marked for the learner's own benefit, so there is nobody
+            to cheat but themselves. The spellchecker stays off — that one is
+            a tool the real exam does not give you. */}
         <textarea key={current} ref={taRef} value={texts[current]} lang="fr" spellCheck="false"
           onChange={(e) => setTexts({ ...texts, [current]: e.target.value })}
-          onPaste={(e) => { e.preventDefault(); toast.error(t('sim.noPaste')); }}
-          className="input paper-textarea mt-3 p-6"
+          className="input paper-textarea mt-3 !min-h-[220px] !p-4 sm:!min-h-[360px] sm:!p-6"
           placeholder={t('sim.writePlaceholder', { min: g.min, max: g.max })} data-testid={`task-textarea-${current}`} />
 
         <WordCountBar text={texts[current]} taskType={current} className="mt-3" />

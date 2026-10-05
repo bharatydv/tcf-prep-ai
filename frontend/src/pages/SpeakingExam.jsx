@@ -471,7 +471,7 @@ export default function SpeakingExam() {
                into view rather than opening it off-screen. */
             return (
               <div key={s.n} id={`tache-${s.n}`}
-                className={`scroll-mt-20 rounded-3xl border p-5 shadow-soft ${
+                className={`scroll-mt-20 rounded-3xl border p-3 shadow-soft sm:p-5 ${
                   result ? 'border-green-200 bg-green-50/40' : 'border-violet-100 bg-white'}`}>
                 <div className="flex items-start gap-3">
                   <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${
@@ -483,9 +483,9 @@ export default function SpeakingExam() {
                       <p className="font-heading text-sm font-bold text-gray-900">{s.label}</p>
                       {/* Sealed with the subject, and revealed with it. */}
                       {result && s.theme && (
-                        <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-primary">{s.theme}</span>
+                        <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-primary">{s.theme}</span>
                       )}
-                      <span className="ml-auto text-[11px] text-gray-400">{s.meta}</span>
+                      <span className="ml-auto text-xs text-gray-400">{s.meta}</span>
                     </div>
                     {/* The subject is sealed until the tâche is sat.
                          Three questions on screen from the moment the paper
@@ -521,7 +521,7 @@ export default function SpeakingExam() {
                           <CheckCircle size={12} weight="fill" className="mr-1 inline" />
                           {result.pending ? t('sexam.marking') : t('sexam.answered')}
                         </span>
-                        <button onClick={() => startTask(s.n)} className="text-xs font-semibold text-primary underline">
+                        <button onClick={() => startTask(s.n)} className="inline-flex min-h-[40px] items-center px-1 text-xs font-semibold text-primary underline">
                           <ArrowClockwise size={12} weight="bold" className="mr-1 inline" />{t('sexam.again')}
                         </button>
                       </div>
@@ -538,7 +538,7 @@ export default function SpeakingExam() {
                           return toggleReview(s.n);
                         }}
                           data-testid={`review-task-${s.n}`}
-                          className="text-xs font-semibold text-primary underline">
+                          className="inline-flex min-h-[40px] items-center px-1 text-xs font-semibold text-primary underline">
                           <MagnifyingGlass size={12} weight="bold" className="mr-1 inline" />
                           {reviewing.has(s.n)
                             ? t('sexam.hideErrors')
@@ -546,7 +546,7 @@ export default function SpeakingExam() {
                               ? t('hist.review')
                               : t('sexam.checkErrors', { n: (result.errors || []).length })}
                         </button>
-                        <button onClick={() => startTask(s.n)} className="text-xs font-semibold text-primary underline">
+                        <button onClick={() => startTask(s.n)} className="inline-flex min-h-[40px] items-center px-1 text-xs font-semibold text-primary underline">
                           <ArrowClockwise size={12} weight="bold" className="mr-1 inline" />{t('sexam.again')}
                         </button>
                       </div>

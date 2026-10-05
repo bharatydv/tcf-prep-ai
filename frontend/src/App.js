@@ -24,6 +24,8 @@ import RouteAnalytics from "./components/RouteAnalytics";
    agree with the consent banner about who owns the bottom of the screen. It
    renders nothing at all until the groups are configured. */
 import CommunityButton from "./components/CommunityButton";
+/* Static for the same reason: a fixed overlay, and tiny. */
+import ActivityToast from "./components/ActivityToast";
 /* Strings only. The page configs and their icons live in tcfCanada/pages.js,
    which the lazy chunk below pulls in — importing them here would put fifteen
    marketing pages' worth of data in the bundle the landing page waits on. */
@@ -39,6 +41,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 
 const Pricing = lazy(() => import("./pages/Pricing"));
+const Reviews = lazy(() => import("./pages/Reviews"));
 const VerifyAccount = lazy(() => import("./pages/VerifyAccount"));
 const Practice = lazy(() => import("./pages/Practice"));
 const SelectTask = lazy(() => import("./pages/SelectTask"));
@@ -112,6 +115,7 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/pricing" element={<Pricing />} />
+          <Route path="/reviews" element={<Reviews />} />
           <Route path="/practice" element={<Practice />} />
           {/* Specific /practice routes MUST come before /practice/:promptId */}
           <Route path="/practice/tasks" element={<SelectTask />} />
@@ -240,6 +244,7 @@ export default function App() {
             page without taking part in any page's layout. */}
         <ConsentBanner />
         <CommunityButton />
+        <ActivityToast />
       </AuthProvider>
       </I18nProvider>
     </BrowserRouter>

@@ -579,6 +579,10 @@ export async function streamAnalysis(backendUrl, payload, {
 
 /* ----------------------------------------------- ErrorHighlightedText ---- */
 export function ErrorHighlightedText({ text, errors }) {
+  // Which mark's correction is open, by position in `marks`. Hover shows it
+  // on a desktop; a phone has no hover, so a tap toggles it — one at a time.
+  const [open, setOpen] = useState(null);
+  const toggle = (k) => setOpen((cur) => (cur === k ? null : k));
   // Build non-overlapping highlight segments
   const marks = [];
   const taken = [];
@@ -602,7 +606,11 @@ export function ErrorHighlightedText({ text, errors }) {
     if (m.start > cursor) parts.push(<span key={`t${k}`}>{text.slice(cursor, m.start)}</span>);
     const meta = CATEGORY_META[m.err.category] || CATEGORY_META.spelling;
     parts.push(
-      <span key={`m${k}`} className="err-mark" style={{ background: meta.color }} data-testid={`error-mark-${m.idx}`}>
+      <span key={`m${k}`} className={`err-mark${open === k ? ' open' : ''}`} style={{ background: meta.color }}
+        data-testid={`error-mark-${m.idx}`}
+        role="button" tabIndex={0} aria-expanded={open === k}
+        onClick={() => toggle(k)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(k); } }}>
         {text.slice(m.start, m.end)}
         <span className="err-tip">
           <strong className="block text-emerald-300">→ {m.err.correction}</strong>

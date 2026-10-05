@@ -155,7 +155,20 @@
     "unsaved": "Unsaved changes",
     "update": "Update",
     "viewAnswers": "See answers",
-    "writingGrader": "Writing analysis"
+    "writingGrader": "Writing analysis",
+    "tabReviews": "Reviews",
+    "reviewsEmpty": "No reviews yet.",
+    "reviewsAverage": "average",
+    "reviewFilter_all": "All",
+    "reviewFilter_pending": "Pending",
+    "reviewFilter_approved": "Approved",
+    "reviewFilter_hidden": "Hidden",
+    "reviewPublicYes": "Can show on site",
+    "reviewPublicNo": "Private",
+    "reviewNoComment": "No comment",
+    "reviewSeeCorrection": "See correction",
+    "reviewApprove": "Approve & show",
+    "reviewHide": "Hide"
   },
   "analysis": {
     "conjugation": "Checking conjugation",
@@ -528,6 +541,10 @@
     "speakingSet": "Speaking test · {{n}}",
     "speakingTests": "Speaking tests",
     "speakingTestsNote": "Expression orale, three tâches per paper",
+    "speakingPractice": "Speaking practice",
+    "speakingPracticeNote": "One tâche at a time, outside a test paper",
+    "speakingPracticeMore": "Show {{n}} older",
+    "practiceTache": "Tâche {{n}} practice",
     "markingNow": "Your paper is being marked — this page updates on its own.",
     "statAttempts": "Attempts",
     "statAverage": "Average score /20",
@@ -557,7 +574,7 @@
     "colError": "Error",
     "colExplanation": "Explanation",
     "disclaimer": "Level estimated by AI from your text, using the TEF/TCF Canada scale. This is not an official result: only an accredited centre can issue a valid score.",
-    "hoverHint": "Hover a highlight to see the correction and the explanation.",
+    "hoverHint": "Tap or hover a highlighted word to see the correction.",
     "level": "Level",
     "linkingWords": "Linking words to use",
     "newAttempt": "New attempt",
@@ -677,8 +694,10 @@
   "hist": {
     "title": "Your past attempts ({{n}})",
     "review": "Review",
+    "showing": "Showing",
     "opening": "Opening…",
     "retake": "Retake",
+    "attemptN": "Attempt {{n}}",
     "more": "Show {{n}} older",
     "reviewing": "Reviewing your attempt from {{when}}",
     "exitReview": "Back to this paper",
@@ -866,7 +885,8 @@
     "weeklyGoalText": "Improve written coherence",
     "weeklyGoals": "Weekly goals",
     "writeBlurb": "Get detailed feedback on grammar, coherence, vocabulary and structure.",
-    "writtenTest": "Written test"
+    "writtenTest": "Written test",
+    "footReviews": "Reviews"
   },
   "landing": {
     "film": {
@@ -966,6 +986,7 @@
     "prev": "Previous",
     "progress": "{{done}} of {{total}} answered",
     "questionN": "Question {{n}}",
+    "questions": "Questions",
     "retake": "Retake this paper",
     "scorePct": "{{p}}% correct",
     "signInBody": "The 35-minute paper is graded and saved to your history, so it needs an account. Practice mode is open to everyone, replays every clip, and marks each question as you answer it.",
@@ -1163,7 +1184,10 @@
     "p4": "For as long as your account exists, because your mistake history is what the review games are built from. Delete your account and the submissions, mistakes and review sessions attached to it go with it.",
     "p5": "You can ask for a copy of everything held about you, ask for corrections, or ask for the account and its contents to be deleted. Write to the address below and we will act on it within 30 days. If you are in Quebec, Law 25 gives you these rights explicitly; elsewhere in Canada, PIPEDA does.",
     "p6": "Two httpOnly cookies keep you signed in, plus one ordinary cookie that only records that a session exists so the app can skip a pointless request when you are signed out. Your language choice is kept in local storage. There is no advertising or cross-site tracking. Google Analytics cookies are set only if you allow them, and you can change that choice at any time through the Cookies link at the bottom of every page.",
-    "p7": "Questions or requests about your data: {{email}}"
+    "p7": "Questions or requests about your data: {{email}}",
+    "h8": "Activity notifications",
+    "p8": "When you finish a test or buy a plan, other visitors may see a short notification such as \"Priya S. just finished a writing test\". It shows only your first name and the first letter of your last name, never your email, score or answers. You can turn this off at any time.",
+    "activityOptOut": "Don't show my name in activity notifications"
   },
   "read": {
     "chooseSub": "Practice comprehension passages one at a time, or sit a full timed reading test.",
@@ -1189,6 +1213,7 @@
     "prev": "Previous",
     "progress": "{{done}} of {{total}} answered",
     "questionN": "Question {{n}}",
+    "questions": "Questions",
     "retake": "Retake this paper",
     "scorePct": "{{p}}% correct",
     "signInBody": "The 60-minute paper is graded and saved to your history, so it needs an account. Practice mode is open to everyone and marks each question as you answer it.",
@@ -1515,6 +1540,10 @@
     "topics": {
       "desc": "Real recent consignes from the TCF Canada written exam, each with a model answer at the target level.",
       "title": "Recent TCF Canada exam topics"
+    },
+    "reviews": {
+      "title": "PrepFrancais reviews from TCF & TEF Canada learners",
+      "desc": "Real reviews from learners who practised TCF and TEF Canada writing and speaking with PrepFrancais."
     }
   },
   "sexam": {
@@ -1587,7 +1616,6 @@
     "minutes": "{{n}} min",
     "nextTask": "Next tâche →",
     "noConsigne": "No prompt available.",
-    "noPaste": "Copy and paste is disabled in exam mode",
     "quit": "Leave the exam",
     "quitConfirm": "Leave the simulation? Your three texts will be lost and will not be graded.",
     "resultsTitle": "Simulation results",
@@ -1596,7 +1624,7 @@
     "rule1": "for the 3 tâches, strict timing (auto-submit at zero)",
     "rule1Bold": "60 minutes",
     "rule2": "Tâche 1: 60–120 words · Tâche 2: 120–150 words · Tâche 3: 120–180 words",
-    "rule3": "No spellchecker, no copy-paste",
+    "rule3": "No spellchecker (copy and paste are allowed)",
     "rule4": "One simulation = 1 credit (not 3)",
     "scorePill": "Score {{score}}/20 · {{level}}",
     "setN": "Exam set {{n}}",
@@ -1754,6 +1782,9 @@
     "orPickTask": "Or choose a TCF task on the left to practise one task at a time.",
     "overview": "Practice task overview",
     "overviewSub": "Choose a speaking tâche on the left to see its themes, or run the full exam simulator.",
+    "practiceAgain": "Practice again",
+    "practiced": "Practiced",
+    "pickAttempt": "You have practised this more than once — choose which attempt's mistakes to read.",
     "prepNone": "None",
     "prepNotes": "Take notes — do not speak yet.",
     "preparation": "Preparation",
@@ -1762,6 +1793,11 @@
     "recordAnswer": "Record answer",
     "recordingAria": "Recording",
     "restart": "Start over",
+    "reviewMistakes": "Review mistakes",
+    "hideMistakes": "Hide mistakes",
+    "openingAttempt": "Opening your attempt…",
+    "nAttempts": "{{n}} attempts so far",
+    "t1Attempts": "Every guided interview you have practised here.",
     "seeDetail": "See details →",
     "skipPrep": "Skip preparation",
     "startConversation": "Start conversation",
@@ -1988,5 +2024,49 @@
     "doneTitle": "Your account is ready",
     "doneBody": "That is everything. Carry on where you left off — your work is saved from now on.",
     "doneCta": "Carry on"
+  },
+  "rate": {
+    "question": "How was this correction?",
+    "label1": "Bad",
+    "label2": "Poor",
+    "label3": "OK",
+    "label4": "Good",
+    "label5": "Great",
+    "placeholderGood": "What did you like? (optional)",
+    "placeholderBad": "What should we improve? (optional)",
+    "allowPublic": "Show my review on PrepFrancais",
+    "namePlaceholder": "Your first name",
+    "needComment": "Write a few words to show your review on the site.",
+    "send": "Send",
+    "thanks": "Thanks for your feedback!",
+    "change": "Change my answer"
+  },
+  "reviews": {
+    "titleA": "What students",
+    "titleB": "say",
+    "count": "{{n}} reviews",
+    "anonymous": "PrepFrancais learner",
+    "seeAll": "See all reviews",
+    "empty": "No reviews yet.",
+    "countOne": "1 review",
+    "basedOn": "Based on {{n}} reviews",
+    "verified": "Verified learner"
+  },
+  "activity": {
+    "test_writing": "{{name}} just finished a writing test",
+    "test_speaking": "{{name}} just finished a speaking test",
+    "test_reading": "{{name}} just finished a reading test",
+    "test_listening": "{{name}} just finished a listening test",
+    "test_mock": "{{name}} just finished a mock exam",
+    "test_writing_exam": "{{name}} just finished the writing exam simulator",
+    "plan": "{{name}} just bought the {{plan}} plan",
+    "minsAgo": "{{n}} min ago",
+    "hourAgo": "1 hour ago",
+    "hoursAgo": "{{n}} hours ago",
+    "dayAgo": "1 day ago",
+    "daysAgo": "{{n}} days ago",
+    "seePlans": "See plans",
+    "close": "Close",
+    "justNow": "just now"
   }
 }

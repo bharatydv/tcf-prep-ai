@@ -158,10 +158,10 @@ export default function Review() {
     const graded = summary.graded || [];
     const correct = graded.filter((r) => r.correct).length;
     return (
-      <main className="mx-auto max-w-xl px-4 py-16 text-center">
+      <main className="mx-auto max-w-xl px-4 py-10 text-center sm:py-16">
         <h1 className="text-3xl font-bold">{t('rev.sessionDone')}</h1>
-        <div className="card mt-6 space-y-3 p-8">
-          <p className="font-heading text-5xl font-bold text-primary">+{summary.xp_earned} XP</p>
+        <div className="card mt-6 space-y-3 p-5 sm:p-8">
+          <p className="font-heading text-4xl font-bold text-primary sm:text-5xl">+{summary.xp_earned} XP</p>
           <p className="text-gray-600">{t('rev.summary', { correct, total: graded.length, mastered: summary.newly_mastered.length, xp: summary.total_xp })}</p>
           {/* An accent slip is marked wrong, so it has to be named: the learner
               knew the word and would otherwise read the card as "no idea". */}
@@ -172,7 +172,7 @@ export default function Review() {
           )}
           {summary.badges?.map((b) => <p key={b} className="pill mx-auto bg-amber-50 text-amber-700">🏅 {b}</p>)}
         </div>
-        <div className="mt-6 flex justify-center gap-3">
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
           <button className="btn-primary" onClick={() => { setMode(null); setSummary(null); setItems([]); load(); }}>{t('rev.continue')}</button>
           <Link to="/dashboard" className="btn-outline">{t('common.dashboard')}</Link>
         </div>
@@ -192,7 +192,7 @@ export default function Review() {
           {t('rev.hubIntro', { n: queue.due.length })} <Fire size={14} className="inline text-orange-500" weight="fill" />
         </p>
         {queue.due.length === 0 ? (
-          <div className="card mt-8 p-10 text-center">
+          <div className="card mt-8 p-6 text-center sm:p-10">
             <p className="text-2xl">{t('rev.nothing')}</p>
             <p className="mt-2 text-gray-600">{t('rev.comeBack')} <Link to="/practice" className="font-semibold text-primary">{t('rev.writeNew')}</Link>.</p>
           </div>
@@ -213,7 +213,40 @@ export default function Review() {
               <h2 className="px-5 pt-6 font-heading text-lg font-bold text-gray-900">
                 {t('rev.listTitle', { n: queue.due.length })}
               </h2>
-              <div className="mt-4 overflow-x-auto">
+              {/* Phones: one stacked block per mistake, the same pattern as
+                  the feedback page's error list. */}
+              <ul className="mt-4 divide-y divide-gray-50 border-t border-gray-100 sm:hidden"
+                data-testid="mistake-list-mobile">
+                {queue.due.map((m, i) => (
+                  <li key={m.mistake_id} className="px-5 py-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-bold tabular-nums text-gray-400">{i + 1}</span>
+                      <span className="pill" style={{ background: CATEGORY_META[m.category]?.color }}>
+                        {CATEGORY_META[m.category]?.label}
+                      </span>
+                      {m.times_repeated > 1 && (
+                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-bold tabular-nums text-amber-700"
+                          aria-label={t('rev.seenTimesTitle', { n: m.times_repeated })}>
+                          ×{m.times_repeated}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-gray-400">{t('rev.colError')}</p>
+                    <p className="mt-0.5 text-sm leading-relaxed">
+                      <span className="text-red-600 line-through decoration-red-300">{m.error_text}</span>
+                    </p>
+                    {m.context_sentence && (
+                      <p className="mt-1 text-sm italic leading-relaxed text-gray-400">{m.context_sentence}</p>
+                    )}
+                    <p className="mt-2.5 text-xs font-semibold uppercase tracking-wide text-gray-400">{t('rev.colCorrection')}</p>
+                    <p className="mt-0.5 text-sm font-semibold leading-relaxed text-green-700">{m.correction}</p>
+                    <p className="mt-2.5 text-xs font-semibold uppercase tracking-wide text-gray-400">{t('rev.colExplanation')}</p>
+                    <p className="mt-0.5 text-sm leading-relaxed text-gray-600">{m.explanation}</p>
+                  </li>
+                ))}
+              </ul>
+              {/* sm and up: the table, in a container that scrolls rather than clips. */}
+              <div className="mt-4 hidden overflow-x-auto sm:block">
                 <table className="w-full min-w-[44rem] text-sm">
                   <thead>
                     <tr className="border-y border-gray-100 text-left text-xs font-bold uppercase tracking-wide text-gray-500">
@@ -227,7 +260,7 @@ export default function Review() {
                     {queue.due.map((m, i) => (
                       <tr key={m.mistake_id}
                         className="border-b border-gray-50 align-top last:border-0">
-                        <td className="px-5 py-4 text-[11px] font-bold tabular-nums text-gray-400">
+                        <td className="px-5 py-4 text-xs font-bold tabular-nums text-gray-400">
                           {i + 1}
                         </td>
                         <td className="px-5 py-4 leading-relaxed">
@@ -235,15 +268,16 @@ export default function Review() {
                             {m.error_text}
                           </span>
                           {m.times_repeated > 1 && (
-                            <span className="ml-2 inline-block rounded-full bg-amber-50 px-2 py-0.5 align-middle text-[11px] font-bold tabular-nums text-amber-700"
-                              title={t('rev.seenTimesTitle', { n: m.times_repeated })}>
+                            <span className="ml-2 inline-block rounded-full bg-amber-50 px-2 py-0.5 align-middle text-xs font-bold tabular-nums text-amber-700"
+                              title={t('rev.seenTimesTitle', { n: m.times_repeated })}
+                              aria-label={t('rev.seenTimesTitle', { n: m.times_repeated })}>
                               ×{m.times_repeated}
                             </span>
                           )}
                           {/* The sentence it was written in, which is what the
                               drills below put back on screen. */}
                           {m.context_sentence && (
-                            <span className="mt-1 block text-[12px] italic leading-relaxed text-gray-400">
+                            <span className="mt-1 block text-xs italic leading-relaxed text-gray-400">
                               {m.context_sentence}
                             </span>
                           )}
@@ -251,7 +285,7 @@ export default function Review() {
                         <td className="px-5 py-4 font-semibold leading-relaxed text-green-700">
                           {m.correction}
                         </td>
-                        <td className="px-5 py-4 text-[13px] leading-relaxed text-gray-600">
+                        <td className="px-5 py-4 text-sm leading-relaxed text-gray-600">
                           {m.explanation}
                         </td>
                       </tr>
@@ -265,7 +299,7 @@ export default function Review() {
               {t('rev.chooseMode')}
             </h2>
             <p className="mt-1 text-sm text-gray-500">{t('rev.chooseModeSub')}</p>
-            <div className="mt-4 grid gap-5 md:grid-cols-3">
+            <div className="mt-4 grid grid-cols-2 gap-5 md:grid-cols-3">
               {MODES.map((key) => {
                 const Icon = MODE_ICON[key];
                 // For the modes built on the fly this is a forecast rather
@@ -277,7 +311,7 @@ export default function Review() {
                 const busy = starting === key;
                 return (
                   <button key={key} disabled={!n || starting != null}
-                    className="card card-hover p-6 text-left disabled:cursor-not-allowed disabled:opacity-50"
+                    className="card card-hover p-4 text-left disabled:cursor-not-allowed disabled:opacity-50 sm:p-6"
                     onClick={() => start(key)} data-testid={`mode-${key}`}>
                     <Icon size={28} weight="duotone" className="text-primary" />
                     <h3 className="mt-3 font-heading text-lg font-semibold">{t(MODE_META[key].title)}</h3>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   ChatText, Article, Scales, ArrowLeft,
@@ -30,6 +30,10 @@ export default function SelectTask() {
   const navigate = useNavigate();
 
   const [activeTache, setActiveTache] = useState(null);
+  // The right-hand pane. On a phone it is below the tâche tabs, so choosing a
+  // tâche scrolls it into view — before that the tap looked like it did
+  // nothing, because the themes it loaded landed below the fold.
+  const paneRef = useRef(null);
   const [themes, setThemes] = useState([]);
   const [loadingThemes, setLoadingThemes] = useState(false);
 
@@ -69,12 +73,18 @@ export default function SelectTask() {
   const selectTache = (t) => {
     if (!user) return navigate('/login');
     setActiveTache(t.n);
+    revealPane();
     setThemes([]);
     setLoadingThemes(true);
     api.get(`/api/themes?task_type=${t.n}&skill=writing`)
       .then(({ data }) => setThemes(data.themes || []))
       .catch(() => setThemes([]))
       .finally(() => setLoadingThemes(false));
+  };
+
+  const revealPane = () => {
+    if (window.innerWidth >= 1024) return;
+    setTimeout(() => paneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
   };
 
   const openTheme = (t) => {
@@ -99,36 +109,41 @@ export default function SelectTask() {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,360px)_1fr]">
-          {/* LEFT — task list (fixed) */}
-          <div className="flex flex-col gap-3">
+          {/* LEFT — task list (fixed). Three tabs in a row on a phone, the
+              full cards from lg up where they sit beside the pane. */}
+          <div className="grid grid-cols-3 gap-2 lg:flex lg:flex-col lg:gap-3">
             {TACHES.map((tache) => {
               const Icon = tache.icon;
               const active = activeTache === tache.n;
               return (
                 <button key={tache.n} onClick={() => selectTache(tache)}
-                  className={`flex w-full flex-col rounded-2xl border p-5 text-left shadow-soft transition hover:shadow-lg hover:shadow-violet-200/50 ${
+                  aria-pressed={active}
+                  className={`flex w-full flex-col rounded-2xl border p-3 text-left shadow-soft transition hover:shadow-lg hover:shadow-violet-200/50 lg:p-5 ${
                     active ? 'border-primary bg-violet-50/60 ring-2 ring-primary/30' : 'border-violet-100 bg-white'
                   }`}>
-                  <div className="flex items-center gap-3">
-                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                  <div className="flex flex-col items-start gap-2 lg:flex-row lg:items-center lg:gap-3">
+                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl lg:h-10 lg:w-10 ${
                       active ? 'bg-primary text-white' : 'bg-violet-100 text-primary'
                     }`}>
                       <Icon size={20} weight="fill" />
                     </span>
                     <div className="min-w-0">
-                      <h3 className="font-heading text-sm font-bold leading-snug text-gray-900">{t(tache.title)}</h3>
-                      <p className="mt-0.5 text-xs font-semibold text-primary">{t(tache.meta)}</p>
+                      <h3 className="font-heading text-sm font-bold leading-snug text-gray-900">
+                        <span className="lg:hidden">Tâche {tache.n}</span>
+                        <span className="hidden lg:inline">{t(tache.title)}</span>
+                      </h3>
+                      <p className="mt-0.5 line-clamp-2 text-xs font-semibold text-primary lg:line-clamp-none">{t(tache.meta)}</p>
                     </div>
-                    <CaretRight size={18} className={`ml-auto shrink-0 ${active ? 'text-primary' : 'text-gray-300'}`} />
+                    <CaretRight size={18} className={`ml-auto hidden shrink-0 lg:block ${active ? 'text-primary' : 'text-gray-300'}`} />
                   </div>
-                  <p className="mt-2 text-xs leading-relaxed text-gray-500">{t(tache.focus)}</p>
+                  <p className="mt-2 hidden text-xs leading-relaxed text-gray-500 lg:block">{t(tache.focus)}</p>
                 </button>
               );
             })}
           </div>
 
           {/* RIGHT — own question, simulator by default, or themes */}
-          <div className="min-h-[360px]">
+          <div ref={paneRef} className="scroll-mt-20 lg:min-h-[360px]">
             {ownMode ? (
               <div className="flex h-full flex-col rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-5 shadow-soft sm:p-6">
                 <div className="flex items-center gap-3">
@@ -145,7 +160,7 @@ export default function SelectTask() {
 
                 <div className="mt-5 flex items-baseline justify-between gap-3">
                   <label htmlFor="own-question" className="text-xs font-bold uppercase tracking-wide text-primary">{t('own.question')}</label>
-                  <span className="text-[11px] tabular-nums text-gray-400">{ownQuestion.length} / 1000</span>
+                  <span className="text-xs tabular-nums text-gray-400">{ownQuestion.length} / 1000</span>
                 </div>
                 <input
                   id="own-question"
@@ -159,7 +174,7 @@ export default function SelectTask() {
                   <label htmlFor="own-answer" className="text-xs font-bold uppercase tracking-wide text-primary">
                     {t('own.answer')} <span className="font-semibold normal-case tracking-normal text-gray-400">· {t('common.optional')}</span>
                   </label>
-                  <span className="text-[11px] tabular-nums text-gray-400">
+                  <span className="text-xs tabular-nums text-gray-400">
                     {t('own.wordsAndChars', { words: ownText.trim() ? ownText.trim().split(/\s+/).length : 0, chars: ownText.length, max: 3000 })}
                   </span>
                 </div>
@@ -213,7 +228,7 @@ export default function SelectTask() {
                             {locked ? <Lock size={20} weight="fill" className="text-amber-500" /> : (theme.emoji || <BookOpen size={20} weight="duotone" className="text-primary" />)}
                           </span>
                           {theme.is_premium ? (
-                            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">{t('common.pro')}</span>
+                            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-amber-700">{t('common.pro')}</span>
                           ) : (
                             <CaretRight size={18} className="text-gray-300" />
                           )}
@@ -230,7 +245,7 @@ export default function SelectTask() {
                           <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-violet-100">
                             <div className="h-full rounded-full bg-gradient-to-r from-primary to-fuchsia-500" style={{ width: '0%' }} />
                           </div>
-                          <p className="mt-1 text-right text-[10px] text-gray-400">{locked ? 'Upgrade to unlock' : '0% completed'}</p>
+                          <p className="mt-1 text-right text-xs text-gray-400">{locked ? 'Upgrade to unlock' : '0% completed'}</p>
                         </div>
                       </button>
                     );

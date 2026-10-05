@@ -22,6 +22,9 @@ const TABS = [
      next to Learners because it is the same question — who is out there —
      asked of the half that has no account behind it. */
   { id: 'leads', label: 'admin.tabLeads' },
+  /* Learners' ratings of their corrections. Approving one here is the only
+     way it reaches the public site. */
+  { id: 'reviews', label: 'admin.tabReviews' },
   { id: 'submissions', label: 'admin.tabSubmissions' },
   { id: 'prompts', label: 'admin.tabPrompts' },
   { id: 'questions', label: 'admin.tabQuestions' },
@@ -52,6 +55,7 @@ export default function Admin() {
         {tab === 'content' && <ContentQuality />}
         {tab === 'users' && <Users />}
         {tab === 'leads' && <Leads />}
+        {tab === 'reviews' && <Reviews />}
         {tab === 'submissions' && <Submissions />}
         {tab === 'prompts' && <Prompts />}
         {tab === 'questions' && <Questions />}
@@ -940,6 +944,98 @@ function SimPrompts() {
         ))}
       </section>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------- Reviews ---- */
+const REVIEW_STATUS = {
+  pending: 'bg-amber-50 text-amber-700',
+  approved: 'bg-emerald-50 text-emerald-700',
+  hidden: 'bg-gray-100 text-gray-500',
+};
+const REVIEW_FILTERS = ['', 'pending', 'approved', 'hidden'];
+const FACE = ['😞', '🙁', '😐', '🙂', '😍'];
+
+function Reviews() {
+  const t = useT();
+  const [rows, setRows] = useState(null);
+  const [total, setTotal] = useState(0);
+  const [average, setAverage] = useState(null);
+  const [status, setStatus] = useState('');
+
+  const load = useCallback(() => {
+    setRows(null);
+    api.get('/api/admin/reviews', { params: { status: status || undefined } })
+      .then((r) => { setRows(r.data.reviews); setTotal(r.data.total); setAverage(r.data.average); })
+      .catch((e) => toast.error(errMsg(e)));
+  }, [status]);
+  useEffect(load, [load]);
+
+  const setRowStatus = (id, next) => {
+    api.patch(`/api/admin/reviews/${id}`, { status: next })
+      .then(() => setRows((prev) => prev.map((r) => (r.id === id ? { ...r, status: next } : r))))
+      .catch((e) => toast.error(errMsg(e)));
+  };
+
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        {REVIEW_FILTERS.map((s) => (
+          <button key={s || 'all'} onClick={() => setStatus(s)}
+            className={`rounded-xl px-3 py-1.5 text-xs font-semibold ${status === s ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            {t(`admin.reviewFilter_${s || 'all'}`)}
+          </button>
+        ))}
+        {rows && (
+          <span className="ml-auto text-xs text-gray-500">
+            {total}{average != null && ` · ${t('admin.reviewsAverage')} ${average} / 5`}
+          </span>
+        )}
+      </div>
+
+      {!rows ? <Spinner /> : rows.length === 0 ? (
+        <p className="card p-8 text-center text-sm text-gray-500">{t('admin.reviewsEmpty')}</p>
+      ) : (
+        <ul className="space-y-3" data-testid="admin-reviews">
+          {rows.map((r) => (
+            <li key={r.id} className="card p-4">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="text-xl">{FACE[r.rating - 1]}</span>
+                <span className="font-bold text-amber-500">{'★'.repeat(r.rating)}<span className="text-gray-200">{'★'.repeat(5 - r.rating)}</span></span>
+                <span className="font-semibold">{r.name || '—'}</span>
+                <a href={`mailto:${r.email}`} className="text-xs text-primary hover:underline">{r.email}</a>
+                <span className="text-xs text-gray-400">{fmtDate(r.created_at)}</span>
+                <Pill tone={REVIEW_STATUS[r.status] || REVIEW_STATUS.hidden}>{t(`admin.reviewFilter_${r.status}`)}</Pill>
+                <Pill tone={r.allow_public ? 'bg-violet-50 text-violet-700' : 'bg-gray-100 text-gray-500'}>
+                  {t(r.allow_public ? 'admin.reviewPublicYes' : 'admin.reviewPublicNo')}
+                </Pill>
+              </div>
+              <p className="mt-2 whitespace-pre-line text-sm text-gray-700">{r.comment || <span className="text-gray-400">{t('admin.reviewNoComment')}</span>}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {r.submission_id && (
+                  <a href={`/feedback/${r.submission_id}`} target="_blank" rel="noopener noreferrer"
+                    className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-200">
+                    {t('admin.reviewSeeCorrection')}
+                  </a>
+                )}
+                {r.allow_public && r.status !== 'approved' && (
+                  <button onClick={() => setRowStatus(r.id, 'approved')}
+                    className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700">
+                    {t('admin.reviewApprove')}
+                  </button>
+                )}
+                {r.status !== 'hidden' && (
+                  <button onClick={() => setRowStatus(r.id, 'hidden')}
+                    className="rounded-xl bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-200">
+                    {t('admin.reviewHide')}
+                  </button>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

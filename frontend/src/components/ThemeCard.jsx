@@ -39,7 +39,7 @@ export function ThemeCard({ theme, ns, locked, attempt, onOpen }) {
             : (theme.emoji || <BookOpen size={20} weight="duotone" className="text-primary" />)}
         </span>
         {theme.is_premium ? (
-          <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+          <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-amber-700">
             {t(`${ns}.pro`)}
           </span>
         ) : <CaretRight size={18} className="text-gray-300" />}
@@ -61,7 +61,7 @@ export function ThemeCard({ theme, ns, locked, attempt, onOpen }) {
           <div className="h-full rounded-full bg-gradient-to-r from-primary to-fuchsia-500"
             style={{ width: `${locked ? 0 : filled}%` }} />
         </div>
-        <p className="mt-1 text-right text-[10px] text-gray-400">
+        <p className="mt-1 text-right text-xs text-gray-400">
           {locked ? t('themes.upgradeToUnlock')
             : done ? t(`${ns}.lastWas`, {
               level: done.tcf_level || '—',

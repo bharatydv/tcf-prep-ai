@@ -14,13 +14,15 @@
  * the dictionaries, so the French version is a translation rather than a
  * separate legal text that can drift from it.
  */
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   EnvelopeSimple, ShieldCheck, Scales, ChatCircleText, Phone, MapPin,
   ArrowUUpLeft, Package,
 } from '@phosphor-icons/react';
 import { useT } from '../i18n';
+import { api, errMsg } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 import { Seo } from '../lib/seo';
 import {
   SUPPORT_EMAIL, SUPPORT_PHONE, BUSINESS_NAME, BUSINESS_LEGAL_NAME, BUSINESS_ADDRESS,
@@ -28,7 +30,7 @@ import {
 
 /* The date the wording last changed. Hardcoded on purpose: "last updated"
    must mean the text changed, not that the page was rendered today. */
-const LAST_UPDATED = '2026-09-01';
+const LAST_UPDATED = '2026-09-24';
 
 /* Who the merchant actually is.
  *
@@ -104,6 +106,39 @@ function Clause({ heading, body }) {
   );
 }
 
+/* The switch behind privacy.p8: leave me out of the "just finished a test"
+   notifications. Only a signed-in learner has a name to hide. */
+function ActivityOptOut() {
+  const t = useT();
+  const { user, refreshUser } = useAuth() || {};
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  if (!user) return null;
+  const hidden = Boolean(user.hide_activity);
+  const toggle = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await api.post('/api/me/activity-visibility', { hide_activity: !hidden });
+      await refreshUser();
+    } catch (e) {
+      setError(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mt-3">
+      <label className="flex cursor-pointer items-start gap-2.5 text-[15px] text-gray-700">
+        <input type="checkbox" checked={hidden} onChange={toggle} disabled={busy}
+          className="mt-1 h-4 w-4 shrink-0 accent-primary" data-testid="activity-optout" />
+        <span>{t('privacy.activityOptOut')}</span>
+      </label>
+      {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
+    </div>
+  );
+}
+
 export function Privacy() {
   const t = useT();
   return (
@@ -114,6 +149,10 @@ export function Privacy() {
         {[1, 2, 3, 4, 5, 6].map((n) => (
           <Clause key={n} heading={t(`privacy.h${n}`)} body={t(`privacy.p${n}`)} />
         ))}
+        <div>
+          <Clause heading={t('privacy.h8')} body={t('privacy.p8')} />
+          <ActivityOptOut />
+        </div>
         <Clause heading={t('privacy.h7')} body={t('privacy.p7', { email: SUPPORT_EMAIL })} />
       </Shell>
     </>

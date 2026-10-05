@@ -61,6 +61,8 @@ export default function ListeningTest() {
   // than this one. Null while sitting the paper, including after handing it in.
   const [pastAttempt, setPastAttempt] = useState(null);
   const [openingId, setOpeningId] = useState(null);
+  // Phone only: whether the question grid is unfolded under the compact bar.
+  const [navOpen, setNavOpen] = useState(false);
   const audioRef = useRef(null);
   const submittedRef = useRef(false);
   // Wall-clock deadline, so backgrounding the tab cannot buy extra time.
@@ -355,11 +357,11 @@ export default function ListeningTest() {
               <p className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-gray-500">
                 <ListChecks size={14} weight="fill" /> {t('listenTest.byLevel')}
               </p>
-              <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                 {Object.entries(result.by_level || {}).sort().map(([lvl, s]) => (
                   <div key={lvl} className="rounded-2xl border border-violet-100 p-3">
                     <div className="flex items-center justify-between">
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${LEVEL_STYLE[lvl] || 'bg-gray-100 text-gray-600'}`}>{lvl}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${LEVEL_STYLE[lvl] || 'bg-gray-100 text-gray-600'}`}>{lvl}</span>
                       <span className="font-heading text-sm font-bold text-gray-900">{s.correct}/{s.total}</span>
                     </div>
                     <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
@@ -390,16 +392,50 @@ export default function ListeningTest() {
           onOpen={openAttempt}
           onRetake={pastAttempt || result ? restart : null} />
 
+        {/* Phone: a compact bar pinned under the site header — the countdown,
+            where you are in the paper, a toggle that unfolds the question grid
+            and the hand-in button. The full navigator is folded away until the
+            toggle opens it. From `sm` up the bar is gone and the navigator is
+            always shown, exactly as before. One countdown state, shown here on
+            phones and in the navigator on wider screens. */}
+        <div className="sticky top-16 z-30 -mx-4 mb-4 flex items-center gap-2 border-b border-violet-100 bg-white px-4 py-2 shadow-sm sm:hidden"
+          data-testid="listening-nav-bar">
+          {isTest && !reviewing && (
+            <span className={`inline-flex min-h-[40px] shrink-0 items-center gap-1 rounded-full px-2.5 text-xs font-bold tabular-nums ${
+              left < 300 ? 'bg-red-100 text-red-700' : 'bg-violet-50 text-primary'
+            }`} data-testid="listening-timer-bar">
+              <ClockCountdown size={13} weight="fill" /> {clock(left)}
+            </span>
+          )}
+          <span className="truncate text-xs font-semibold tabular-nums text-gray-700"
+            aria-label={t('listenTest.questionN', { n: index + 1 })}>
+            {index + 1} / {questions.length}
+          </span>
+          <button type="button" onClick={() => setNavOpen((o) => !o)} aria-expanded={navOpen}
+            className="ml-auto inline-flex min-h-[40px] shrink-0 items-center gap-1 rounded-lg border border-violet-100 bg-white px-2.5 text-xs font-bold text-primary"
+            data-testid="listening-nav-toggle">
+            <ListChecks size={14} weight="fill" /> {t('listenTest.questions')}
+          </button>
+          {isTest && !reviewing && (
+            <button onClick={handIn} disabled={submitting}
+              className="inline-flex min-h-[40px] shrink-0 items-center gap-1 rounded-lg bg-gradient-to-r from-pink-600 to-fuchsia-600 px-2.5 text-xs font-bold text-white disabled:opacity-60"
+              aria-label={t('listenTest.handIn')} data-testid="listening-submit-bar">
+              <CheckCircle size={14} weight="fill" />
+              <span className="hidden min-[400px]:inline">{t('listenTest.handIn')}</span>
+            </button>
+          )}
+        </div>
+
         <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
           {/* ---------------- NAVIGATOR ---------------- */}
-          <aside className="lg:sticky lg:top-6 lg:self-start">
+          <aside className={`${navOpen ? '' : 'hidden'} sm:block lg:sticky lg:top-6 lg:self-start`}>
             <div className="rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-5 shadow-soft">
               <div className="flex items-center justify-between">
                 <p className="font-heading text-sm font-bold text-gray-900">
                   {t('listenTest.testN', { n: testNumber })}
                 </p>
                 {isTest && !reviewing && (
-                  <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold tabular-nums ${
+                  <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold tabular-nums ${
                     left < 300 ? 'bg-red-100 text-red-700' : 'bg-white text-primary'
                   }`} data-testid="listening-timer">
                     <ClockCountdown size={13} weight="fill" /> {clock(left)}
@@ -419,7 +455,7 @@ export default function ListeningTest() {
                 {questions.map((item, i) => (
                   <button
                     key={item.listening_question_id}
-                    onClick={() => setIndex(i)}
+                    onClick={() => { setIndex(i); setNavOpen(false); }}
                     data-testid={`nav-q-${i + 1}`}
                     className={`flex h-11 items-center justify-center rounded-lg text-xs font-bold transition sm:h-9 ${swatch(item)} ${
                       i === index ? 'ring-2 ring-primary ring-offset-1' : ''
@@ -437,7 +473,7 @@ export default function ListeningTest() {
                   <CheckCircle size={16} weight="fill" /> {t('listenTest.handIn')}
                 </button>
               )}
-              <p className="mt-4 flex items-start gap-1.5 text-[11px] leading-relaxed text-gray-500">
+              <p className="mt-4 hidden items-start gap-1.5 text-xs leading-relaxed text-gray-500 sm:flex">
                 <Lightning size={13} weight="fill" className="mt-0.5 shrink-0 text-primary" />
                 {isTest ? t('listenTest.testHint') : t('listenTest.practiceHint')}
               </p>
@@ -448,13 +484,13 @@ export default function ListeningTest() {
           <div>
             <div className="rounded-3xl border border-violet-100 bg-white p-5 shadow-xl shadow-violet-200/40 sm:p-6">
               <div className="mb-4 flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-gray-900 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
+                <span className="rounded-full bg-gray-900 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-white">
                   {t('listenTest.questionN', { n: index + 1 })}
                 </span>
-                <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${LEVEL_STYLE[q.level] || 'bg-gray-100 text-gray-600'}`}>
+                <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${LEVEL_STYLE[q.level] || 'bg-gray-100 text-gray-600'}`}>
                   {q.level}
                 </span>
-                {q.band && <span className="text-[11px] text-gray-500">{q.band}</span>}
+                {q.band && <span className="text-xs text-gray-500">{q.band}</span>}
               </div>
 
               {/* -------- THE PICTURE, when the question has one --------
@@ -515,7 +551,7 @@ export default function ListeningTest() {
                         <SpeakerHigh size={13} weight="fill" className="text-primary" />
                         {t('listenTest.audioLabel')}
                       </span>
-                      <span className="text-[11px] tabular-nums text-gray-500">
+                      <span className="text-xs tabular-nums text-gray-500">
                         {clock(Math.floor(heard))}
                         {clipLength > 0 && ` / ${clock(Math.floor(clipLength))}`}
                       </span>
@@ -524,7 +560,7 @@ export default function ListeningTest() {
                       <div className="h-full rounded-full bg-gradient-to-r from-primary to-fuchsia-500"
                         style={{ width: `${progress}%` }} />
                     </div>
-                    <p className="mt-1.5 text-[11px] text-gray-500">
+                    <p className="mt-1.5 text-xs text-gray-500">
                       {playsLeft === Infinity
                         ? t('listenTest.playsUnlimited')
                         : playsLeft > 0
@@ -571,7 +607,7 @@ export default function ListeningTest() {
                         marked ? 'cursor-default' : ''
                       }`}
                     >
-                      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold uppercase ${
+                      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold uppercase ${
                         isRight ? 'bg-green-500 text-white'
                           : isWrongPick ? 'bg-red-500 text-white'
                           : picked ? 'bg-primary text-white' : 'bg-violet-100 text-primary'
@@ -620,7 +656,7 @@ export default function ListeningTest() {
                       moves an oral score. */}
                   {correction.transcript && (
                     <div className="rounded-2xl border border-violet-100 bg-violet-50/40 p-4">
-                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                      <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-primary">
                         <Waveform size={12} weight="fill" /> {t('listenTest.transcript')}
                       </p>
                       <p className="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-gray-800">
@@ -637,7 +673,7 @@ export default function ListeningTest() {
                   <div className="grid gap-4 sm:grid-cols-2">
                     {correction.key_line_fr && (
                       <div className="rounded-2xl border border-amber-100 bg-amber-50/60 p-4">
-                        <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                        <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-amber-700">
                           <Quotes size={12} weight="fill" /> {t('listenTest.keyLine')}
                         </p>
                         <p className="mt-1.5 text-sm font-semibold leading-relaxed text-gray-800">{correction.key_line_fr}</p>
@@ -648,7 +684,7 @@ export default function ListeningTest() {
                     )}
                     {correction.vocabulary?.length > 0 && (
                       <div className="rounded-2xl border border-violet-100 bg-white p-4">
-                        <p className="text-[10px] font-bold uppercase tracking-wide text-primary">
+                        <p className="text-xs font-bold uppercase tracking-wide text-primary">
                           {t('listenTest.vocabulary')}
                         </p>
                         <ul className="mt-1.5 space-y-1">
@@ -666,7 +702,7 @@ export default function ListeningTest() {
 
                   {correction.breakdown && (
                     <div className="rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
-                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-sky-700">
+                      <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-sky-700">
                         <ListChecks size={12} weight="fill" /> {t('listenTest.breakdown')}
                       </p>
                       <p className="mt-1.5 whitespace-pre-line text-xs leading-relaxed text-gray-700">

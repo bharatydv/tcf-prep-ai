@@ -153,6 +153,13 @@ export default function ConversationModal({
      with the grade so the answer is findable as part of that paper instead of
      living only in the tab it was spoken in. Absent for free practice. */
   examSet = null,
+  /* The theme question this roleplay answers, in Practice mode. Sent with the
+     grade for the same reason examSet is: without it the answer is a loose
+     correction in the history list, and the card for the question it answered
+     cannot say it has been practised or what it scored. Absent for the guided
+     interview and for open practice, neither of which comes from the bank. */
+  themeId = null,
+  questionId = null,
   /* Given by a caller that does not want to hold the candidate while the
      answer is marked — a sitting, where the next tâche should start straight
      away. It receives the in-flight request instead of the grade: the marking
@@ -790,6 +797,8 @@ export default function ConversationModal({
     const body = {
       consigne, history: turnsRef.current, mode,
       ...(examSet ? { exam_set: examSet } : {}),
+      ...(themeId ? { theme_id: themeId } : {}),
+      ...(questionId ? { question_id: questionId } : {}),
     };
     /* With the recording when there is one: the server transcribes it, keeps
        it with the result and times every word, which is what lets each
@@ -824,7 +833,8 @@ export default function ConversationModal({
       setPhase('live');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [consigne, onGraded, onSubmitted, onCancel, phase, teardown, flushSpeech, flushRecording, stopSession]);
+  }, [consigne, themeId, questionId, onGraded, onSubmitted, onCancel, phase,
+      teardown, flushSpeech, flushRecording, stopSession]);
 
   /* The recording runs only on the candidate's turn. Listening covers both
      ways of speaking — the live recogniser and the record button — and a
