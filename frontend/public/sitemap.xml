@@ -61,6 +61,11 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://prepfrancais.com/tcf-canada-vocabulary</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>https://prepfrancais.com/combinations</loc>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
@@ -171,20 +176,50 @@
     <priority>0.3</priority>
   </url>
   <url>
+    <loc>https://prepfrancais.com/blog/free-tcf-canada-practice-test</loc>
+    <lastmod>2026-09-19</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>https://prepfrancais.com/blog/tcf-canada-clb-chart</loc>
-    <lastmod>2026-09-03</lastmod>
+    <lastmod>2026-09-19</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/blog/tcf-canada-complete-guide</loc>
+    <lastmod>2026-09-19</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/blog/tcf-canada-exam-centers-canada</loc>
-    <lastmod>2026-09-03</lastmod>
+    <lastmod>2026-09-19</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://prepfrancais.com/blog/tcf-canada-exam-centers-india</loc>
-    <lastmod>2026-09-03</lastmod>
+    <lastmod>2026-09-19</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/blog/tcf-canada-test-sample</loc>
+    <lastmod>2026-09-20</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/blog/tcf-tef-participe-present-french-grammar</loc>
+    <lastmod>2026-09-20</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://prepfrancais.com/blog/tcf-vs-tef-canada</loc>
+    <lastmod>2026-09-20</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
