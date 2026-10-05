@@ -39,7 +39,7 @@ export function PaperCard({ paper, ns, isTest, accent, onOpen }) {
           </span>
           {!ready ? <Lock size={18} weight="fill" className="text-gray-300" />
             : sat ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-[11px] font-bold tabular-nums text-green-700"
+              <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-xs font-bold tabular-nums text-green-700"
                 title={t(`${ns}.satOn`, { date: (sat.created_at || '').slice(0, 10) })}
                 data-testid="paper-score">
                 <CheckCircle size={12} weight="fill" /> {sat.score}/{sat.total}
@@ -57,11 +57,11 @@ export function PaperCard({ paper, ns, isTest, accent, onOpen }) {
         </p>
 
         <div className="mt-4 flex items-center gap-2">
-          <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-gray-600">
+          <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-gray-600">
             A1 → C2
           </span>
           {ready && !sat && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-green-700">
+            <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-green-700">
               <CheckCircle size={11} weight="fill" /> {t(`${ns}.ready`)}
             </span>
           )}

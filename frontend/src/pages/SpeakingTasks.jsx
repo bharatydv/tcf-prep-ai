@@ -1,10 +1,9 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ChatText, Handshake, Scales, ClockCountdown, ArrowLeft,
   Lock, CaretRight, BookOpen, Microphone, Star, Clock,
-  Stop, ArrowClockwise, UploadSimple, Lightning, CheckCircle, X, ChatsCircle,
-  Question,
+  Stop, ArrowClockwise, UploadSimple, Lightning, X, ChatsCircle,
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api } from '../lib/api';
@@ -14,9 +13,10 @@ import {
 import { SPEAKING_TASKS, displayMark } from '../lib/tcf';
 import { useAuth } from '../context/AuthContext';
 import { BackLink } from '../components/shared';
-import { SpeakingGrid } from '../components/SpeakingGrid';
-import { CorrectionText } from '../components/CorrectionText';
 import ConversationModal from '../components/ConversationModal';
+import { useAttempts } from '../components/AttemptHistory';
+import PracticedPanel from '../components/PracticedPanel';
+import { useSpeak } from '../lib/speak';
 import { useT } from '../i18n';
 import { useSeo } from '../lib/seo';
 
@@ -104,8 +104,6 @@ const TACHE_PREP_SECONDS = { 1: 0, 2: 120, 3: 0 };
 const TACHE_SPEAK_SECONDS = { 1: 120, 2: 210, 3: 270 };
 
 const fmt = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
-
-const catKey = (category) => `cat.${category}`;
 
 /* ---- Recording modal: brief → preparation → 3·2·1 → recording ---- */
 function RecorderModal({ question, tacheNum, tacheTitle, onCancel, onComplete }) {
@@ -288,7 +286,7 @@ function RecorderModal({ question, tacheNum, tacheTitle, onCancel, onComplete })
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 p-4 backdrop-blur-sm"
       role="dialog" aria-modal="true" aria-label={t('st.recordingAria')}>
-      <div className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl">
+      <div className="max-h-[92dvh] w-full max-w-lg overflow-x-hidden overflow-y-auto rounded-3xl bg-white shadow-2xl">
         {/* HEADER */}
         <div className="flex items-start gap-3 bg-gradient-to-r from-primary to-fuchsia-600 px-6 py-4 text-white">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/20">
@@ -296,13 +294,13 @@ function RecorderModal({ question, tacheNum, tacheTitle, onCancel, onComplete })
           </span>
           <div className="min-w-0 flex-1">
             <p className="font-heading text-sm font-bold leading-snug">{tacheTitle}</p>
-            <p className="text-[11px] text-white/80">
+            <p className="text-xs text-white/80">
               Préparation : {prepSeconds ? fmt(prepSeconds) : 'aucune'} · Parole : {fmt(speakSeconds)}
             </p>
           </div>
           {phase !== 'recording' && (
             <button onClick={cancel} aria-label={t('st.closeAria')}
-              className="rounded-lg p-1 text-white/80 transition hover:bg-white/20 hover:text-white">
+              className="-m-1.5 rounded-lg p-2.5 text-white/80 transition hover:bg-white/20 hover:text-white">
               <X size={18} weight="bold" />
             </button>
           )}
@@ -311,7 +309,7 @@ function RecorderModal({ question, tacheNum, tacheTitle, onCancel, onComplete })
         {/* QUESTION — always visible except during the 3·2·1 */}
         {phase !== 'countdown' && (
           <div className="border-b border-violet-100 bg-violet-50/40 px-6 py-4">
-            <p className="text-[10px] font-bold uppercase tracking-wide text-primary">{t('st.consigne')}</p>
+            <p className="text-xs font-bold uppercase tracking-wide text-primary">{t('st.consigne')}</p>
             <p className="mt-1 text-sm leading-relaxed text-gray-800">{question}</p>
           </div>
         )}
@@ -384,7 +382,10 @@ function RecorderModal({ question, tacheNum, tacheTitle, onCancel, onComplete })
 }
 
 /* ---- Inline recorder/uploader + analysis for a single question ---- */
-function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate, refreshUser, navigate }) {
+function QuestionCard({
+  q, duration, tacheNum, tacheTitle, isActive, onActivate, refreshUser,
+  themeId, attempts, reloadAttempts, tts,
+}) {
   const t = useT();
   // Tache 2 is an interaction: it opens a live conversation instead of a monologue.
   const isInteraction = tacheNum === 2;
@@ -408,12 +409,20 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
     if (audioUrl) URL.revokeObjectURL(audioUrl);
   }, [audioUrl]);
 
-  const reset = () => {
+  /* The take itself, dropped. Split out of reset() because a graded answer
+     keeps its result and loses its unsent recording: leaving the blob in hand
+     left an Analyse button sitting next to the finished correction, which
+     would have spent a second credit re-marking the same words. */
+  const clearAudio = () => {
     setAudioBlob(null);
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     setAudioUrl('');
     setAudioMeta(null);
     setElapsed(0);
+  };
+
+  const reset = () => {
+    clearAudio();
     setResult(null);
   };
 
@@ -428,6 +437,7 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
   const handleGraded = async (analysis) => {
     setChatOpen(false);
     setResult(analysis);
+    reloadAttempts?.();
     await refreshUser();
     if (!analysis?.transcript) toast.error(t('st.noSpeechConv'));
     else toast.success(t('speak.doneToast', { level: analysis.tcf_level }));
@@ -482,10 +492,17 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
       // the single free roleplay — so the trial's one-per-account ceiling
       // simply did not apply to answers started from here.
       if (tacheNum) form.append('task_type', String(tacheNum));
+      /* And WHICH question it answers, which nothing recorded before — so a
+         theme question practised yesterday came back looking untouched, and
+         the card could not show the grade it had already earned. */
+      if (q.question_id) form.append('question_id', String(q.question_id));
+      if (themeId) form.append('theme_id', String(themeId));
       const { data } = await api.post('/api/speaking/analyze', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setResult(data);
+      clearAudio();
+      reloadAttempts?.();
       await refreshUser();
       if (!data.transcript) toast.error(t('st.noSpeech'));
       else toast.success(t('speak.doneToast', { level: data.tcf_level }));
@@ -504,7 +521,12 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
 
   const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
   const ss = String(elapsed % 60).padStart(2, '0');
-  const showActions = isActive && (audioBlob || analyzing || result);
+  const showActions = isActive && (audioBlob || analyzing);
+  /* Practised, by this account, at some point — not just in this tab.
+     A question with a grade behind it offers Review and Practice again, the
+     way an answered tâche does in Test Mode, rather than a Record button that
+     says nothing about the attempt already on file. */
+  const practised = Boolean(result) || (attempts?.length || 0) > 0;
 
   return (
     <div className={`rounded-2xl border bg-white p-5 shadow-soft transition ${
@@ -534,12 +556,14 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
         <ConversationModal
           consigne={q.prompt_text}
           tacheTitle={tacheTitle}
+          themeId={themeId}
+          questionId={q.question_id}
           onCancel={() => setChatOpen(false)}
           onGraded={handleGraded}
         />
       )}
 
-      {!showActions && (
+      {!showActions && !practised && (
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
           <button onClick={openRecorder}
             className="btn-primary flex-1 justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600">
@@ -547,9 +571,17 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
               ? <><ChatsCircle size={16} weight="fill" /> {t('st.startConversation')}</>
               : <><Microphone size={16} weight="fill" /> {t('st.recordAnswer')}</>}
           </button>
-          <button onClick={openFilePicker} className="btn-outline flex-1 justify-center">
-            <UploadSimple size={16} weight="bold" /> {t('st.uploadRecording')}
-          </button>
+          {/* Tâche 2 is a two-way conversation, so there is nothing to upload:
+              the exercise IS the exchange with the examiner, and a recording
+              made somewhere else is a monologue by definition — it cannot
+              contain the half of the tâche that is being graded. The button
+              offered it anyway, and an answer sent that way was marked as an
+              interaction that never happened. */}
+          {!isInteraction && (
+            <button onClick={openFilePicker} className="btn-outline flex-1 justify-center">
+              <UploadSimple size={16} weight="bold" /> {t('st.uploadRecording')}
+            </button>
+          )}
         </div>
       )}
 
@@ -575,101 +607,21 @@ function QuestionCard({ q, duration, tacheNum, tacheTitle, isActive, onActivate,
         </div>
       )}
 
-      {result && (
-        <div className="mt-4 space-y-3">
-          {/* Removed with the one in SpeakingResult, for the same reason:
-              the grid below carries the level, the mark and the relevance
-              score, so this card only repeated them. */}
-          <SpeakingGrid result={result} />
-
-          <div className="rounded-2xl border border-violet-100 bg-white p-4">
-            <p className="text-xs font-bold text-gray-900">{t('st.transcript')}</p>
-            <p className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-gray-700">
-              {result.transcript || t('st.noSpeechDetected')}
-            </p>
-          </div>
-
-          {Array.isArray(result.errors) && result.errors.length > 0 && (
-            <div className="rounded-2xl border border-violet-100 bg-white p-4">
-              <p className="text-xs font-bold text-gray-900">{t('st.corrections')}</p>
-              <div className="mt-2 space-y-2">
-                {result.errors.map((e, i) => (
-                  <div key={i} className="rounded-xl border border-violet-50 bg-violet-50/40 p-3">
-                    <div className="flex flex-wrap items-center gap-2 text-xs">
-                      {/* Only the changed words, the same as the full result
-                          table: striking the whole phrase marks the six words
-                          that were right along with the one that was not. */}
-                      <CorrectionText said={e.error} correction={e.correction} side="said" />
-                      <span className="text-gray-400">→</span>
-                      <CorrectionText said={e.error} correction={e.correction} side="fix" />
-                      <span className="ml-auto rounded-full bg-violet-100 px-2 py-0.5 text-[9px] font-bold uppercase text-primary">{t(catKey(e.category))}</span>
-                    </div>
-                    <p className="mt-1 text-[11px] text-gray-500">{e.explanation}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* "What more could you have asked?" — tâche 2 only. The questions
-              are in French and ready to speak, so they are shown verbatim with
-              the English note explaining what each would have obtained. */}
-          {Array.isArray(result.missed_questions) && result.missed_questions.length > 0 && (
-            <div className="rounded-2xl border border-amber-100 bg-amber-50/50 p-4" data-testid="missed-questions">
-              <p className="flex items-center gap-1.5 text-xs font-bold text-gray-900">
-                <Question size={14} weight="fill" className="text-amber-600" />
-                {t('st.missedQuestions')}
-              </p>
-              <p className="mt-0.5 text-[11px] text-gray-500">{t('st.missedQuestionsHint')}</p>
-              <ul className="mt-2 space-y-2">
-                {result.missed_questions.map((m, i) => (
-                  <li key={i} className="rounded-xl border border-amber-100 bg-white p-2.5">
-                    <p className="text-xs font-semibold text-gray-900">« {m.question} »</p>
-                    {m.why && <p className="mt-0.5 text-[11px] leading-relaxed text-gray-500">{m.why}</p>}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {Array.isArray(result.suggestions) && result.suggestions.length > 0 && (
-            <div className="rounded-2xl border border-violet-100 bg-white p-4">
-              <p className="text-xs font-bold text-gray-900">{t('st.suggestions')}</p>
-              <ul className="mt-2 space-y-1.5">
-                {result.suggestions.map((s, i) => (
-                  <li key={i} className="flex items-start gap-2 text-xs text-gray-700">
-                    <CheckCircle size={14} weight="fill" className="mt-0.5 shrink-0 text-primary" /> {s}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {Array.isArray(result.vocabulary_suggestions) && result.vocabulary_suggestions.length > 0 && (
-            <div className="rounded-2xl border border-violet-100 bg-white p-4">
-              <p className="text-xs font-bold text-gray-900">{t('st.vocabulary')}</p>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {result.vocabulary_suggestions.map((v, i) => {
-                  const phrase = typeof v === 'string' ? v : v?.phrase;
-                  const meaning = typeof v === 'string' ? '' : v?.meaning;
-                  if (!phrase) return null;
-                  return (
-                    <span key={i}
-                      className="rounded-full bg-fuchsia-50 px-2.5 py-1 text-[11px] font-medium text-fuchsia-700">
-                      {phrase}
-                      {meaning && <span className="ml-1 font-normal text-fuchsia-500">· {meaning}</span>}
-                    </span>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          <button onClick={reset} className="btn-outline w-full justify-center !py-2 text-sm">
-            <Microphone size={16} weight="fill" /> {t('st.newAnswer')}
-          </button>
-        </div>
-      )}
+      {/* The grade, the CLB band, and the corrections — read back through the
+          same SpeakingResult Test Mode uses. The card used to render its own
+          smaller version of a result: a grid, a transcript and four lists,
+          with no priorities, no recurring mistakes, no progress against the
+          last attempt and no way to play back what was actually said. The
+          answer is graded identically either way, so practice was simply
+          shown less of its own result than a test was. */}
+      <PracticedPanel
+        attempts={attempts}
+        fresh={result}
+        tacheNum={tacheNum}
+        tts={tts}
+        onAgain={openRecorder}
+        idPrefix={`q${q.question_id}-`}
+        testid={`practised-${q.question_id}`} />
     </div>
   );
 }
@@ -700,9 +652,47 @@ export default function SpeakingTasks() {
 
   const isPremiumUser = user?.subscription_status === 'premium';
 
+  /* One synthesiser for the page, as the exam page keeps one: with several
+     results open, a second play button must stop the first rather than talk
+     over it. */
+  const tts = useSpeak();
+
+  /* Everything this candidate has already practised on the open tâche.
+   *
+   * Fetched per tâche rather than per question, in one request: a theme holds
+   * a dozen questions and asking for each card's history separately would be
+   * a dozen requests to find out that eleven of them have none. Reloaded when
+   * an answer is graded, which is the only thing that changes it.
+   *
+   * Practice only — the endpoint filters out Test Mode sittings, so a tâche
+   * sat as part of a paper never appears on a theme question it did not
+   * answer. */
+  const { attempts: practiceAttempts, reload: reloadPractice } = useAttempts(
+    activeTache ? `/api/speaking/practice/attempts?task_type=${activeTache}` : null,
+    { enabled: Boolean(user && activeTache) });
+
+  const attemptsByQuestion = useMemo(() => {
+    const out = {};
+    (practiceAttempts || []).forEach((a) => {
+      if (!a.question_id) return;
+      (out[a.question_id] = out[a.question_id] || []).push(a);
+    });
+    return out;
+  }, [practiceAttempts]);
+
+  // The right-hand pane. On a phone it is below the tâche tabs, so choosing a
+  // tâche scrolls it into view — before that the tap looked like it did
+  // nothing, because what it loaded landed below the fold.
+  const paneRef = useRef(null);
+  const revealPane = () => {
+    if (window.innerWidth >= 1024) return;
+    setTimeout(() => paneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+  };
+
   const selectTache = (t) => {
     if (!user) return navigate('/login');
     setActiveTache(t.n);
+    revealPane();
     setActiveTheme(null);
     setQuestions([]);
     setActiveQid(null);
@@ -725,6 +715,7 @@ export default function SpeakingTasks() {
   const onInterviewGraded = async (analysis) => {
     setInterviewOpen(false);
     setInterviewResult(analysis);
+    reloadPractice();
     await refreshUser();
     toast.success(t('st.conversationGraded', { level: analysis.tcf_level }));
   };
@@ -791,38 +782,43 @@ export default function SpeakingTasks() {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,360px)_1fr]">
-          {/* LEFT — task list (fixed) */}
-          <div className="flex flex-col gap-3">
+          {/* LEFT — task list (fixed). Three tabs in a row on a phone, the
+              full cards from lg up where they sit beside the pane. */}
+          <div className="grid grid-cols-3 gap-2 lg:flex lg:flex-col lg:gap-3">
             {TACHES.map((tache) => {
               const Icon = tache.icon;
               const active = activeTache === tache.n;
               return (
                 <button key={tache.n} onClick={() => selectTache(tache)}
-                  className={`flex w-full flex-col rounded-2xl border p-5 text-left shadow-soft transition hover:shadow-lg hover:shadow-violet-200/50 ${
+                  aria-pressed={active}
+                  className={`flex w-full flex-col rounded-2xl border p-3 text-left shadow-soft transition hover:shadow-lg hover:shadow-violet-200/50 lg:p-5 ${
                     active ? 'border-primary bg-violet-50/60 ring-2 ring-primary/30' : 'border-violet-100 bg-white'
                   }`}>
-                  <div className="flex items-center gap-3">
-                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                  <div className="flex flex-col items-start gap-2 lg:flex-row lg:items-center lg:gap-3">
+                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl lg:h-10 lg:w-10 ${
                       active ? 'bg-primary text-white' : 'bg-violet-100 text-primary'
                     }`}>
                       <Icon size={20} weight="fill" />
                     </span>
                     <div className="min-w-0">
-                      <h3 className="font-heading text-sm font-bold leading-snug text-gray-900">{t(tache.title)}</h3>
-                      <p className="mt-0.5 text-xs font-semibold text-primary">{t(tache.meta)}</p>
+                      <h3 className="font-heading text-sm font-bold leading-snug text-gray-900">
+                        <span className="lg:hidden">Tâche {tache.n}</span>
+                        <span className="hidden lg:inline">{t(tache.title)}</span>
+                      </h3>
+                      <p className="mt-0.5 line-clamp-2 text-xs font-semibold text-primary lg:line-clamp-none">{t(tache.meta)}</p>
                     </div>
-                    <CaretRight size={18} className={`ml-auto shrink-0 ${active ? 'text-primary' : 'text-gray-300'}`} />
+                    <CaretRight size={18} className={`ml-auto hidden shrink-0 lg:block ${active ? 'text-primary' : 'text-gray-300'}`} />
                   </div>
-                  <p className="mt-2 text-xs leading-relaxed text-gray-500">{t(tache.focus)}</p>
+                  <p className="mt-2 hidden text-xs leading-relaxed text-gray-500 lg:block">{t(tache.focus)}</p>
                 </button>
               );
             })}
           </div>
 
           {/* RIGHT — simulator / themes / questions */}
-          <div className="min-h-[360px]">
+          <div ref={paneRef} className="scroll-mt-20 lg:min-h-[360px]">
             {activeTache === null ? (
-              <div className="flex h-full flex-col justify-center rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-8 shadow-soft">
+              <div className="flex h-full flex-col justify-center rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-5 shadow-soft sm:p-8">
                 <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-100 text-primary">
                   <ChatsCircle size={28} weight="fill" />
                 </span>
@@ -845,19 +841,19 @@ export default function SpeakingTasks() {
                       <p className="text-xs font-bold text-gray-900">{t('st.lastConversation')}</p>
                       <p className="font-heading text-lg font-extrabold text-primary">
                         {freeTalkResult.tcf_level}
-                        <span className="ml-1 text-[10px] font-semibold text-gray-400">
+                        <span className="ml-1 text-xs font-semibold text-gray-400">
                           {displayMark(freeTalkResult.overall_score, freeTalkResult.tcf_level) ?? '—'}/20
                         </span>
                       </p>
                     </div>
                     {freeTalkResult.relevance_comment && (
-                      <p className="mt-1 text-[11px] leading-relaxed text-gray-600">
+                      <p className="mt-1 text-xs leading-relaxed text-gray-600">
                         {freeTalkResult.relevance_comment}
                       </p>
                     )}
                     {freeTalkResult.submission_id && (
                       <button onClick={() => navigate(`/feedback/${freeTalkResult.submission_id}`)}
-                        className="mt-2 text-[11px] font-bold text-primary hover:underline">
+                        className="mt-2 text-xs font-bold text-primary hover:underline">
                         {t('st.seeDetail')}
                       </button>
                     )}
@@ -868,7 +864,7 @@ export default function SpeakingTasks() {
               </div>
             ) : activeTache === 1 ? (
               /* Tâche 1: no theme list, straight into the guided interview. */
-              <div className="flex h-full flex-col justify-center rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-8 shadow-soft">
+              <div className="flex h-full flex-col justify-center rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-5 shadow-soft sm:p-8">
                 <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-100 text-primary">
                   <ChatText size={28} weight="fill" />
                 </span>
@@ -884,30 +880,22 @@ export default function SpeakingTasks() {
                   <Microphone size={18} weight="fill" /> {t('st.t1Start')}
                 </button>
 
-                {interviewResult && (
-                  <div className="mt-5 rounded-2xl border border-violet-100 bg-white/70 p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-xs font-bold text-gray-900">{t('st.lastConversation')}</p>
-                      <p className="font-heading text-lg font-extrabold text-primary">
-                        {interviewResult.tcf_level}
-                        <span className="ml-1 text-[10px] font-semibold text-gray-400">
-                          {displayMark(interviewResult.overall_score, interviewResult.tcf_level) ?? '—'}/20
-                        </span>
-                      </p>
-                    </div>
-                    {interviewResult.relevance_comment && (
-                      <p className="mt-1 text-[11px] leading-relaxed text-gray-600">
-                        {interviewResult.relevance_comment}
-                      </p>
-                    )}
-                    {interviewResult.submission_id && (
-                      <button onClick={() => navigate(`/feedback/${interviewResult.submission_id}`)}
-                        className="mt-2 text-[11px] font-bold text-primary hover:underline">
-                        {t('st.seeDetail')}
-                      </button>
-                    )}
-                  </div>
-                )}
+                {/* Tâche 1 has no question bank, so its history is the tâche:
+                    every guided interview this candidate has practised here,
+                    with the newest one's grade on the badge. It used to show a
+                    level and a "See details" link for the interview just
+                    given and nothing at all for the dozen before it — an
+                    account that had practised tâche 1 twenty times came back
+                    to a panel that said nothing about any of them. */}
+                <PracticedPanel
+                  attempts={practiceAttempts}
+                  fresh={interviewResult}
+                  tacheNum={1}
+                  tts={tts}
+                  onAgain={startInterview}
+                  idPrefix="t1-practice-"
+                  testid="practised-tache1"
+                  hint={t('st.t1Attempts')} />
               </div>
             ) : activeTheme ? (
               <div>
@@ -939,7 +927,7 @@ export default function SpeakingTasks() {
                     <div className="h-8 w-8 animate-spin rounded-full border-4 border-violet-200 border-t-primary" />
                   </div>
                 ) : questions.length === 0 ? (
-                  <div className="rounded-2xl border border-violet-100 bg-white p-8 text-center text-sm text-gray-500">
+                  <div className="rounded-2xl border border-violet-100 bg-white p-5 text-center text-sm text-gray-500 sm:p-8">
                     {t('st.noQuestions')}
                   </div>
                 ) : (
@@ -954,18 +942,21 @@ export default function SpeakingTasks() {
                         isActive={activeQid === q.question_id}
                         onActivate={() => setActiveQid(q.question_id)}
                         refreshUser={refreshUser}
-                        navigate={navigate}
+                        themeId={activeTheme.theme_id}
+                        attempts={attemptsByQuestion[q.question_id]}
+                        reloadAttempts={reloadPractice}
+                        tts={tts}
                       />
                     ))}
                   </div>
                 )}
               </div>
             ) : loadingThemes ? (
-              <div className="flex h-full items-center justify-center rounded-3xl border border-violet-100 bg-white p-8">
+              <div className="flex h-full items-center justify-center rounded-3xl border border-violet-100 bg-white p-5 sm:p-8">
                 <div className="h-9 w-9 animate-spin rounded-full border-4 border-violet-200 border-t-primary" />
               </div>
             ) : themes.length === 0 ? (
-              <div className="flex h-full items-center justify-center rounded-3xl border border-violet-100 bg-white p-8 text-center text-sm text-gray-500">
+              <div className="flex h-full items-center justify-center rounded-3xl border border-violet-100 bg-white p-5 text-center text-sm text-gray-500 sm:p-8">
                 {t('st.noThemes')}
               </div>
             ) : (
@@ -991,7 +982,7 @@ export default function SpeakingTasks() {
                             {locked ? <Lock size={20} weight="fill" className="text-amber-500" /> : (theme.emoji || <BookOpen size={20} weight="duotone" className="text-primary" />)}
                           </span>
                           {theme.is_premium ? (
-                            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">{t('common.pro')}</span>
+                            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-amber-700">{t('common.pro')}</span>
                           ) : (
                             <CaretRight size={18} className="text-gray-300" />
                           )}

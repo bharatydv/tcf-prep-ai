@@ -572,6 +572,9 @@ class User(Base):
     phone_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     phone_verified_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    # Left out of the "Priya S. just finished a test" notifications. Off by
+    # default; the learner switches it on from the privacy page.
+    hide_activity: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class AuthToken(Base):
@@ -712,6 +715,16 @@ class Submission(Base):
     # column existed; the pickers read that as "not written yet", which is all
     # anyone can honestly say about them.
     theme_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    # Which question of that theme was answered.
+    #
+    # theme_id alone cannot say it: a theme holds a dozen questions and a
+    # candidate practises them one at a time, so a card reading its theme's
+    # submissions would report all twelve as practised the moment one of
+    # them was. Empty for everything not answered from a question bank —
+    # the guided interview, open practice, every written submission, and
+    # every spoken answer graded before this column existed. Those keep
+    # their grade and simply cannot be placed on a card.
+    question_id: Mapped[str] = mapped_column(String(64), default="", index=True)
     # The learner's own recording, for the speaking sources. Relative to
     # RECORDINGS_ROOT ("speaking/<user>/<submission>.webm") and served only by
     # /api/submissions/{id}/audio, never by media_url() — see RECORDINGS_ROOT.
@@ -992,6 +1005,39 @@ class ReviewSession(Base):
         DateTime(timezone=True), index=True)
 
 
+class UserReview(Base):
+    """A 1-5 rating a learner gave a correction, with an optional comment.
+
+    Nothing here reaches the public site on its own. A row is shown only when
+    the learner ticked "show my review" AND an admin approved it, because the
+    landing page once carried invented testimonials and the point of this
+    table is that every quote on the site is a real person who agreed to it.
+
+    One row per (user, submission): rating the same correction twice is a
+    change of mind, not a second review.
+    """
+    __tablename__ = "user_reviews"
+    __table_args__ = (UniqueConstraint("user_id", "submission_id",
+                                       name="uq_user_reviews_user_submission"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.user_id"), index=True)
+    submission_id: Mapped[str] = mapped_column(String(64), default="")
+    rating: Mapped[int] = mapped_column(Integer)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    # What the public card prints. First name only by default; the learner
+    # can change it or leave it as they like.
+    display_name: Mapped[str] = mapped_column(String(60), default="")
+    allow_public: Mapped[bool] = mapped_column(Boolean, default=False)
+    # pending -> approved | hidden. Only an admin moves it.
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    source: Mapped[str] = mapped_column(String(20), default="correction")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
+
 # ----------------------------------------------------------------------------
 # Row -> dict helpers (replace Mongo's strip_mongo)
 # ----------------------------------------------------------------------------
@@ -1037,6 +1083,7 @@ def public_user(u: User) -> dict:
         "longest_streak": u.longest_streak or 0,
         "last_activity_date": u.last_activity_date,
         "xp": u.xp or 0,
+        "hide_activity": bool(u.hide_activity),
         "badges": u.badges or [],
         "model_answers_read": u.model_answers_read or 0,
         "timezone": u.timezone or "America/Toronto",
@@ -3224,6 +3271,7 @@ async def persist_submission(db: AsyncSession, user: User, text: str,
                              source: str = "practice",
                              consume: bool = True,
                              theme_id: Optional[str] = None,
+                             question_id: Optional[str] = None,
                              exam_set: Optional[int] = None,
                              task_type: Optional[int] = None) -> dict:
     """Save a graded piece of work. `consume=False` for flows metered by their
@@ -3243,6 +3291,7 @@ async def persist_submission(db: AsyncSession, user: User, text: str,
         caps_applied=analysis.get("caps_applied") or [],
         source=source,
         theme_id=(theme_id or "")[:64],
+        question_id=(question_id or "")[:64],
         exam_set=exam_set,
         task_type=task_type,
         analysis=(stored_analysis(analysis)
@@ -5190,6 +5239,12 @@ class ConverseGradeIn(BaseModel):
     # found again as part of a paper. Absent for free practice, which is not
     # part of one.
     exam_set: Optional[int] = Field(default=None, ge=1)
+    # The theme question this roleplay answered, so the practice card for
+    # that question can say it has been practised and what it scored.
+    # Absent for the guided interview and for open practice, neither of
+    # which comes from a question bank.
+    theme_id: Optional[str] = Field(default=None, max_length=64)
+    question_id: Optional[str] = Field(default=None, max_length=64)
 
 
 class AnalyzeIn(BaseModel):
@@ -5907,6 +5962,7 @@ MIGRATIONS = [
     "WHERE email_verified = FALSE AND created_at < TIMESTAMPTZ '2026-09-10'",
     # SMS confirmation, the second channel.
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(32)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS hide_activity BOOLEAN DEFAULT FALSE",
     "ALTER TABLE users "
     "ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMPTZ",
@@ -6100,6 +6156,15 @@ MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_set BOOLEAN DEFAULT TRUE",
     "UPDATE users SET password_set = TRUE WHERE password_set IS NULL",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS level VARCHAR(16) DEFAULT ''",
+
+    # ---- which theme question a spoken practice answer belongs to -------
+    # See Submission.question_id. No backfill: the link was never recorded,
+    # and deriving it from the theme would report questions as practised
+    # that nobody ever opened.
+    "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS question_id "
+    "VARCHAR(64) DEFAULT ''",
+    "CREATE INDEX IF NOT EXISTS ix_submissions_user_question "
+    "ON submissions (user_id, question_id)",
 ]
 
 
@@ -6777,6 +6842,240 @@ async def subscribe(body: NewsletterIn, db: AsyncSession = Depends(get_db),
         db.add(Subscriber(email=email, created_at=now_utc(), source="footer"))
         await db.commit()
     return {"detail": "Subscribed"}
+
+
+# ----------------------------------------------------------------------------
+# Recent activity: "Priya S. just finished a writing test" notifications
+# ----------------------------------------------------------------------------
+# Every event is a real row: a graded submission, a finished test, or an issued
+# invoice. Nothing is invented. Only a first name and an initial leave the
+# server - never the email, the user id or the score - and anyone who switched
+# hide_activity on, and every admin, is left out.
+ACTIVITY_WINDOW_DAYS = 14
+ACTIVITY_MAX_EVENTS = 20
+# Short, because open pages poll this to show new activity as it happens.
+ACTIVITY_CACHE_SECONDS = 15
+_activity_cache: Dict[str, Any] = {"at": 0.0, "events": []}
+
+
+def activity_name(full_name: str) -> str:
+    """'priya sharma' -> 'Priya S.'; a single name stays as it is."""
+    parts = [p for p in (full_name or "").strip().split() if p]
+    if not parts:
+        return ""
+    first = parts[0][:20].capitalize()
+    return f"{first} {parts[-1][0].upper()}." if len(parts) > 1 else first
+
+
+class ActivityPrefIn(BaseModel):
+    hide_activity: bool
+
+
+@app.post("/api/me/activity-visibility")
+async def set_activity_visibility(body: ActivityPrefIn,
+                                  user: User = Depends(get_current_user),
+                                  db: AsyncSession = Depends(get_db)):
+    user.hide_activity = body.hide_activity
+    await db.commit()
+    _activity_cache["at"] = 0.0  # so a hidden name stops showing at once
+    return {"hide_activity": user.hide_activity}
+
+
+@app.get("/api/activity/recent")
+async def recent_activity(response: Response,
+                          db: AsyncSession = Depends(get_db)):
+    """The latest finished tests and plan purchases, newest first.
+
+    Every open page polls this, so it is cached for a few seconds: the server
+    does the queries once per window however many visitors are online.
+    """
+    response.headers["Cache-Control"] = f"public, max-age={ACTIVITY_CACHE_SECONDS}"
+    now_ts = time.time()
+    if now_ts - _activity_cache["at"] < ACTIVITY_CACHE_SECONDS:
+        return {"events": _activity_cache["events"]}
+
+    since = now_utc() - timedelta(days=ACTIVITY_WINDOW_DAYS)
+    visible = (User.role != "admin", or_(User.hide_activity.is_(None),
+                                         User.hide_activity.is_(False)))
+
+    async def latest(model, time_col, extra_cols=()):
+        q = (select(User.user_id, User.name, time_col, *extra_cols)
+             .join(User, User.user_id == model.user_id)
+             .where(time_col >= since, *visible)
+             .order_by(time_col.desc()).limit(ACTIVITY_MAX_EVENTS))
+        return (await db.execute(q)).all()
+
+    raw = []
+    for uid, name, at, source in await latest(
+            Submission, Submission.created_at, (Submission.source,)):
+        spoken = source in ("speaking", "speaking_exam", "conversation")
+        raw.append((at, uid, name, "test", "speaking" if spoken else "writing", ""))
+    for model, what in ((ExamAttempt, "writing_exam"),
+                        (ReadingAttempt, "reading"),
+                        (ListeningAttempt, "listening"),
+                        (MockExamAttempt, "mock")):
+        for uid, name, at in await latest(model, model.created_at):
+            raw.append((at, uid, name, "test", what, ""))
+    for uid, name, at, plan in await latest(
+            Invoice, Invoice.issued_at, (Invoice.plan_name,)):
+        raw.append((at, uid, name, "plan", "", plan or ""))
+
+    # One line per person and kind, so one busy learner does not fill the feed.
+    raw.sort(key=lambda r: r[0], reverse=True)
+    seen, events = set(), []
+    for at, uid, name, kind, what, plan in raw:
+        shown = activity_name(name)
+        if not shown or (uid, kind) in seen:
+            continue
+        seen.add((uid, kind))
+        events.append({"name": shown, "kind": kind, "what": what,
+                       "plan": plan, "at": at.isoformat()})
+        if len(events) >= ACTIVITY_MAX_EVENTS:
+            break
+
+    _activity_cache.update(at=now_ts, events=events)
+    return {"events": events}
+
+
+# ----------------------------------------------------------------------------
+# Reviews: a learner rates a correction; approved ones appear on the site
+# ----------------------------------------------------------------------------
+class ReviewIn(BaseModel):
+    submission_id: str = Field(default="", max_length=64)
+    rating: int = Field(ge=1, le=5)
+    comment: str = Field(default="", max_length=1000)
+    display_name: str = Field(default="", max_length=60)
+    allow_public: bool = False
+
+
+class ReviewStatusIn(BaseModel):
+    status: str = Field(pattern="^(pending|approved|hidden)$")
+
+
+review_rate_limit = rate_limit("review", limit=20, window_seconds=300)
+
+
+def _public_review(r: UserReview) -> dict:
+    return {"id": r.id, "rating": r.rating, "comment": r.comment,
+            "name": r.display_name or "",
+            "created_at": (r.created_at or now_utc()).isoformat()}
+
+
+@app.get("/api/reviews/mine/{submission_id}")
+async def my_review(submission_id: str,
+                    user: User = Depends(get_current_user),
+                    db: AsyncSession = Depends(get_db)):
+    """So a correction already rated shows the thanks, not the question."""
+    r = await db.scalar(select(UserReview).where(
+        UserReview.user_id == user.user_id,
+        UserReview.submission_id == submission_id))
+    return {"review": ({"rating": r.rating, "comment": r.comment,
+                        "allow_public": r.allow_public} if r else None)}
+
+
+@app.post("/api/reviews")
+async def submit_review(body: ReviewIn,
+                        user: User = Depends(get_current_user),
+                        db: AsyncSession = Depends(get_db),
+                        _rl=Depends(review_rate_limit)):
+    """Save or update the learner's rating of one correction.
+
+    Only their own submission can be rated. Any edit sends the row back to
+    pending, so an approved quote can never change under the admin's eyes.
+    """
+    sid = body.submission_id.strip()
+    if sid:
+        owner = await db.scalar(select(Submission.user_id).where(
+            Submission.submission_id == sid))
+        if owner != user.user_id:
+            raise HTTPException(status_code=404, detail="Submission not found")
+    comment = body.comment.strip()
+    name = body.display_name.strip() or (user.name or "").split(" ")[0]
+    # Low ratings are private feedback, never a public quote.
+    allow_public = body.allow_public and body.rating >= 4 and bool(comment)
+
+    r = await db.scalar(select(UserReview).where(
+        UserReview.user_id == user.user_id, UserReview.submission_id == sid))
+    now = now_utc()
+    if r is None:
+        r = UserReview(user_id=user.user_id, submission_id=sid,
+                       created_at=now, source="correction")
+        db.add(r)
+    r.rating = body.rating
+    r.comment = comment
+    r.display_name = name[:60]
+    r.allow_public = allow_public
+    r.status = "pending"
+    r.updated_at = now
+    await db.commit()
+    return {"detail": "Thanks"}
+
+
+@app.get("/api/reviews")
+async def public_reviews(limit: int = Query(6, ge=1, le=50),
+                         db: AsyncSession = Depends(get_db)):
+    """Approved reviews whose authors agreed to be shown, best first.
+
+    The average and count are over the same set, so the headline number is
+    never computed from reviews nobody can see.
+    """
+    shown = (UserReview.status == "approved", UserReview.allow_public.is_(True))
+    rows = (await db.execute(
+        select(UserReview).where(*shown)
+        .order_by(UserReview.rating.desc(), UserReview.created_at.desc())
+        .limit(limit))).scalars().all()
+    count = await db.scalar(
+        select(func.count()).select_from(UserReview).where(*shown)) or 0
+    avg = await db.scalar(select(func.avg(UserReview.rating)).where(*shown))
+    # How many of each star, 5 down to 1, for the bars on /reviews.
+    per_star = dict((await db.execute(
+        select(UserReview.rating, func.count()).where(*shown)
+        .group_by(UserReview.rating))).all())
+    return {"reviews": [_public_review(r) for r in rows], "count": count,
+            "average": round(float(avg), 1) if avg is not None else None,
+            "breakdown": {str(n): per_star.get(n, 0) for n in range(5, 0, -1)}}
+
+
+@app.get("/api/admin/reviews")
+async def admin_reviews(status: Optional[str] = None,
+                        limit: int = Query(100, ge=1, le=500),
+                        offset: int = Query(0, ge=0),
+                        admin: User = Depends(get_admin_user),
+                        db: AsyncSession = Depends(get_db)):
+    """Every rating, newest first, with who gave it — public or not."""
+    base = select(UserReview, User.email).join(
+        User, User.user_id == UserReview.user_id)
+    if status:
+        base = base.where(UserReview.status == status)
+    total = await db.scalar(
+        select(func.count()).select_from(base.subquery())) or 0
+    rows = (await db.execute(
+        base.order_by(UserReview.created_at.desc())
+        .limit(limit).offset(offset))).all()
+    avg = await db.scalar(select(func.avg(UserReview.rating)))
+    return {"total": total,
+            "average": round(float(avg), 1) if avg is not None else None,
+            "reviews": [{**_public_review(r), "email": email,
+                         "submission_id": r.submission_id,
+                         "allow_public": r.allow_public, "status": r.status}
+                        for r, email in rows]}
+
+
+@app.patch("/api/admin/reviews/{review_id}")
+async def admin_set_review_status(review_id: int, body: ReviewStatusIn,
+                                  admin: User = Depends(get_admin_user),
+                                  db: AsyncSession = Depends(get_db)):
+    r = await db.get(UserReview, review_id)
+    if r is None:
+        raise HTTPException(status_code=404, detail="Review not found")
+    if body.status == "approved" and not r.allow_public:
+        raise HTTPException(
+            status_code=400,
+            detail="This learner did not agree to be shown on the site.")
+    r.status = body.status
+    r.updated_at = now_utc()
+    await db.commit()
+    return {"status": r.status}
 
 
 # ----------------------------------------------------------------------------
@@ -8418,6 +8717,51 @@ async def speaking_exam_attempts(set_number: int,
         for sid, task, level, score, created, n, has_audio in rows]}
 
 
+@app.get("/api/speaking/practice/attempts")
+async def speaking_practice_attempts(task_type: Optional[int] = None,
+                                     question_id: Optional[str] = None,
+                                     user: User = Depends(get_current_user),
+                                     db: AsyncSession = Depends(get_db)):
+    """Every spoken answer given in Practice mode, newest first.
+
+    Practice is everything outside a Test Mode sitting, so the filter is
+    `exam_set IS NULL`: the per-set endpoint above serves one paper, and
+    mixing the two would put a sitting's tâche 2 on the practice card of a
+    theme question it never answered.
+
+    `task_type` narrows to one tâche and `question_id` to one question of a
+    theme, which is what the practice pages ask for — tâche 1 wants every
+    guided interview, tâches 2 and 3 want the attempts on the question on the
+    card. A tâche is always required to be present: open practice covers all
+    three at once and belongs to none of them.
+
+    The corrections are not repeated here. /api/submissions/{id} already
+    serves one in full, and the cards fetch it only when it is opened.
+    """
+    stmt = (select(Submission.submission_id, Submission.task_type,
+                   Submission.question_id, Submission.theme_id,
+                   Submission.tcf_level, Submission.overall_score,
+                   Submission.created_at,
+                   func.coalesce(func.jsonb_array_length(Submission.errors), 0),
+                   func.coalesce(Submission.audio_path, "") != "")
+            .where(Submission.user_id == user.user_id,
+                   Submission.exam_set.is_(None),
+                   Submission.task_type.is_not(None),
+                   Submission.source.in_(SPEAKING_SOURCES)))
+    if task_type in (1, 2, 3):
+        stmt = stmt.where(Submission.task_type == task_type)
+    if question_id:
+        stmt = stmt.where(Submission.question_id == question_id)
+    rows = (await db.execute(
+        stmt.order_by(Submission.created_at.desc()).limit(200))).all()
+    return {"attempts": [
+        {"submission_id": sid, "task_type": task, "question_id": qid or "",
+         "theme_id": theme or "", "tcf_level": level, "overall_score": score,
+         "created_at": created, "error_count": int(n or 0),
+         "has_audio": bool(has_audio)}
+        for sid, task, qid, theme, level, score, created, n, has_audio in rows]}
+
+
 # ----------------------------------------------------------------------------
 # Compréhension écrite — numbered practice/test papers
 # ----------------------------------------------------------------------------
@@ -8982,6 +9326,7 @@ async def speaking_analyze(question: str = Form(...),
                            exam_set: Optional[int] = Form(None),
                            mime_type: Optional[str] = Form(None),
                            theme_id: Optional[str] = Form(None),
+                           question_id: Optional[str] = Form(None),
                            user: User = Depends(get_current_user),
                            db: AsyncSession = Depends(get_db),
                            _rl=Depends(ai_rate_limit)):
@@ -9078,7 +9423,7 @@ async def speaking_analyze(question: str = Form(...),
     sub = await persist_submission(
         db, user, transcript, None, analysis,
         source="speaking", consume=False, theme_id=theme_id,
-        exam_set=exam_set, task_type=task_type)
+        question_id=question_id, exam_set=exam_set, task_type=task_type)
     # Kept after the submission exists, because the file is named after it.
     # This is the one flow with a single recording behind a single grade; the
     # roleplay below is a dozen turn uploads and no one file to keep, so it
@@ -9396,7 +9741,10 @@ async def grade_conversation(body: ConverseGradeIn, user: User, db: AsyncSession
         db, user, transcript or "(no speech detected)", None, analysis,
         source="conversation" if free_mode else "speaking",
         consume=False,  # the credit, if any, was reserved above
-        # Free practice is not part of a paper, whatever the client sends.
+        # Free practice is neither part of a paper nor an answer to a
+        # question from the bank, whatever the client sends.
+        theme_id=None if free_mode else body.theme_id,
+        question_id=None if free_mode else body.question_id,
         exam_set=None if free_mode else body.exam_set,
         task_type=None if free_mode else task_type)
     if audio_bytes:

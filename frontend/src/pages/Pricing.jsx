@@ -7,6 +7,7 @@ import { Seo, SITE_URL } from '../lib/seo';
 import { useBillingPlans } from '../lib/plans';
 import { useCheckout } from '../lib/checkout';
 import { trackViewPricing } from '../lib/analytics';
+import ReviewsSection from '../components/ReviewsSection';
 
 const FEATURE_KEYS = ['pricing.feature1', 'pricing.feature2', 'pricing.feature3', 'pricing.feature4'];
 const FAQ_KEYS = [
@@ -74,10 +75,10 @@ export default function Pricing() {
   const cta = user ? '/dashboard' : '/register';
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-12">
+    <main className="mx-auto max-w-6xl px-4 py-8 sm:py-12">
       <Seo titleKey="seo.pricing.title" descKey="seo.pricing.desc" path="/pricing"
         jsonLd={offerSchema} />
-      <h1 className="text-center text-4xl font-bold">{t('pricing.title')}</h1>
+      <h1 className="text-center text-3xl font-bold sm:text-4xl">{t('pricing.title')}</h1>
       <p className="mx-auto mt-3 max-w-xl text-center text-gray-600">
         {t('pricing.subtitle')}
       </p>
@@ -100,12 +101,12 @@ export default function Pricing() {
         </div>
       )}
 
-      <div className="mt-12 grid items-center gap-6 md:grid-cols-3">
+      <div className="mt-8 grid items-center gap-6 sm:mt-12 md:grid-cols-3">
         {plans.map((p) => (
           <div key={p.name}
             className={`card relative overflow-hidden ${p.popular ? 'z-10 ring-4 ring-primary md:scale-110' : ''}`}
             data-testid={`plan-${p.name.toLowerCase()}`}>
-            <div className="absolute -right-9 top-5 rotate-45 bg-gray-900 px-10 py-1 text-[10px] font-bold tracking-widest text-white">PACK</div>
+            <div className="absolute -right-9 top-5 hidden rotate-45 bg-gray-900 px-10 py-1 text-[10px] font-bold tracking-widest text-white sm:block">PACK</div>
             {p.popular && (
               <div className="bg-primary py-1.5 text-center text-xs font-bold tracking-wider text-white">{t('pricing.mostPopular')}</div>
             )}
@@ -125,7 +126,7 @@ export default function Pricing() {
                 <span className="text-white/80"> / {p.durationKey ? t(p.durationKey) : p.name}</span>
               </p>
               {p.wasPrice && (
-                <p className="mt-1 inline-block rounded-full bg-white/20 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                <p className="mt-1 inline-block rounded-full bg-white/20 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide">
                   {t('pricing.firstTime')}
                 </p>
               )}
@@ -160,7 +161,9 @@ export default function Pricing() {
         ))}
       </div>
 
-      <section className="mx-auto mt-20 max-w-3xl">
+      <ReviewsSection className="mt-12 sm:mt-20" />
+
+      <section className="mx-auto mt-12 max-w-3xl sm:mt-20">
         <h2 className="text-center text-2xl font-bold">{t('pricing.faqTitle')}</h2>
         <div className="mt-8 space-y-4">
           {FAQ_KEYS.map(([q, a]) => (
@@ -172,7 +175,7 @@ export default function Pricing() {
         </div>
       </section>
 
-      <section className="header-gradient mt-16 rounded-3xl px-8 py-12 text-center text-white">
+      <section className="header-gradient mt-10 rounded-3xl px-5 py-8 text-center text-white sm:mt-16 sm:px-8 sm:py-12">
         <h2 className="text-2xl font-bold">{t('pricing.ctaTitle')}</h2>
         <Link to={cta} className="mt-6 inline-flex rounded-xl bg-white px-6 py-3 font-semibold text-primary transition hover:-translate-y-0.5 hover:shadow-xl" data-testid="pricing-cta">
           {user ? t('pricing.goDashboard') : t('pricing.createAccount')}

@@ -13,6 +13,7 @@ import { Seo, SITE_URL } from '../lib/seo';
 import { track } from '../lib/api';
 import { useBillingPlans, formatPrice } from '../lib/plans';
 import { useCheckout } from '../lib/checkout';
+import ReviewsSection from '../components/ReviewsSection';
 
 /* ===================================================================== page */
 /* Verifiable description of the product, in place of invented testimonials. */
@@ -120,13 +121,13 @@ export default function Landing() {
       />
       {/* ============================================================ HERO */}
       <section className="relative bg-gradient-to-br from-violet-100 via-fuchsia-50 to-violet-200">
-        <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div aria-hidden className="pointer-events-none absolute inset-0 hidden overflow-hidden sm:block">
         <div className="blob absolute -left-24 top-10 h-72 w-72 rounded-full bg-fuchsia-300/30 blur-3xl" />
         <div className="blob absolute right-0 top-1/3 h-80 w-80 rounded-full bg-violet-400/25 blur-3xl" style={{ animationDelay: '-5s' }} />
         <div className="blob absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-purple-300/30 blur-3xl" style={{ animationDelay: '-9s' }} />
         </div>
       
-        <div className="relative mx-auto grid max-w-7xl items-center gap-10 px-4 pb-16 pt-12 sm:px-6 lg:grid-cols-2 lg:gap-14 lg:pb-24 lg:pt-20">
+        <div className="relative mx-auto grid max-w-7xl items-center gap-8 px-4 pb-10 pt-8 sm:gap-10 sm:px-6 sm:pb-16 sm:pt-12 lg:grid-cols-2 lg:gap-14 lg:pb-24 lg:pt-20">
           {/* left copy */}
           <div>
             {/* <span className="hero-rise inline-flex items-center gap-2 rounded-full border border-violet-200 bg-white/80 px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider text-primary shadow-sm backdrop-blur mx-auto">
@@ -145,13 +146,17 @@ export default function Landing() {
                 className="btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600 !px-6 !py-3 shadow-lg shadow-violet-300/60 hover:!brightness-110">
                 {t('land.trial')}
               </Link>
-              {/* <Link to="/pricing" className="btn-outline !border-gray-300 bg-white !px-6 !py-3" data-testid="hero-plans-button">
+              {/* To the plans further down this page, whose buttons open the
+                  checkout directly, rather than away to /pricing. */}
+              <button type="button" data-testid="hero-plans-button"
+                onClick={() => document.getElementById('plans')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                className="btn-outline !border-gray-300 bg-white !px-6 !py-3">
                 {t('land.explorePlans')}
-              </Link> */}
+              </button>
             </div>
-            <div className="hero-rise mt-9 flex flex-wrap items-center gap-7" style={{ animationDelay: '0.4s' }}>
+            <div className="hero-rise mt-7 flex flex-wrap items-center gap-7 sm:mt-9" style={{ animationDelay: '0.4s' }}>
               <div className="flex items-center gap-3">
-                <div className="flex -space-x-2.5">
+                <div className="hidden -space-x-2.5 sm:flex">
                   {['SL', 'KB', 'PN'].map((ini, i) => (
                     <span key={ini} className="flex h-9 w-9 items-center rounded-full border-2 border-white text-[10px] font-bold text-white"
                       style={{ background: ['#7C3AED', '#C026D3', '#5B21B6'][i] }}>{ini}</span>
@@ -460,7 +465,7 @@ export default function Landing() {
       </section>
 
       {/* ============================================ AI WRITTEN SIMULATOR */}
-      <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
+      <section className="mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-14">
         <Reveal>
           <div className="grid items-center gap-8 rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-6 sm:p-10 lg:grid-cols-[1fr_320px]">
             <div>
@@ -533,7 +538,11 @@ export default function Landing() {
       
 
       {/* ================================== PRECISION / PERSONALIZATION */}
-      <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6">
+      {/* Desktop only, with the showcase below it. On a phone the home page
+          ran to fourteen screens; these two sections are the product
+          described a second and third time, between the demo and the plans,
+          and were the first to go. */}
+      <section className="mx-auto hidden max-w-7xl px-4 pb-16 sm:block sm:px-6">
         <Reveal>
           <div className="grid gap-10 rounded-3xl bg-gradient-to-br from-fuchsia-50 via-violet-50 to-white p-6 shadow-soft sm:p-10 lg:grid-cols-2">
             <div className="relative">
@@ -593,7 +602,7 @@ export default function Landing() {
       </section>
 
       {/* ============================================= DARK APP SHOWCASE */}
-      <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6">
+      <section className="mx-auto hidden max-w-7xl px-4 pb-16 sm:block sm:px-6">
         <div className="rounded-[2rem] bg-ink px-5 py-12 sm:px-10 sm:py-16" style={{ background: 'radial-gradient(1100px 500px at 50% -10%, #2a1352 0%, #120822 55%)' }}>
           <Reveal>
             <h2 className="text-center font-heading text-3xl font-extrabold text-white sm:text-4xl">
@@ -680,7 +689,7 @@ export default function Landing() {
           customers is misleading advertising, so it is replaced with what the
           product verifiably does. Add real quotes here once you have consent
           to publish them. */}
-      <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6">
+      <section className="mx-auto max-w-7xl px-4 pb-10 sm:px-6 sm:pb-16">
         <Reveal>
           <h2 className="text-center font-heading text-3xl font-extrabold text-gray-900">
             {t('land.howA')} <span className="text-primary">{t('land.howB')}</span>
@@ -689,29 +698,43 @@ export default function Landing() {
             {t('land.howSub')}
           </p>
         </Reveal>
-        <div className="mt-9 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Four cards on a desktop; on a phone a numbered list, with the
+            number beside the title instead of above it, so the four steps
+            take one screen rather than three. */}
+        <div className="mt-6 grid gap-3 sm:mt-9 sm:gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {HOW_IT_WORKS.map((s, i) => (
             <Reveal key={s.title} delay={i * 90}>
-              <div className="tilt-card flex h-full flex-col rounded-3xl border border-violet-100 bg-white p-6 shadow-soft">
-                <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-fuchsia-600 font-heading text-sm font-bold text-white">
+              <div className="tilt-card flex h-full flex-row items-start gap-3 rounded-2xl border border-violet-100 bg-white p-4 shadow-soft sm:flex-col sm:gap-0 sm:rounded-3xl sm:p-6">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-fuchsia-600 font-heading text-sm font-bold text-white sm:h-11 sm:w-11 sm:rounded-2xl">
                   {i + 1}
                 </span>
-                <h3 className="mt-4 font-heading text-base font-bold text-gray-900">{t(s.title)}</h3>
-                <p className="mt-2 flex-1 text-[13px] leading-relaxed text-gray-600">{t(s.body)}</p>
+                <div className="min-w-0">
+                  <h3 className="font-heading text-base font-bold text-gray-900 sm:mt-4">{t(s.title)}</h3>
+                  <p className="mt-1 flex-1 text-[13px] leading-relaxed text-gray-600 sm:mt-2">{t(s.body)}</p>
+                </div>
               </div>
             </Reveal>
           ))}
         </div>
       </section>
 
+      {/* ============================================================ REVIEWS */}
+      {/* Right before the prices: what other learners said is most useful at
+          the moment somebody is deciding whether to pay. */}
+      <ReviewsSection className="mx-auto max-w-7xl px-4 pb-16 sm:px-6" />
+
       {/* =========================================================== OFFERS */}
-      <section className="bg-gradient-to-b from-white via-violet-50/60 to-fuchsia-50/60 px-4 py-16 sm:px-6">
+      <section id="plans" className="scroll-mt-20 bg-gradient-to-b from-white via-violet-50/60 to-fuchsia-50/60 px-4 py-10 sm:px-6 sm:py-16">
         <Reveal>
           <h2 className="text-center font-heading text-3xl font-extrabold text-gray-900">{t('land.offers')}</h2>
           <p className="mt-2 text-center text-xs uppercase tracking-wider text-gray-400">{t('land.offersSub')}</p>
         </Reveal>
-        <div className="mx-auto mt-10 grid max-w-6xl items-stretch gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          <Reveal>
+        {/* A phone swipes through the plans, one card at a time, with the
+            next one peeking in from the right; stacked, four cards ran to
+            two thousand pixels. -mx-4 lets the strip bleed to the screen
+            edge so the peek is visible; the padding puts the cards back. */}
+        <div className="-mx-4 mt-6 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-4 [scrollbar-width:none] sm:mx-auto sm:mt-10 sm:grid sm:max-w-6xl sm:snap-none sm:items-stretch sm:gap-6 sm:overflow-visible sm:px-0 sm:pb-0 sm:grid-cols-2 lg:grid-cols-4">
+          <Reveal className="w-[82%] shrink-0 snap-center sm:w-auto sm:shrink">
             <div className="tilt-card relative flex h-full flex-col overflow-hidden rounded-3xl border border-green-200 bg-white text-center shadow-soft">
               <div className="bg-green-100 px-6 pb-5 pt-8 font-heading text-2xl font-bold text-green-800">
                 {t('pricing.freeName')}
@@ -734,7 +757,7 @@ export default function Landing() {
             </div>
           </Reveal>
           {plans.map((p, i) => (
-            <Reveal key={p.id} delay={i * 100} className={p.popular ? 'md:-my-4 z-10' : ''}>
+            <Reveal key={p.id} delay={i * 100} className={`w-[82%] shrink-0 snap-center sm:w-auto sm:shrink ${p.popular ? 'md:-my-4 z-10' : ''}`}>
               <div className={`tilt-card relative flex h-full flex-col overflow-hidden rounded-3xl bg-white text-center ${p.popular ? 'shadow-2xl shadow-violet-300/60 ring-2 ring-primary md:scale-[1.04]' : 'border border-violet-100 shadow-soft'}`}>
                 {p.popular && (
                   <span className="absolute left-1/2 top-3 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-amber-300 px-3 py-0.5 text-[9px] font-extrabold uppercase tracking-wider text-amber-900 shadow">★ {t('pricing.mostPopular')}</span>
@@ -777,8 +800,13 @@ export default function Landing() {
           {t('land.orPrefix')} <Link to="/register" className="text-primary underline-offset-2 hover:underline">{t('land.orFree')}</Link> {t('land.noCardSuffix')}
         </p>
 
-        {/* NCLC table */}
-        <Reveal className="mx-auto mt-16 max-w-4xl">
+        {/* NCLC table. Desktop only: a five-column score table on a phone is
+            a sideways scroll inside a page, and the CLB chart article says
+            the same thing in a form that fits. */}
+        <Link to="/blog/tcf-canada-clb-chart" className="mx-auto mt-8 flex items-center justify-center gap-1 text-sm font-bold text-primary sm:hidden">
+          {t('land.footClbChart')} <ArrowRight size={15} weight="bold" />
+        </Link>
+        <Reveal className="mx-auto mt-16 hidden max-w-4xl sm:block">
           <div className="overflow-hidden rounded-3xl shadow-2xl shadow-violet-300/40">
             <div className="bg-gradient-to-br from-primary via-purple-600 to-fuchsia-600 px-6 py-8 text-center">
               <h3 className="font-heading text-2xl font-extrabold text-white sm:text-3xl">{t('land.nclcTable')}</h3>
@@ -817,18 +845,20 @@ export default function Landing() {
       </section>
 
       {/* ============================================================ GUIDES */}
-      <section className="mx-auto max-w-7xl px-4 pt-16 sm:px-6" data-testid="home-guides">
+      <section className="mx-auto max-w-7xl px-4 pt-10 sm:px-6 sm:pt-16" data-testid="home-guides">
         <Reveal>
           <h2 className="text-center font-heading text-3xl font-extrabold text-gray-900">
             {t('land.guidesA')} <span className="text-primary">{t('land.guidesB')}</span>
           </h2>
           <p className="mt-2 text-center text-sm text-gray-500">{t('land.guidesSub')}</p>
         </Reveal>
-        <div className="mt-9 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Four of the eight on a phone; the rest are one tap away on the
+            pillar page, which the link under the grid opens. */}
+        <div className="mt-6 grid gap-3 sm:mt-9 sm:gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {GUIDES.map((g, i) => (
-            <Reveal key={g.to} delay={i * 60}>
+            <Reveal key={g.to} delay={i * 60} className={i >= 4 ? 'hidden sm:block' : ''}>
               <Link to={g.to}
-                className="tilt-card group flex h-full flex-col rounded-3xl border border-violet-100 bg-white p-5 shadow-soft transition hover:border-violet-300">
+                className="tilt-card group flex h-full flex-col rounded-2xl border border-violet-100 bg-white p-4 shadow-soft transition hover:border-violet-300 sm:rounded-3xl sm:p-5">
                 <h3 className="font-heading text-base font-bold text-gray-900 group-hover:text-primary">
                   {t(`land.guide_${g.key}_t`)}
                 </h3>
@@ -840,10 +870,13 @@ export default function Landing() {
             </Reveal>
           ))}
         </div>
+        <Link to="/tcf-canada" className="mt-4 flex items-center justify-center gap-1 text-sm font-bold text-primary sm:hidden">
+          {t('land.footTcfCanada')} <ArrowRight size={15} weight="bold" />
+        </Link>
       </section>
 
       {/* =============================================================== FAQ */}
-      <section className="mx-auto max-w-4xl px-4 py-16 sm:px-6">
+      <section className="mx-auto max-w-4xl px-4 py-10 sm:px-6 sm:py-16">
         <Reveal><h2 className="font-heading text-3xl font-extrabold text-gray-900">{t('land.faq')}</h2></Reveal>
         <div className="mt-7 space-y-3.5">
           {FAQ_NUMBERS.map((n, i) => (
@@ -853,9 +886,9 @@ export default function Landing() {
       </section>
 
       {/* ======================================================= CTA BANNER */}
-      <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6">
+      <section className="mx-auto max-w-7xl px-4 pb-10 sm:px-6 sm:pb-16">
         <Reveal>
-          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-primary via-purple-600 to-fuchsia-600 px-6 py-12 sm:px-12">
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-primary via-purple-600 to-fuchsia-600 px-6 py-9 sm:px-12 sm:py-12">
             <RocketLaunch size={90} weight="duotone" className="absolute -left-3 top-1/2 hidden -translate-y-1/2 rotate-12 text-white/25 sm:block" />
             <PaperPlaneTilt size={80} weight="duotone" className="absolute -bottom-3 right-4 hidden -rotate-12 text-white/25 sm:block" />
             <div className="relative mx-auto flex max-w-4xl flex-col items-center gap-6 text-center lg:flex-row lg:text-left">

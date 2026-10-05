@@ -68,24 +68,24 @@ function PaywallDialog({ block, onClose }) {
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/60 p-4 backdrop-blur-sm"
       role="dialog" aria-modal="true" aria-label={title}>
-      <div className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+      <div className="flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
         <div className="flex items-start gap-3 bg-gradient-to-r from-primary to-fuchsia-600 px-6 py-4 text-white">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/20">
             <Lock size={18} weight="fill" />
           </span>
           <div className="min-w-0 flex-1">
             <p className="font-heading text-sm font-bold leading-snug">{title}</p>
-            <p className="text-[11px] text-white/80">{t('pay.kept')}</p>
+            <p className="text-xs text-white/80">{t('pay.kept')}</p>
           </div>
           <button onClick={close} aria-label={t('pay.close')}
-            className="rounded-lg p-1.5 text-white/80 transition hover:bg-white/20 hover:text-white">
+            className="-m-1 rounded-lg p-2.5 text-white/80 transition hover:bg-white/20 hover:text-white">
             <X size={18} weight="bold" />
           </button>
         </div>
 
         <div className="overflow-y-auto px-6 py-5">
           {trial && (
-            <div className="flex flex-wrap gap-2 text-[11px] font-semibold">
+            <div className="flex flex-wrap gap-2 text-xs font-semibold">
               {['writing', 'speaking', 'speaking_tache2'].map((key) => (
                 line(key) && (
                   <span key={key} className="pill bg-violet-50 text-primary">
@@ -111,14 +111,14 @@ function PaywallDialog({ block, onClose }) {
                       dialog for every learner who ran out of credits. The
                       server's own plan name is the truthful fallback. Pricing
                       already guards it the same way. */}
-                  <p className="text-[11px] text-gray-500">
+                  <p className="text-xs text-gray-500">
                     {plan.durationKey ? t(plan.durationKey) : plan.name}
                     {' · '}{t('pricing.bonus', { n: plan.bonus })}
                   </p>
                 </div>
                 <span className="shrink-0 text-right">
                   {plan.wasPrice && (
-                    <span className="mr-1.5 text-[11px] text-gray-400 line-through">{plan.wasPrice}</span>
+                    <span className="mr-1.5 text-xs text-gray-400 line-through">{plan.wasPrice}</span>
                   )}
                   <span className="font-heading text-sm font-extrabold text-gray-900">{plan.price}</span>
                 </span>
@@ -129,7 +129,7 @@ function PaywallDialog({ block, onClose }) {
           {/* Nothing is bought from this dialog, so the fee is flagged here
               and itemised on /pricing where the money is actually taken. */}
           {Boolean(feePercent) && (
-            <p className="mt-2 text-[11px] leading-relaxed text-gray-500">
+            <p className="mt-2 text-xs leading-relaxed text-gray-500">
               {t('pricing.feeNote', { pct: feePercent })}
             </p>
           )}
@@ -137,7 +137,7 @@ function PaywallDialog({ block, onClose }) {
           {/* Only while payment really is closed — once Cashfree is configured
               this line would be a lie sitting above a working buy button. */}
           {!configured && (
-            <p className="mt-3 flex items-start gap-1.5 text-[11px] leading-relaxed text-gray-500">
+            <p className="mt-3 flex items-start gap-1.5 text-xs leading-relaxed text-gray-500">
               <CheckCircle size={14} weight="fill" className="mt-0.5 shrink-0 text-primary" />
               {t('pay.notLive')}
             </p>

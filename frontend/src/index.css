@@ -60,12 +60,26 @@ h1, h2, h3, h4 { @apply font-heading; }
 }
 .err-tip {
   @apply pointer-events-none invisible absolute left-1/2 bottom-full z-30 mb-2 w-64
-    -translate-x-1/2 rounded-xl bg-gray-900 p-3 text-xs leading-snug text-white
-    opacity-0 shadow-lg transition;
+    max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-xl bg-gray-900 p-3 text-xs
+    leading-snug text-white opacity-0 shadow-lg transition;
 }
 .err-mark:hover .err-tip,
-.err-mark:focus .err-tip {
+.err-mark:focus .err-tip,
+.err-mark.open .err-tip {
   @apply visible opacity-100;
+}
+/* Phones: no hover, and a centred tip clips at the screen edge. The tip opens
+   under the tapped word, left-aligned to it, and never wider than the screen. */
+@media (max-width: 639px) {
+  .err-tip {
+    left: 0;
+    transform: none;
+    bottom: auto;
+    top: 100%;
+    margin-top: .5rem;
+    margin-bottom: 0;
+    max-width: calc(100vw - 2rem);
+  }
 }
 
 /* Screen-reader-only text that still reaches the accessibility tree. */
@@ -252,6 +266,38 @@ h1, h2, h3, h4 { @apply font-heading; }
   9%, 100%  { stroke-dashoffset: 130; }
 }
 
+
+/* ---------------------------------------------------- activity toast ------ */
+@keyframes activity-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: none; }
+}
+.activity-toast { animation: activity-in 0.45s cubic-bezier(0.22, 1, 0.36, 1); }
+
+/* ------------------------------------------------------- reviews marquee --- */
+/* The review cards drift right to left. The list is rendered twice, so moving
+   the track by half its width lands on an identical frame and the loop has no
+   seam. Hovering (or focusing a card) pauses it so a quote can be read. */
+@keyframes reviews-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.reviews-marquee {
+  animation: reviews-marquee var(--marquee-duration, 40s) linear infinite;
+}
+.reviews-marquee:hover,
+.reviews-marquee:focus-within { animation-play-state: paused; }
+.reviews-marquee-mask {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent);
+          mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Standing still, the doubled list would show every card twice, so the
+     copy is hidden and the row scrolls by hand instead. */
+  .reviews-marquee { animation: none !important; transform: none !important; }
+  .reviews-marquee [data-copy="1"] { display: none; }
+  .reviews-marquee-mask { overflow-x: auto; -webkit-mask-image: none; mask-image: none; }
+}
 
 /* -------------------------------------------------------- reduced motion --- */
 /* Everything above animates for effect, not to convey information, so when the

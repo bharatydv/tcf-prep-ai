@@ -8,7 +8,7 @@ import { api, errMsg, CATEGORY_META } from '../lib/api';
 import { RecordingPlayer } from '../components/RecordingPlayer';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
-import { displayMark, markFromCorrect, speakingPaperMark } from '../lib/tcf';
+import { displayMark, markFromCorrect, nclcFromMark, speakingPaperMark } from '../lib/tcf';
 import { setLabel } from '../lib/speakingExam';
 
 /* The four papers, each with a hue of its own so the current selection is
@@ -43,7 +43,7 @@ function Head({ title, note }) {
   return (
     <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
       <h2 className="font-heading text-[15px] font-bold text-gray-900">{title}</h2>
-      {note && <span className="text-[11px] font-medium text-gray-400">{note}</span>}
+      {note && <span className="text-xs font-medium text-gray-400">{note}</span>}
     </div>
   );
 }
@@ -80,6 +80,14 @@ export default function Dashboard() {
      page itself, which meant a candidate who closed that tab had no way back
      to their result. */
   const [sittings, setSittings] = useState([]);
+  /* And the tâches practised outside a paper, which nothing here could show
+     either. A practice answer reached the history list below as one graded
+     submission among the written ones, named only by its CEFR level — so
+     "how is my tâche 3 going" was a question the dashboard held the answer to
+     and could not be asked. */
+  const [practice, setPractice] = useState([]);
+  // Only the newest few, until asked. Twenty tâches is a ledger, not a glance.
+  const [allPractice, setAllPractice] = useState(false);
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   // Set by the exam when it sends somebody here to wait out the marking.
@@ -101,6 +109,8 @@ export default function Dashboard() {
     api.get('/api/listening/attempts').then(({ data }) => setListening(data.attempts || [])).catch(() => {});
     api.get('/api/speaking/exam-sets/attempts')
       .then(({ data }) => setSittings(data.sittings || [])).catch(() => {});
+    api.get('/api/speaking/practice/attempts')
+      .then(({ data }) => setPractice(data.attempts || [])).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -225,14 +235,15 @@ export default function Dashboard() {
   const aiGraded = AI_GRADED.has(skill);
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-10">
+    <main className="mx-auto max-w-7xl px-4 py-6 sm:py-10">
       <Seo titleKey="seo.dashboard.title" path="/dashboard" noindex />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-heading text-3xl font-extrabold tracking-tight text-gray-900">
+        <h1 className="font-heading text-2xl font-extrabold tracking-tight text-gray-900 sm:text-3xl">
           {t('dash.title')}
         </h1>
-        <Link to="/invoices" className="btn-outline !px-4 !py-2 text-sm"
+        {/* The phone menu already lists invoices. */}
+        <Link to="/invoices" className="btn-outline !hidden !px-4 !py-2 text-sm sm:!inline-flex"
           data-testid="dashboard-invoices">
           <Receipt size={16} /> {t('inv.title')}
         </Link>
@@ -240,16 +251,18 @@ export default function Dashboard() {
 
       {/* FILTER BAR — the four papers and the window, in one row, because they
           answer one question together: which attempts am I looking at. */}
-      <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-3 shadow-soft">
+      <div className="mt-5 rounded-2xl border border-gray-200 bg-white p-3 shadow-soft sm:mt-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-1.5" role="tablist" data-testid="dash-skill">
+          {/* Nine buttons wrapped into four rows on a phone. The papers scroll
+              in one row there, and the window is a select. */}
+          <div className="-mx-3 flex gap-1.5 overflow-x-auto px-3 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0" role="tablist" data-testid="dash-skill">
             {SKILLS.map(({ id, key, Icon, tone: c }) => {
               const on = skill === id;
               return (
                 <button key={id} type="button" role="tab" aria-selected={on}
                   onClick={() => setSkill(id)} data-testid={`dash-skill-${id}`}
                   style={on ? { backgroundColor: c, borderColor: c } : undefined}
-                  className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[13px] font-semibold transition ${
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-2 text-[13px] font-semibold transition ${
                     on ? 'text-white shadow-sm'
                        : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'}`}>
                   <Icon size={15} weight="fill" /> {t(key)}
@@ -258,7 +271,14 @@ export default function Dashboard() {
             })}
           </div>
 
-          <div className="flex flex-wrap gap-1.5" data-testid="dash-range">
+          <label className="w-full sm:hidden">
+            <span className="sr-only">{t('dash.range30')}</span>
+            <select value={days} onChange={(e) => setDays(Number(e.target.value))}
+              className="input !py-2 text-sm" data-testid="dash-range-select">
+              {RANGES.map((d) => <option key={d} value={d}>{t(RANGE_KEY[d])}</option>)}
+            </select>
+          </label>
+          <div className="hidden flex-wrap gap-1.5 sm:flex" data-testid="dash-range">
             {RANGES.map((d) => (
               <button key={d} type="button" onClick={() => setDays(d)}
                 data-testid={`dash-range-${d}`}
@@ -275,22 +295,22 @@ export default function Dashboard() {
 
       {/* STAT CARDS. Attempts and average follow the filters; the streaks are
           all-time by definition — a streak inside a 7-day window is not one. */}
-      <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:mt-5 sm:gap-4 lg:grid-cols-4">
         {[
           [t('dash.statAttempts'), filtered.length, ChartLineUp, tone, true],
           [t('dash.statAverage'), average == null ? '—' : average, null, null, true],
           [t('dash.statStreak'), stats.current_streak, Fire, '#F97316', false],
           [t('dash.statBest'), stats.longest_streak, Trophy, '#D97706', false],
         ].map(([label, value, Icon, colour, follows]) => (
-          <div key={label} className="card p-5">
-            <p className="flex items-center gap-2 text-[13px] font-medium text-gray-500">
+          <div key={label} className="card p-4 sm:p-5">
+            <p className="flex items-center gap-2 text-xs font-medium text-gray-500 sm:text-[13px]">
               {Icon ? <Icon size={17} weight="fill" style={{ color: colour }} /> : null}
               {label}
             </p>
-            <p className="mt-1.5 font-heading text-[32px] font-extrabold leading-none tracking-tight text-gray-900">
+            <p className="mt-1.5 font-heading text-[28px] font-extrabold leading-none tracking-tight text-gray-900 sm:text-[32px]">
               {value}
             </p>
-            <p className="mt-1.5 text-[11px] text-gray-400">
+            <p className="mt-1.5 text-xs text-gray-400">
               {follows ? skillName : t('dash.allTime')}
             </p>
           </div>
@@ -299,7 +319,7 @@ export default function Dashboard() {
 
       {/* WEAK POINTS + RECURRING — the original 2/3 + 1/3 split, kept. */}
       <div className="mt-5 grid gap-5 lg:grid-cols-3">
-        <section className="card p-6 lg:col-span-2">
+        <section className="card p-4 sm:p-6 lg:col-span-2">
           <Head title={t('dash.weakPoints')} note={t('dash.basedOn')} />
           {!aiGraded ? <NotForSkill>{t('dash.aiGradedOnly', { skill: skillName })}</NotForSkill> : mistakes?.weak_points?.length ? (
             <div className="grid gap-3 sm:grid-cols-2">
@@ -327,7 +347,7 @@ export default function Dashboard() {
           )}
         </section>
 
-        <section className="card p-6">
+        <section className="card p-4 sm:p-6">
           <Head title={t('dash.recurring')} />
           {!aiGraded ? <NotForSkill>{t('dash.aiGradedOnly', { skill: skillName })}</NotForSkill> : mistakes?.repeat_leaders?.length ? (
             <ul className="space-y-2.5 text-[13px]">
@@ -336,7 +356,7 @@ export default function Dashboard() {
                   <span className="text-red-600 line-through decoration-1">{m.error_text}</span>
                   {' → '}
                   <span className="font-semibold text-green-700">{m.correction}</span>
-                  <span className="ml-1.5 text-[11px] tabular-nums text-gray-400">
+                  <span className="ml-1.5 text-xs tabular-nums text-gray-400">
                     ×{m.times_repeated + 1}
                   </span>
                 </li>
@@ -354,7 +374,7 @@ export default function Dashboard() {
           the exam reports Expression orale and the only way this page ever
           shows a combined mark. */}
       {(sittings.length > 0 || marking) && (
-        <section className="card mt-5 p-6" data-testid="dash-speaking-tests">
+        <section className="card mt-5 p-4 sm:p-6" data-testid="dash-speaking-tests">
           <Head title={t('dash.speakingTests')} note={t('dash.speakingTestsNote')} />
           {marking && !sittings[0]?.complete && (
             <p className="mb-3 flex items-center gap-2 rounded-xl bg-violet-50 px-3 py-2 text-xs text-primary"
@@ -381,7 +401,7 @@ export default function Dashboard() {
                     <span className="block font-heading text-sm font-bold text-gray-900">
                       {t('dash.speakingSet', { n: setLabel(t, sit) })}
                     </span>
-                    <span className="block text-[11px] text-gray-500">
+                    <span className="block text-xs text-gray-500">
                       {tasks.map((task, i) => (
                         <span key={i} className="mr-2">
                           {t('hist.tache', { n: i + 1 })} {task ? task.tcf_level : '—'}
@@ -395,13 +415,13 @@ export default function Dashboard() {
                         {paper.mark}<span className="text-xs text-gray-400">/20</span>
                       </span>
                       {paper.nclc && (
-                        <span className="rounded-full bg-green-100 px-2.5 py-1 text-[11px] font-bold text-green-700">
+                        <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-bold text-green-700">
                           {t('sexam.clb', { level: paper.nclc })}
                         </span>
                       )}
                     </span>
                   ) : (
-                    <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-700">
+                    <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-700">
                       {t('dash.speakingPartial', { done: answered, total: 3 })}
                     </span>
                   )}
@@ -412,18 +432,113 @@ export default function Dashboard() {
         </section>
       )}
 
+      {/* SPEAKING PRACTICE — the tâches practised one at a time, which is
+          where most of the speaking in this app actually happens. Each row is
+          one answer, with the mark out of 20 and the CLB band that mark
+          converts to, so a practice tâche is reported on exactly the scale a
+          sitting is. No combined mark: three tâches practised on three
+          different days are not a paper, and averaging them into one would
+          invent a sitting nobody sat. */}
+      {practice.length > 0 && (
+        <section className="card mt-5 p-4 sm:p-6" data-testid="dash-speaking-practice">
+          <Head title={t('dash.speakingPractice')} note={t('dash.speakingPracticeNote')} />
+          <div className="space-y-2">
+            {(allPractice ? practice : practice.slice(0, 5)).map((a) => {
+              const mark = displayMark(a.overall_score, a.tcf_level);
+              const clb = nclcFromMark(mark);
+              return (
+                <Link key={a.submission_id} to={`/feedback/${a.submission_id}`}
+                  data-testid={`dash-practice-${a.submission_id}`}
+                  className="flex flex-wrap items-center gap-3 rounded-2xl border border-gray-100 px-4 py-3 transition hover:border-violet-200 hover:bg-violet-50/40">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-100 font-heading text-sm font-extrabold text-primary">
+                    {a.task_type}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-heading text-sm font-bold text-gray-900">
+                      {t('dash.practiceTache', { n: a.task_type })}
+                    </span>
+                    <span className="block text-xs text-gray-500">
+                      {(a.created_at || '').slice(0, 10)}
+                      {' · '}
+                      {a.error_count
+                        ? t('hist.errors', { n: a.error_count })
+                        : t('hist.noErrors')}
+                    </span>
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="font-heading text-lg font-extrabold text-gray-900">
+                      {mark ?? '—'}<span className="text-xs text-gray-400">/20</span>
+                    </span>
+                    <span className="rounded-full bg-violet-100 px-2.5 py-1 text-xs font-bold text-primary">
+                      {clb ? t('sexam.clb', { level: clb }) : a.tcf_level}
+                    </span>
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+          {!allPractice && practice.length > 5 && (
+            <button type="button" onClick={() => setAllPractice(true)}
+              data-testid="dash-practice-more"
+              className="mt-3 text-xs font-semibold text-primary underline">
+              {t('dash.speakingPracticeMore', { n: practice.length - 5 })}
+            </button>
+          )}
+        </section>
+      )}
+
       {/* HISTORY — now covers all four papers, so which paper an attempt was
           is a column rather than something the reader has to infer. */}
       <section className="card mt-5 overflow-hidden p-0">
-        <div className="flex flex-wrap items-center justify-between gap-2 p-6 pb-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 p-4 pb-3 sm:p-6 sm:pb-4">
           <h2 className="font-heading text-[15px] font-bold text-gray-900">{t('dash.history')}</h2>
-          <span className="text-[11px] font-medium text-gray-400">
+          <span className="text-xs font-medium text-gray-400">
             {t('dash.nAttempts', { n: filtered.length })}
           </span>
         </div>
-        <div className="overflow-x-auto">
+
+        {/* On a phone the six-column table scrolled sideways inside the page.
+            One card per attempt instead, with the same fields and the same
+            actions; the table below is the sm-and-up layout. */}
+        <ul className="divide-y divide-gray-100 border-t border-gray-100 sm:hidden" data-testid="dash-history-cards">
+          {filtered.map((a) => (
+            <li key={`${a.skill}-${a.id}`} className="px-4 py-3">
+              <div className="flex items-center gap-3">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: TONE[a.skill] }} />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold" style={{ color: TONE[a.skill] }}>
+                    {t(SKILLS.find((s) => s.id === a.skill).key)}
+                    <span className="ml-2 font-heading text-gray-900">{a.label}</span>
+                  </span>
+                  <span className="block text-xs tabular-nums text-gray-500">
+                    {(a.at || '').slice(0, 10)} · {t('dash.colScore')} {a.score ?? '—'} · {t('dash.colErrors')} {a.errors}
+                  </span>
+                </span>
+                {a.href
+                  ? <Link to={a.href} className="inline-flex min-h-[40px] items-center px-2 text-sm font-semibold text-primary">{t('dash.view')}</Link>
+                  : null}
+              </div>
+              {a.hasAudio && (
+                <div className="mt-2">
+                  <button type="button"
+                    onClick={() => setPlaying(playing === a.id ? null : a.id)}
+                    className="inline-flex min-h-[40px] items-center gap-1 text-sm font-semibold text-rose-600">
+                    <Microphone size={14} weight="fill" />
+                    {playing === a.id ? t('dash.hideAudio') : t('dash.listen')}
+                  </button>
+                  {playing === a.id && <div className="mt-2"><RecordingPlayer submissionId={a.id} /></div>}
+                </div>
+              )}
+            </li>
+          ))}
+          {!filtered.length && (
+            <li className="px-4 py-8 text-center text-sm text-gray-400">{t('dash.noSubmissions')}</li>
+          )}
+        </ul>
+
+        <div className="hidden overflow-x-auto sm:block">
           <table className="w-full min-w-[38rem] text-sm">
-            <thead className="bg-gray-50 text-left text-[10.5px] uppercase tracking-wide text-gray-500">
+            <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
               <tr>
                 <th className="px-4 py-2.5 font-bold sm:px-6">{t('dash.colDate')}</th>
                 <th className="px-4 py-2.5 font-bold sm:px-6">{t('dash.colSkill')}</th>

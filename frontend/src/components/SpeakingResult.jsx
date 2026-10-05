@@ -45,6 +45,7 @@ import {
 import { useOwnVoice } from '../lib/ownVoice';
 import { findClip } from '../lib/speechClips';
 import { useT } from '../i18n';
+import RateCorrection from './RateCorrection';
 
 // Each note names one sound in one word. The word gets a play button of its
 // own, because "the nasal vowel in « etranger » was not produced distinctly"
@@ -513,6 +514,7 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
         </div>
       )}
 
+      <RateCorrection submissionId={result.submission_id} />
     </div>
   );
 }

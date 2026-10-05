@@ -27,6 +27,7 @@
  * that buys the visitor nothing.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { ChatsCircle, TelegramLogo, WhatsappLogo, X } from '@phosphor-icons/react';
 import { COMMUNITY_LINKS, HAS_COMMUNITY } from '../lib/community';
 import { storedConsent } from './ConsentBanner';
@@ -34,6 +35,15 @@ import { track } from '../lib/api';
 import { useT } from '../i18n';
 
 const ICONS = { whatsapp: WhatsappLogo, telegram: TelegramLogo };
+
+/* Where a phone screen is all work surface: the recorder, the editor and the
+   timed papers. The button sat over the analyse button, the record button and
+   the hand-in button there, so on phones it stays off these routes. A desktop
+   has room beside the page and keeps it. */
+const PHONE_QUIET = [
+  /^\/practice\/(write|simulator)/, /^\/practice\/[0-9a-f-]{8,}/, /^\/speaking\/(record|test)/,
+  /^\/exam/, /^\/(reading|listening)\/(test|practice)\/\d+/, /^\/check-writing/, /^\/review/,
+];
 /* Each group's own colour, so the two are told apart at a glance rather than
    by reading them. */
 const TONES = {
@@ -83,9 +93,11 @@ export function CommunityInline({ from, className = '' }) {
 
 export default function CommunityButton() {
   const t = useT();
+  const { pathname } = useLocation();
   const [ready, setReady] = useState(false);
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
+  const phoneQuiet = PHONE_QUIET.some((re) => re.test(pathname));
 
   useEffect(() => {
     if (!HAS_COMMUNITY) return undefined;
@@ -128,14 +140,14 @@ export default function CommunityButton() {
   /* z-40: under the cookie banner (z-50) and the paywall (z-60), over the
      page. Those two are modal moments and must never be covered. */
   return (
-    <div ref={rootRef} className="fixed bottom-4 right-4 z-40 print:hidden sm:bottom-6 sm:right-6">
+    <div ref={rootRef} className={`fixed bottom-4 right-4 z-40 print:hidden sm:bottom-6 sm:right-6 ${phoneQuiet ? 'hidden sm:block' : ''}`}>
       {single ? (
         <a
           href={single.url} target="_blank" rel="noopener noreferrer"
           onClick={() => report(single.id)}
           data-testid={`community-float-${single.id}`}
           aria-label={t('community.join')}
-          className={`flex min-h-[52px] items-center gap-2.5 rounded-full px-5 text-sm font-bold text-white shadow-lg transition ${TONES[single.id] || 'bg-primary'}`}
+          className={`flex h-12 w-12 items-center justify-center gap-2.5 rounded-full text-sm font-bold text-white shadow-lg transition sm:h-auto sm:min-h-[52px] sm:w-auto sm:px-5 ${TONES[single.id] || 'bg-primary'}`}
         >
           <SingleIcon size={22} weight="fill" />
           <span className="hidden sm:inline">{t('community.join')}</span>
@@ -174,7 +186,7 @@ export default function CommunityButton() {
             aria-controls="community-panel"
             aria-label={open ? t('community.close') : t('community.join')}
             data-testid="community-float-toggle"
-            className="ml-auto flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-primary to-fuchsia-600 text-white shadow-lg transition hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            className="ml-auto flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br sm:h-14 sm:w-14 from-primary to-fuchsia-600 text-white shadow-lg transition hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           >
             {open ? <X size={24} weight="bold" /> : <ChatsCircle size={26} weight="fill" />}
           </button>

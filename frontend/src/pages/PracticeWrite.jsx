@@ -231,25 +231,50 @@ export default function PracticeWrite() {
         <BackLink className="!mb-6" testid="back-to-tasks"
           fallback={themeId ? `/practice/themes?tache=${tacheNum}` : '/practice/tasks'} />
 
-        <div className={`grid gap-6 ${freeWriting ? '' : 'lg:grid-cols-[340px_1fr]'}`}>
+        <div className={`grid grid-cols-[minmax(0,1fr)] gap-6 ${freeWriting ? '' : 'lg:grid-cols-[340px_minmax(0,1fr)]'}`}>
           {/* LEFT: the theme's topics, or the generic test list off-theme.
               Free writing has neither, so the editor takes the full width. */}
           {!freeWriting && (
-          <aside className="rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-5 shadow-soft">
+          <aside className="min-w-0 rounded-3xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-4 shadow-soft lg:p-5">
             <p className="flex items-center gap-2 font-heading text-sm font-bold text-gray-900">
               <BookOpen size={18} weight="duotone" className="text-primary" />
               {themeId ? t('write.topicsList') : t('write.testsList')}
               {themeId && topics.length > 0 && (
-                <span className="ml-auto rounded-full bg-violet-100 px-2.5 py-1 text-[10px] font-bold text-primary">
+                <span className="ml-auto rounded-full bg-violet-100 px-2.5 py-1 text-xs font-bold text-primary">
                   {t('write.topicsCount', { n: topics.length })}
                 </span>
               )}
             </p>
 
+            {/* Below lg the list sits ABOVE the editor, and six test cards
+                (or twenty topics) were six hundred pixels to scroll past on
+                every visit. There it is one row of chips that scrolls
+                sideways; the cards below are the lg layout. */}
+            <div className="-mx-4 mt-3 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] lg:hidden" data-testid="topic-chips">
+              {(themeId ? topics : prompts).map((q, i) => {
+                const isTopic = Boolean(themeId);
+                const active = isTopic ? activeTopicId === q.question_id : activePrompt?.prompt_id === q.prompt_id;
+                return (
+                  <button key={isTopic ? q.question_id : q.prompt_id} type="button"
+                    onClick={() => (isTopic ? selectTopic(q) : selectPrompt(q))}
+                    aria-pressed={active}
+                    className={`flex min-h-[40px] shrink-0 items-center gap-2 rounded-full border px-3 text-sm font-semibold transition ${
+                      active ? 'border-primary bg-primary text-white' : 'border-violet-200 bg-white text-gray-700'
+                    }`}>
+                    <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
+                      active ? 'bg-white/20' : 'bg-violet-100 text-primary'}`}>{i + 1}</span>
+                    <span className="max-w-[40vw] truncate">
+                      {isTopic ? (q.title || t('write.topicN', { n: i + 1 })) : t('write.testN', { n: i + 1 })}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
             {themeId ? (
               /* Twenty topics do not fit on screen, so the list scrolls inside
                  the card rather than stretching the page past the editor. */
-              <div className="mt-4 max-h-[560px] space-y-2.5 overflow-y-auto pr-1">
+              <div className="mt-4 hidden max-h-[560px] space-y-2.5 overflow-y-auto pr-1 lg:block">
                 {topics.map((q, i) => {
                   const active = activeTopicId === q.question_id;
                   return (
@@ -283,7 +308,7 @@ export default function PracticeWrite() {
                 })}
               </div>
             ) : (
-            <div className="mt-4 space-y-2.5">
+            <div className="mt-4 hidden space-y-2.5 lg:block">
               {prompts.map((p, i) => {
                 const active = activePrompt?.prompt_id === p.prompt_id;
                 return (
@@ -315,7 +340,7 @@ export default function PracticeWrite() {
           )}
 
           {/* RIGHT: writing panel */}
-          <div className="rounded-3xl border border-violet-100 bg-white p-5 shadow-xl shadow-violet-200/40 sm:p-6">
+          <div className="rounded-3xl border border-violet-100 bg-white p-4 shadow-xl shadow-violet-200/40 sm:p-6">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
               {taskType ? (
                 <p className="text-sm font-bold text-gray-900">
@@ -334,7 +359,7 @@ export default function PracticeWrite() {
                  counted in the 120-180 words, which the note below spells out —
                  learners otherwise assume the counter includes them. */
               <div className="mb-4 rounded-2xl border border-violet-100 bg-violet-50/40 p-4" data-testid="question-display">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-primary">
+                <p className="text-xs font-bold uppercase tracking-wide text-primary">
                   {t('write.topicN', { n: activeTopicIndex + 1 })}
                 </p>
                 <p className="mt-1 font-heading text-base font-bold text-gray-900">{docSubject.title}</p>
@@ -343,7 +368,7 @@ export default function PracticeWrite() {
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   {[docSubject.doc_1, docSubject.doc_2].map((doc, i) => (
                     <div key={i} className="rounded-xl border border-violet-100 bg-white p-3" data-testid={`document-${i + 1}`}>
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-primary">
+                      <p className="text-xs font-bold uppercase tracking-wide text-primary">
                         {t('write.documentN', { n: i + 1 })}
                       </p>
                       <p className="mt-1 text-xs leading-relaxed text-gray-700">{doc}</p>
@@ -351,11 +376,11 @@ export default function PracticeWrite() {
                   ))}
                 </div>
 
-                <p className="mt-3 text-[11px] italic text-gray-500">{t('write.docsNotCounted')}</p>
+                <p className="mt-3 text-xs italic text-gray-500">{t('write.docsNotCounted')}</p>
               </div>
             ) : question && (
               <div className="mb-4 rounded-2xl border border-violet-100 bg-violet-50/40 p-4" data-testid="question-display">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-primary">
+                <p className="text-xs font-bold uppercase tracking-wide text-primary">
                   {!freeMode ? activePrompt.title
                     : activeTopicIndex >= 0 ? t('write.topicN', { n: activeTopicIndex + 1 })
                     : t('write.yourQuestion')}
@@ -377,7 +402,9 @@ export default function PracticeWrite() {
                 onChange={(e) => setText(e.target.value)}
                 onDrop={(e) => e.preventDefault()}
                 lang="fr"
-                className="input paper-textarea min-h-[340px] p-6 shadow-card"
+                /* A 340px box plus 24px of padding was the whole screen once a
+                   phone keyboard was up. */
+                className="input paper-textarea !min-h-[220px] !p-4 shadow-card sm:!min-h-[340px] sm:!p-6"
                 placeholder={t('write.placeholder')}
                 data-testid="writing-textarea"
               />
@@ -433,8 +460,9 @@ export default function PracticeWrite() {
           </div>
         </div>
 
-        {/* RECENT TOPICS (placeholder) */}
-        <div className="mt-12">
+        {/* RECENT TOPICS (placeholder). Not on phones: three cards of
+            placeholder text under the editor is scrolling for nothing. */}
+        <div className="mt-12 hidden sm:block">
           <div className="flex items-center justify-between">
             <h2 className="flex items-center gap-2 font-heading text-xl font-extrabold text-gray-900">
               <Sparkle size={20} weight="fill" className="text-primary" /> {t('write.recentTopics')}
@@ -458,7 +486,7 @@ export default function PracticeWrite() {
                     <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-fuchsia-600 text-white">
                       <PenNib size={20} weight="fill" />
                     </span>
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-green-700">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-green-700">
                       <span className="h-1.5 w-1.5 rounded-full bg-green-500" /> {t('write.available')}
                     </span>
                   </div>

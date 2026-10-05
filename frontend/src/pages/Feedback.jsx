@@ -11,6 +11,7 @@ import { useT } from '../i18n';
 import { displayMark } from '../lib/tcf';
 import { Seo } from '../lib/seo';
 import { trackResultView } from '../lib/analytics';
+import RateCorrection from '../components/RateCorrection';
 
 /* Same two sources the dashboard counts as speaking. */
 const SPEAKING_SOURCES = new Set(['speaking', 'conversation']);
@@ -61,21 +62,21 @@ export default function Feedback() {
       <BackLink testid="feedback-back" />
 
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold">{t('fb.title')}</h1>
+        <h1 className="text-2xl font-bold sm:text-3xl">{t('fb.title')}</h1>
         <div className="flex items-center gap-4">
           <div className="text-center">
             <p className="text-xs uppercase tracking-wide text-gray-500">{t('fb.score')}</p>
             {/* The mark the exam would print, not the grader's working 0-100:
                 a candidate reads /20, and two scales on one page is how you
                 get someone reporting a 68 to an immigration officer. */}
-            <p className="font-heading text-4xl font-bold text-primary" data-testid="overall-score">
+            <p className="font-heading text-3xl font-bold text-primary sm:text-4xl" data-testid="overall-score">
               {displayMark(sub.overall_score, sub.tcf_level) ?? '—'}
               <span className="text-xl text-gray-400">/20</span>
             </p>
           </div>
           <div className="text-center">
             <p className="text-xs uppercase tracking-wide text-gray-500">{t('fb.level')}</p>
-            <p className="font-heading text-4xl font-bold" data-testid="tcf-level">{sub.tcf_level}</p>
+            <p className="font-heading text-3xl font-bold sm:text-4xl" data-testid="tcf-level">{sub.tcf_level}</p>
           </div>
         </div>
       </div>
@@ -101,7 +102,7 @@ export default function Feedback() {
         </section>
       )}
 
-      <section className="card mt-6 p-8">
+      <section className="card mt-6 p-5 sm:p-8">
         <h2 className="mb-4 font-heading text-lg font-semibold">
           {spoken ? t('fb.annotatedSpoken') : t('fb.annotated')}
         </h2>
@@ -192,6 +193,8 @@ export default function Feedback() {
           </section>
         ))}
       </div>
+
+      <RateCorrection submissionId={sub.submission_id} />
 
       <div className="mt-8 flex flex-wrap gap-3">
         <Link to="/review" className="btn-primary">{t('fb.reviewErrors')}</Link>

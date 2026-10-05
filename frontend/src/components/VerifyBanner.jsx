@@ -76,7 +76,7 @@ export default function VerifyBanner() {
         </button>
         {/* Resending to an address typed wrong just repeats the mistake, so the
             way to correct it sits right next to the resend. */}
-        <Link to="/account/verify" className="font-semibold underline underline-offset-2">
+        <Link to="/account/verify" className="hidden font-semibold underline underline-offset-2 sm:inline">
           {t('auth.verifyManage')}
         </Link>
         <button type="button" onClick={dismiss} aria-label={t('auth.dismiss')}
