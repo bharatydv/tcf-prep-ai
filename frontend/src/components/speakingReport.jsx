@@ -52,9 +52,20 @@ export const TOKENS = {
 };
 
 /* French names for the grader's categories, as the correction table uses. */
-export const CAT_LABELS = {
-  prepositions: 'Prépositions', spelling: 'Orthographe', conjugation: 'Conjugaison',
-  gender_number: 'Accord', anglicism: 'Anglicismes', improvement: 'Améliorations C1',
+/* The error category, named for the reader.
+ *
+ * These were hardcoded French — "Accord", "Conjugaison", "Améliorations C1" —
+ * sitting in a Type column whose heading, legend and every other cell are
+ * English. The dictionary has carried the English names the whole time under
+ * `cat.*`; nothing read them. The interface speaks English and only the exam
+ * speaks French, so the category of a mistake is interface.
+ *
+ * A category the dictionary does not know falls back to its own key rather
+ * than to a blank cell: "gender_number" is ugly and is still information. */
+export const catLabel = (t, category) => {
+  const key = `cat.${category}`;
+  const label = t(key);
+  return label === key ? category : label;
 };
 
 /* Three states a row can be in, mirroring VALID_ERROR_KINDS in
@@ -236,7 +247,7 @@ export function Priorities({ errors, practiceHref }) {
               className={`flex w-full items-center gap-[11px] px-[13px] py-[11px] text-left transition hover:bg-[#faf8ff] ${isOpen ? 'bg-[#faf8ff]' : ''}`}>
               <span className={`h-[10px] w-[10px] flex-none rounded-full ${PRIORITY_DOT[i]}`} />
               <span className="flex-1 text-[13px] font-extrabold text-[#171322]">
-                {CAT_LABELS[r.category] || r.category}
+                {catLabel(t, r.category)}
               </span>
               <span className="text-[11px] text-[#64748b]">
                 {countLabel(t, r.count, 'report.oneError', 'report.nErrors')}
@@ -301,7 +312,7 @@ export function Recurring({ items, practiceHref }) {
           <div key={r.category} className="rounded-[13px] border border-[#f0e2bf] bg-white p-[14px]">
             <div className="flex items-center justify-between gap-[10px]">
               <p className="text-[13px] font-black text-[#171322]">
-                {CAT_LABELS[r.category] || r.category}
+                {catLabel(t, r.category)}
               </p>
               <span className="shrink-0 rounded-full bg-[#fff8e7] px-[7px] py-[5px] text-[10px] font-black text-[#92400e]">
                 {countLabel(t, r.times, 'report.oneTime', 'report.nTimes')}
@@ -479,11 +490,11 @@ export function ProfileCards({ criteria }) {
 /* --------------------------------------------------------------- practice --
    One button, its own card, because it is the thing the page is asking the
    reader to go and do. */
-export function PracticeCta({ practiceHref }) {
+export function PracticeCta({ practiceHref, className = '' }) {
   const t = useT();
   return (
     <section
-      className="flex flex-wrap items-center justify-between gap-[20px] rounded-[18px] border border-[#e8d5ff] bg-[image:linear-gradient(115deg,#faf5ff,#fdf2f8)] p-[22px] shadow-[0_6px_22px_rgba(35,20,70,0.05)]"
+      className={`flex flex-wrap items-center justify-between gap-[20px] rounded-[18px] border border-[#e8d5ff] bg-[image:linear-gradient(115deg,#faf5ff,#fdf2f8)] p-[22px] shadow-[0_6px_22px_rgba(35,20,70,0.05)] ${className}`}
       data-testid="practice-cta">
       <div className="min-w-0">
         <h2 className="font-heading text-[18px] font-extrabold tracking-[-0.25px] text-[#581c87]">

@@ -30,17 +30,16 @@
  * numbers at the top are the result, and a second block of criterion scores
  * under everything else read as a second, different result.
  */
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { CheckCircle, XCircle, Sparkle, Question } from '@phosphor-icons/react';
 import { SpeakButton } from './SpeakButton';
 import { OwnVoiceButton } from './OwnVoiceButton';
-import { CorrectionText } from './CorrectionText';
+import CorrectionsTable, { rankErrors } from './CorrectionsTable';
 import { RecordingPlayer } from './RecordingPlayer';
 import { TranscriptDiff, candidateText } from './TranscriptDiff';
 import {
   ResultHero, DidWell, Priorities, Recurring, Progress, Vocabulary,
-  NextStep, PracticeCta, Panel, TOKENS, CAT_LABELS, KIND_TONE,
-  KIND_ROW, KIND_LABEL,
+  NextStep, PracticeCta, Panel,
 } from './speakingReport';
 import { useOwnVoice } from '../lib/ownVoice';
 import { findClip } from '../lib/speechClips';
@@ -52,48 +51,9 @@ import RateCorrection from './RateCorrection';
 // is advice you cannot act on until you have heard the vowel done right.
 const ISSUE_KEYS = ['vowel', 'nasal', 'liaison', 'consonant', 'stress', 'rhythm'];
 
-/* How much an error costs, mirroring VALID_SEVERITIES in backend/server.py.
-   Absent on a correction the grader did not weigh, which is why there is no
-   default entry here to fall back to. */
-const SEVERITY_TONE = {
-  major: 'bg-[#fff1f2] text-[#b91c1c]',
-  moderate: 'bg-[#fff8e7] text-[#92400e]',
-  minor: 'bg-[#f1f5f9] text-[#64748b]',
-};
-
-/* One cell, the prototype's padding and rule. Named because it is repeated
-   five times a row and a table whose columns disagree about their padding by
-   a pixel is a table that looks slightly broken and cannot be pointed at. */
-const CELL = 'border-b border-[#e7e2f2] px-[13px] py-[14px] align-top text-[12px] break-words';
-
-/* What turns one <td> into a labelled line of a card below lg.
- *
- * The same cells, restyled — not a second copy of the rows. Two copies would
- * mean two play buttons carrying the same id, and the synthesiser keys on the
- * id: pressing one would stop the other. The column heading comes back as the
- * label through `data-label`, so nothing on the row loses its name when the
- * header row goes away. */
-const STACK = 'max-lg:block max-lg:w-full max-lg:border-b-0 max-lg:px-[14px] max-lg:pb-0 max-lg:pt-[10px] max-lg:before:mb-[4px] max-lg:before:block max-lg:before:text-[9px] max-lg:before:font-bold max-lg:before:uppercase max-lg:before:tracking-[0.06em] max-lg:before:text-[#64748b] max-lg:before:content-[attr(data-label)]';
-
-/* The columns, as shares of the card rather than pixels, so the table is
-   always exactly as wide as the space it has. Written out as whole class
-   names because Tailwind's JIT reads this file for literals — see the note in
-   speakingReport. The Remember column only exists when something fills it,
-   and the other four widen to take back its share. */
-const COLUMNS = (hasRemember) => (hasRemember
-  ? [['speak.colSaid', 'w-[19%]'], ['speak.colFix', 'w-[19%]'],
-     ['speak.colType', 'w-[12%]'], ['speak.colWhy', 'w-[26%]'],
-     ['report.colRemember', 'w-[24%]']]
-  : [['speak.colSaid', 'w-[24%]'], ['speak.colFix', 'w-[24%]'],
-     ['speak.colType', 'w-[14%]'], ['speak.colWhy', 'w-[38%]']]);
-
 /* Where "Practice my mistakes" goes. A plain href rather than a router Link:
    this component deliberately imports no react-router — see speakingReport. */
 const PRACTICE_HREF = '/review';
-
-/* How many corrections are shown before "View all". Enough to be worth
-   reading, few enough that the page does not open with twenty rows. */
-const IMPORTANT_COUNT = 5;
 
 /* The whole answer, played back as it was actually spoken.
  *
@@ -113,33 +73,6 @@ const IMPORTANT_COUNT = 5;
  */
 const FULL_RECORDING_TACHES = [1, 3];
 
-/* Highest-impact first.
- *
- * The grader returns its errors in the order they were said, which is the one
- * order that carries no information about which of them matters. A real
- * mistake outranks a stylistic suggestion, and a major outranks a minor —
- * both are stated per row now, so the page can sort by them instead of
- * hoping the reader works it out.
- *
- * A row the grader did not label sits with the errors rather than below the
- * upgrades: an unlabelled row is an old result, and every row on an old
- * result was a mistake.
- */
-const KIND_RANK = { error: 0, better: 1, upgrade: 2 };
-const SEVERITY_RANK = { major: 0, moderate: 1, minor: 2 };
-
-export function rankErrors(errors) {
-  return (errors || [])
-    .map((e, at) => ({ e, at }))
-    .sort((a, b) => {
-      const kind = (KIND_RANK[a.e.kind] ?? 0) - (KIND_RANK[b.e.kind] ?? 0);
-      if (kind) return kind;
-      const sev = (SEVERITY_RANK[a.e.severity] ?? 1) - (SEVERITY_RANK[b.e.severity] ?? 1);
-      if (sev) return sev;
-      return a.at - b.at;   // stable: the order they were said decides the rest
-    });
-}
-
 // `taskType` says which tâche this is, which decides whether the whole
 // recording is offered below. See FULL_RECORDING_TACHES.
 export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) {
@@ -148,7 +81,6 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
      and 2 for a while (heard, not read, like the exam), but a correction of a
      sentence you cannot see is the part of the report that teaches least. */
   const showTranscript = true;
-  const [showAll, setShowAll] = useState(false);
   /* The candidate's own voice, for the left-hand column. Needs three things
      that are each allowed to be missing — a kept recording, word timings from
      the transcriber, and a phrase that can be found among them — so every
@@ -185,11 +117,6 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
      whether to ask for it at all. */
   const playWholeAnswer = Boolean(result.has_audio) && Boolean(result.submission_id)
     && FULL_RECORDING_TACHES.includes(Number(taskType));
-  const rows = showAll ? ranked : ranked.slice(0, IMPORTANT_COUNT);
-  const hasMore = ranked.length > IMPORTANT_COUNT;
-  /* Over every correction rather than the five on screen, so the table does
-     not gain a column halfway down "View all". */
-  const hasRemember = ranked.some(({ e }) => e.remember);
 
   return (
     <div className="space-y-5">
@@ -232,144 +159,12 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
 
           Sized to break out of the prose column: the page is centred and the
           margin either side is empty, so from xl up the table takes it. */}
-      {ranked.length > 0 && (
-        <section className={TOKENS.card} data-testid="corrections-table">
-          <h2 className={TOKENS.title}>{t('report.corrections')}</h2>
-          {/* The subtitle names the Remember column, so it only says so
-              when there is one to name. */}
-          <p className={TOKENS.desc}>
-            {t(hasRemember ? 'report.correctionsSub' : 'report.correctionsSubPlain')}
-          </p>
-
-          {/* The legend earns its place the moment a row can be something
-              other than a mistake: without it "Upgrade" reads as a fourth
-              severity. */}
-          <div className="mb-[12px] mt-[15px] flex flex-wrap items-center justify-between gap-[12px]">
-            <div className="flex flex-wrap gap-[7px]">
-              {Object.keys(KIND_TONE).map((k) => (
-                <span key={k} className={`${TOKENS.badge} ${KIND_TONE[k]}`}>
-                  {t(KIND_LABEL[k])}
-                </span>
-              ))}
-            </div>
-            <span className="text-[11px] text-[#64748b]">
-              {t('report.countSummary', { shown: rows.length, total: ranked.length })}
-            </span>
-          </div>
-
-          {/* It never scrolls sideways. The columns are shares of the card
-              rather than pixel widths, so the whole of every row is on screen
-              at every width — a table you have to drag is a table whose last
-              two columns most people never learn are there.
-
-              Below lg the same cells become a stacked card, labelled by the
-              heading each one lost. Not the old folding, which dropped "Why"
-              and "Remember" and so dropped the two columns the table exists
-              for: nothing is hidden here, it is only laid out downwards. */}
-          <div className="rounded-[14px] border border-[#e7e2f2] max-lg:border-0">
-            <table className="w-full table-fixed border-collapse max-lg:block">
-              <thead className="max-lg:hidden">
-                <tr>
-                  {COLUMNS(hasRemember).map(([key, width]) => (
-                    <th key={key}
-                      className={`${width} border-b border-[#e7e2f2] bg-[#faf8ff] px-[13px] py-[12px] text-left text-[10px] font-bold uppercase tracking-[0.06em] text-[#64748b]`}>
-                      {t(key)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="max-lg:block lg:[&>tr:last-child>td]:border-b-0">
-                {rows.map(({ e, at }) => (
-                  <tr key={at}
-                    className={`${KIND_ROW[e.kind] || ''} max-lg:mb-[10px] max-lg:block max-lg:rounded-[14px] max-lg:border max-lg:border-[#e7e2f2] max-lg:pb-[12px] max-lg:last:mb-0`}>
-                    {/* No wash of colour across the cell. The tint said
-                        "this whole side is wrong", which is not what a
-                        correction means — the wrong part is a word or two
-                        inside an otherwise fine phrase, and that is what is
-                        marked now. */}
-                    <td data-label={t('speak.colSaid')} className={`${CELL} ${STACK}`}>
-                      <span className="flex flex-wrap items-center gap-1.5">
-                        <CorrectionText said={e.error} correction={e.correction} side="said" />
-                        {/* Both sides are playable, not just the right one. A
-                            speaker who cannot hear the difference between what
-                            they said and what they should have said cannot fix
-                            it, and the correction alone leaves them comparing a
-                            sound to a spelling.
-
-                            The left one plays the candidate's own recording
-                            where it can be found, and only falls back to the
-                            synthesiser where it cannot — a machine reading
-                            your mistake back to you in a clean accent is the
-                            least useful way to hear it. */}
-                        {clips[at]
-                          ? <OwnVoiceButton clip={clips[at]} id={`${idPrefix}said-${at}`} {...own} />
-                          : <SpeakButton text={e.error} id={`${idPrefix}said-${at}`} {...tts} />}
-                      </span>
-                    </td>
-                    <td data-label={t('speak.colFix')} className={`${CELL} ${STACK}`}>
-                      <span className="flex flex-wrap items-center gap-1.5">
-                        <CorrectionText said={e.error} correction={e.correction} side="fix" />
-                        <SpeakButton text={e.correction} id={`${idPrefix}fix-${at}`} {...tts} />
-                      </span>
-                    </td>
-                    {/* Stacked, not in a row: pills side by side are what
-                        forces this column wide. */}
-                    <td data-label={t('speak.colType')} className={`${CELL} ${STACK}`}>
-                      <span className="flex flex-wrap items-center gap-[6px] lg:flex-col lg:items-start">
-                        {/* What to do about it, added above what it costs.
-                            Absent on an old result, which had no such field
-                            and on which every row was a mistake. */}
-                        {KIND_TONE[e.kind] && (
-                          <span className={`${TOKENS.badge} ${KIND_TONE[e.kind]}`}>
-                            {t(KIND_LABEL[e.kind])}
-                          </span>
-                        )}
-                        {SEVERITY_TONE[e.severity] && (
-                          <span className={`${TOKENS.badge} ${SEVERITY_TONE[e.severity]}`}>
-                            {t(`speak.severity.${e.severity}`)}
-                          </span>
-                        )}
-                        <span className="text-[10px] text-[#64748b]">
-                          {CAT_LABELS[e.category] || e.category}
-                        </span>
-                      </span>
-                    </td>
-                    <td data-label={t('speak.colWhy')}
-                      className={`${CELL} ${STACK} leading-[1.5] text-[#334155]`}>
-                      {e.explanation}
-                    </td>
-                    {/* The rule, not the explanation again. Its own box
-                        because it is the one thing on the row worth carrying
-                        out of the page. */}
-                    {/* Only when at least one correction carries a rule.
-                        A grader that returned none — and every result graded
-                        before the field existed returned none — used to get a
-                        headed column of five empty cells, which reads as the
-                        page having lost something rather than as the grader
-                        never having said it. */}
-                    {hasRemember && (
-                      <td data-label={t('report.colRemember')} className={`${CELL} ${STACK}`}>
-                        {e.remember && (
-                          <span className="block rounded-[10px] border border-[#e4d8ff] bg-[#f5f0ff] p-[10px] leading-[1.45] text-[#4c1d95]">
-                            {e.remember}
-                          </span>
-                        )}
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {hasMore && (
-            <button type="button" onClick={() => setShowAll((v) => !v)}
-              data-testid="toggle-corrections"
-              className={`${TOKENS.secondary} mt-[12px] w-full`}>
-              {showAll ? t('report.viewFewer') : t('report.viewAll')}
-            </button>
-          )}
-        </section>
-      )}
+      {/* The corrections, in the table every screen in the app reads them
+          in — see CorrectionsTable. Sized to break out of the prose column:
+          the page is centred and the margin either side is empty, so from xl
+          up the table takes it. */}
+      <CorrectionsTable errors={result.errors} tts={tts} clips={clips} own={own}
+        idPrefix={idPrefix} />
 
       {/* The answer, twice, side by side.
           Stacking the transcript above the corrected version meant comparing
@@ -519,4 +314,5 @@ export function SpeakingResult({ result, tts, idPrefix = '', taskType = null }) 
   );
 }
 
+export { rankErrors };
 export default SpeakingResult;

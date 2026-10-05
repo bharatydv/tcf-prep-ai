@@ -110,10 +110,14 @@ describe('SpeakingResult', () => {
   it('counts priorities from real mistakes only, never from style', () => {
     const page = mount(RESULT);
     const box = page.find('top-priorities');
-    expect(box.textContent).toMatch(/Conjugaison/);
-    expect(box.textContent).toMatch(/Prépositions/);
+    // Named in English, like the rest of the interface. The category of a
+    // mistake is something the page says about the answer, not part of the
+    // answer — only the French being corrected stays French.
+    expect(box.textContent).toMatch(/Conjugation/);
+    expect(box.textContent).toMatch(/Prepositions/);
+    expect(box.textContent).not.toMatch(/Conjugaison|Prépositions/);
     // The 'improvement'/'upgrade' row must not become a thing to go and fix.
-    expect(box.textContent).not.toMatch(/Améliorations/);
+    expect(box.textContent).not.toMatch(/improvements/i);
     page.unmount();
   });
 

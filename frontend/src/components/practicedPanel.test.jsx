@@ -9,7 +9,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nProvider } from '../i18n';
 import PracticedPanel from './PracticedPanel';
-import { displayMark, nclcFromMark } from '../lib/tcf';
+import { displayMark } from '../lib/tcf';
 
 jest.mock('../lib/api', () => ({
   api: { get: jest.fn(), post: jest.fn() },
@@ -81,25 +81,29 @@ describe('PracticedPanel', () => {
     unmount();
   });
 
-  it('reports the latest attempt as practised, with its mark and CLB band', () => {
+  it('reports the latest attempt as practised, with its level and mark', () => {
     const rows = [attempt('s2', 'B2', 62, '2026-10-02T09:00:00Z'),
                   attempt('s1', 'B1', 48, '2026-09-30T09:00:00Z')];
     const { host, unmount } = mount({ attempts: rows });
     const mark = displayMark(62, 'B2');
     expect(host.textContent).toContain('Practiced');
     expect(host.textContent).toContain(`B2 · ${mark}/20`);
-    expect(host.querySelector('[data-testid="p-clb"]').textContent)
-      .toBe(`CLB ${nclcFromMark(mark)}`);
     // The newest attempt is the standing grade; the older B1 is behind it.
     expect(host.textContent).not.toContain('B1 · ');
     unmount();
   });
 
-  it('says so when the mark converts to nothing the official table publishes', () => {
+  /* The CLB band is the dashboard's, and only the dashboard's: it is read
+     across all four skills, and one tâche of one theme question cannot say
+     what it is. This panel reports what it actually knows about that answer —
+     the CEFR level the grader gave it and the mark out of 20. */
+  it('does not claim a CLB level from a single tâche', () => {
     const { host, unmount } = mount({
       attempts: [attempt('s1', 'A1', 10, '2026-10-02T09:00:00Z')],
     });
-    expect(host.querySelector('[data-testid="p-clb"]').textContent).toBe('Below CLB 4');
+    expect(host.textContent).toContain('Practiced');
+    expect(host.textContent).not.toContain('CLB');
+    expect(host.querySelector('[data-testid="p-clb"]')).toBeNull();
     unmount();
   });
 
