@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Timer, WarningCircle, SignOut, PenNib } from '@phosphor-icons/react';
 import { toast } from 'sonner';
-import { api, errMsg, CATEGORY_META } from '../lib/api';
+import { api, errMsg } from '../lib/api';
 import { WRITING_TASKS, WRITING_TOTAL_SECONDS, displayMark, nclcFromMark } from '../lib/tcf';
 import { monthLabel } from '../lib/speakingExam';
 import ExamSetRow from '../components/ExamSetRow';
+import CorrectionsTable from '../components/CorrectionsTable';
 import { useAuth } from '../context/AuthContext';
 import { formatDateTime, useT } from '../i18n';
 import { Seo } from '../lib/seo';
@@ -319,40 +320,21 @@ export default function ExamSimulator() {
             </section>
           );
         })}
-        <section className="card mt-6 p-6">
-          <h2 className="font-heading text-xl font-semibold">{t('sim.allErrors')}</h2>
-          {Object.entries(CATEGORY_META).map(([key, meta]) => {
-            const errs = [1, 2, 3].flatMap((i) => (attempt[`task${i}`]?.analysis.errors || []).filter((e) => e.category === key));
-            if (!errs.length) return null;
-            return (
-              <div key={key} className="mt-5">
-                <span className="pill" style={{ background: meta.color }}>{meta.label} · {errs.length}</span>
-                <ul className="mt-2 divide-y divide-gray-100 sm:hidden">
-                  {errs.map((e, j) => (
-                    <li key={j} className="py-3">
-                      <p className="text-sm text-red-600">{e.error}</p>
-                      <p className="mt-1 text-sm font-medium text-green-700">{e.correction}</p>
-                      <p className="mt-1 text-sm leading-relaxed text-gray-600">{e.explanation}</p>
-                    </li>
-                  ))}
-                </ul>
-                <div className="mt-2 hidden overflow-x-auto sm:block">
-                  <table className="w-full min-w-[34rem] text-sm">
-                    <tbody>
-                      {errs.map((e, j) => (
-                        <tr key={j} className="border-b border-gray-100 align-top">
-                          <td className="py-2 pr-3 text-red-600">{e.error}</td>
-                          <td className="py-2 pr-3 font-medium text-green-700">{e.correction}</td>
-                          <td className="py-2 text-gray-600">{e.explanation}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            );
-          })}
-        </section>
+        {/* Every correction of the sitting, in the table the speaking result
+            uses — see CorrectionsTable.
+
+            It was a list grouped by category: the mistake, the fix and the
+            explanation, in three bare columns, with the same correction
+            looking different here and on the speaking page an hour later.
+            Grouping by category also buried the ranking that matters — a
+            major error and a stylistic upgrade sat side by side under one
+            heading, in the order they were written. The table says which is
+            which, puts the worst first, and carries the rule to remember. */}
+        <CorrectionsTable
+          className="mt-6"
+          testid="sim-corrections"
+          title={t('sim.allErrors')}
+          errors={[1, 2, 3].flatMap((i) => attempt[`task${i}`]?.analysis?.errors || [])} />
         <div className="mt-8 flex flex-wrap gap-3">
           <Link to="/review" className="btn-primary">{t('sim.reviewErrors')}</Link>
           <Link to="/dashboard" className="btn-outline">{t('common.dashboard')}</Link>

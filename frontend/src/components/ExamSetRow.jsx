@@ -31,16 +31,21 @@ const ACCENT = {
   none: 'bg-gradient-to-b from-pink-500 to-fuchsia-600',
 };
 
-/* The line under the title. A finished paper shows its CLB level and its mark
-   out of 20 — the two numbers the real Expression orale result gives. */
+/* The line under the title. A finished paper shows that it is finished and
+   the mark it earned.
+
+   It used to carry the CLB band too. That band is now the dashboard's job
+   and only the dashboard's: a level printed on a single paper reads as the
+   candidate's level, and it is not — a level is the lowest of four skills
+   over everything they have done, which is a question a card about one
+   paper cannot answer. The mark stays, because that IS about this paper. */
 function CardStatus({ result, icon: Icon, metaKey }) {
   const t = useT();
   if (result?.state === 'done') {
     return (
       <span className="mt-1 flex items-center gap-1.5 text-xs" data-testid="set-result">
         <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-extrabold text-emerald-700">
-          {result.nclc ? t('sexam.cardClb', { n: result.nclc })
-            : result.mark != null ? t('sexam.cardBelow') : t('sexam.cardCompleted')}
+          {t('sexam.cardCompleted')}
         </span>
         {result.mark != null && (
           <span className="font-semibold text-gray-500">{result.mark}/20</span>

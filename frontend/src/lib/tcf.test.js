@@ -2,6 +2,7 @@
    is the one place a rounding slip would rewrite every number on screen. */
 import {
   markOutOf20, displayMark, markFromCorrect, nclcFromMark, levelFromScore,
+  clbFromComprehension, TCF_COMPREHENSION_TOTAL,
 } from './tcf';
 
 describe('markOutOf20', () => {
@@ -89,5 +90,62 @@ describe('levelFromScore', () => {
     expect(levelFromScore(null)).toBeNull();
     expect(levelFromScore(undefined)).toBeNull();
     expect(levelFromScore('n/a')).toBeNull();
+  });
+});
+
+/* Compréhension écrite and orale are reported on the paper's own 699-point
+   scale, and each skill has its own published CLB chart. The two differ in
+   the middle, which is exactly the kind of difference a shared ladder would
+   quietly flatten — so both boundaries are pinned here. */
+describe('clbFromComprehension', () => {
+  it('matches the published reading chart at every boundary', () => {
+    expect(clbFromComprehension(699, 'reading')).toBe('10+');
+    expect(clbFromComprehension(549, 'reading')).toBe('10+');
+    expect(clbFromComprehension(548, 'reading')).toBe('9');
+    expect(clbFromComprehension(524, 'reading')).toBe('9');
+    expect(clbFromComprehension(523, 'reading')).toBe('8');
+    expect(clbFromComprehension(499, 'reading')).toBe('8');
+    expect(clbFromComprehension(498, 'reading')).toBe('7');
+    expect(clbFromComprehension(453, 'reading')).toBe('7');
+    expect(clbFromComprehension(452, 'reading')).toBe('6');
+    expect(clbFromComprehension(406, 'reading')).toBe('6');
+    expect(clbFromComprehension(405, 'reading')).toBe('5');
+    expect(clbFromComprehension(375, 'reading')).toBe('5');
+    expect(clbFromComprehension(374, 'reading')).toBe('4');
+    expect(clbFromComprehension(342, 'reading')).toBe('4');
+  });
+
+  it('matches the published listening chart, which is not the reading one', () => {
+    expect(clbFromComprehension(549, 'listening')).toBe('10+');
+    expect(clbFromComprehension(523, 'listening')).toBe('9');
+    expect(clbFromComprehension(503, 'listening')).toBe('8');
+    expect(clbFromComprehension(458, 'listening')).toBe('7');
+    expect(clbFromComprehension(398, 'listening')).toBe('6');
+    expect(clbFromComprehension(369, 'listening')).toBe('5');
+    expect(clbFromComprehension(331, 'listening')).toBe('4');
+    // The two skills genuinely diverge in the middle of the table.
+    expect(clbFromComprehension(500, 'reading')).toBe('8');
+    expect(clbFromComprehension(500, 'listening')).toBe('7');
+    expect(clbFromComprehension(400, 'reading')).toBe('5');
+    expect(clbFromComprehension(400, 'listening')).toBe('6');
+  });
+
+  it('publishes nothing below the bottom of the chart', () => {
+    expect(clbFromComprehension(341, 'reading')).toBeNull();
+    expect(clbFromComprehension(330, 'listening')).toBeNull();
+    expect(clbFromComprehension(0, 'reading')).toBeNull();
+  });
+
+  it('answers null for a skill with no chart, and for no score', () => {
+    expect(clbFromComprehension(600, 'writing')).toBeNull();
+    expect(clbFromComprehension(600, 'speaking')).toBeNull();
+    expect(clbFromComprehension(null, 'reading')).toBeNull();
+    expect(clbFromComprehension(undefined, 'reading')).toBeNull();
+    expect(clbFromComprehension('', 'reading')).toBeNull();
+  });
+
+  it('agrees with the paper it is read off', () => {
+    // 4x3 + 6x9 + 9x15 + 10x21 + 6x26 + 4x33
+    expect(TCF_COMPREHENSION_TOTAL).toBe(699);
   });
 });

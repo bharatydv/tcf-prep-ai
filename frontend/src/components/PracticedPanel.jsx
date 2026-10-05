@@ -9,7 +9,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { CheckCircle, MagnifyingGlass } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, errMsg } from '../lib/api';
-import { displayMark, nclcFromMark } from '../lib/tcf';
+import { displayMark } from '../lib/tcf';
 import AttemptHistory from './AttemptHistory';
 import { SpeakingResult } from './SpeakingResult';
 import { useT } from '../i18n';
@@ -107,7 +107,6 @@ export default function PracticedPanel({
   if (!latest) return null;
 
   const mark = displayMark(latest.overall_score, latest.tcf_level);
-  const clb = nclcFromMark(mark);
   const shown = selected ? cache[selected] : null;
 
   return (
@@ -119,12 +118,6 @@ export default function PracticedPanel({
         </span>
         <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-primary shadow-sm">
           {latest.tcf_level} · {mark ?? '—'}/20
-        </span>
-        {/* The band the real paper reports, from the same conversion table
-            Test Mode uses — see nclcFromMark in lib/tcf.js. */}
-        <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-bold text-green-700"
-          data-testid={`${testid}-clb`}>
-          {clb ? t('sexam.clb', { level: clb }) : t('sexam.clbBelow')}
         </span>
         <button type="button" onClick={toggle} data-testid={`${testid}-review`}
           className="ml-auto inline-flex min-h-[40px] items-center gap-1.5 px-1 text-xs font-semibold text-primary underline">

@@ -42,18 +42,30 @@ function mount(result) {
 }
 
 describe('ExamSetCard', () => {
-  it('shows the CLB level and the mark of a finished paper', () => {
+  it('shows that a finished paper is done, and the mark it earned', () => {
     const card = mount({ state: 'done', mark: 14, nclc: 8 });
     expect(card.host.querySelector('[data-state="done"]')).not.toBeNull();
-    expect(card.host.textContent).toContain('CLB 8');
+    expect(card.host.textContent).toContain('Completed');
     expect(card.host.textContent).toContain('14/20');
     card.unmount();
   });
 
-  it('says so when a finished paper is below CLB 4', () => {
-    const card = mount({ state: 'done', mark: 3, nclc: null });
-    expect(card.host.textContent).toContain('Below CLB 4');
-    card.unmount();
+  /* A level belongs to the candidate, not to a paper.
+     The card used to print the CLB band of whatever sitting it was, which
+     reads as "this is your level" — and a level is the lowest of four skills
+     across everything someone has done, which a card about one paper cannot
+     know. The dashboard answers that; this card answers "how did this paper
+     go". `sittingResult` still computes the band, so nothing downstream
+     loses it. */
+  it('never prints a CLB band, however the paper went', () => {
+    const strong = mount({ state: 'done', mark: 18, nclc: '10+' });
+    expect(strong.host.textContent).not.toContain('CLB');
+    strong.unmount();
+
+    const weak = mount({ state: 'done', mark: 3, nclc: null });
+    expect(weak.host.textContent).not.toContain('CLB');
+    expect(weak.host.textContent).toContain('3/20');
+    weak.unmount();
   });
 
   it('shows how far a paper in progress has got', () => {

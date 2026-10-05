@@ -598,11 +598,6 @@ export default function SpeakingExam() {
                   <p className="font-heading text-3xl font-extrabold" data-testid="paper-mark">
                     {paperMark.mark}<span className="text-xl text-white/70">/20</span>
                   </p>
-                  <span className="rounded-full bg-white/20 px-3 py-1 text-sm font-bold" data-testid="paper-clb">
-                    {paperMark.nclc
-                      ? t('sexam.clb', { level: paperMark.nclc })
-                      : t('sexam.clbBelow')}
-                  </span>
                 </div>
               )}
               <p className="mt-1 text-sm text-white/90">{t('sexam.doneSub', { levels: levels.join(' · ') })}</p>

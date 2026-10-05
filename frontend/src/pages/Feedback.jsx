@@ -4,14 +4,13 @@ import { toast } from 'sonner';
 import { api, errMsg, CATEGORY_META } from '../lib/api';
 import { BackLink, ErrorHighlightedText } from '../components/shared';
 import { RecordingPlayer } from '../components/RecordingPlayer';
-import { SpeakButton } from '../components/SpeakButton';
-import { CorrectionText } from '../components/CorrectionText';
 import { useSpeak } from '../lib/speak';
 import { useT } from '../i18n';
 import { displayMark } from '../lib/tcf';
 import { Seo } from '../lib/seo';
 import { trackResultView } from '../lib/analytics';
 import RateCorrection from '../components/RateCorrection';
+import CorrectionsTable from '../components/CorrectionsTable';
 
 /* Same two sources the dashboard counts as speaking. */
 const SPEAKING_SOURCES = new Set(['speaking', 'conversation']);
@@ -122,73 +121,49 @@ export default function Feedback() {
         <p className="mt-4 text-xs text-gray-400">{t('fb.hoverHint')}</p>
       </section>
 
-      {Object.entries(byCat).map(([cat, errs]) => (
-        <section key={cat} className="card mt-6 overflow-hidden">
-          <div className="px-6 py-3 font-heading font-semibold" style={{ background: CATEGORY_META[cat]?.color }}>
-            {CATEGORY_META[cat]?.label} ({errs.length})
-          </div>
-          {/* Phones: one stacked block per error. */}
-          <ul className="divide-y divide-gray-100 sm:hidden">
-            {errs.map((e, i) => (
-              <li key={i} className="px-4 py-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t('fb.colError')}</p>
-                {/* Both sides are playable. What was said and what should have
-                    been said only become a lesson when they can be heard one
-                    after the other — the same reason the speaking result plays
-                    both, and the same button doing it. */}
-                <p className="mt-0.5 flex items-start gap-2 text-sm">
-                  <CorrectionText said={e.error} correction={e.correction} side="said" />
-                  <SpeakButton text={e.error} id={`m-${cat}-err-${i}`} {...tts} />
-                </p>
-                <p className="mt-2.5 text-xs font-semibold uppercase tracking-wide text-gray-400">{t('fb.colCorrection')}</p>
-                <p className="mt-0.5 flex items-start gap-2 text-sm">
-                  <CorrectionText said={e.error} correction={e.correction} side="fix" />
-                  <SpeakButton text={e.correction} id={`m-${cat}-fix-${i}`} {...tts} />
-                </p>
-                <p className="mt-2.5 text-xs font-semibold uppercase tracking-wide text-gray-400">{t('fb.colExplanation')}</p>
-                <p className="mt-0.5 text-sm leading-relaxed text-gray-600">{e.explanation}</p>
-              </li>
-            ))}
-          </ul>
-          {/* sm and up: the table, in a container that scrolls rather than clips. */}
-          <div className="hidden overflow-x-auto sm:block">
-            <table className="w-full min-w-[36rem] text-sm">
-              <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
-                <tr><th className="px-6 py-2">{t('fb.colError')}</th><th className="px-6 py-2">{t('fb.colCorrection')}</th><th className="px-6 py-2">{t('fb.colExplanation')}</th></tr>
-              </thead>
-              <tbody>
-                {errs.map((e, i) => (
-                  <tr key={i} className="border-t border-gray-100 align-top">
-                    {/* Only the words that changed carry colour. The whole
-                        cell in red said the whole phrase was wrong, when
-                        usually one word in it is. */}
-                    <td className="px-6 py-3">
-                      <span className="flex items-start gap-2">
-                        <CorrectionText said={e.error} correction={e.correction} side="said" />
-                        <SpeakButton text={e.error} id={`d-${cat}-err-${i}`} {...tts} />
-                      </span>
-                    </td>
-                    <td className="px-6 py-3">
-                      <span className="flex items-start gap-2">
-                        <CorrectionText said={e.error} correction={e.correction} side="fix" />
-                        <SpeakButton text={e.correction} id={`d-${cat}-fix-${i}`} {...tts} />
-                      </span>
-                    </td>
-                    <td className="px-6 py-3 text-gray-600">{e.explanation}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ))}
+      {/* The corrections, in the table every result in the app reads them
+          in — see CorrectionsTable.
+
+          This was one three-column table per category: the mistake, the fix,
+          the explanation. It lost the three things the grader actually says
+          about a correction — whether it is a mistake or a style suggestion,
+          what it costs, and the rule worth carrying away — and it grouped by
+          category, which sets a major error beside an optional upgrade with
+          nothing to tell them apart. The same words, graded the same way,
+          also looked like two different products depending on whether they
+          had been written or spoken. */}
+      <CorrectionsTable
+        className="mt-6"
+        testid="feedback-corrections"
+        errors={sub.errors}
+        tts={tts}
+        idPrefix="fb-" />
 
       <div className="mt-6 grid gap-6 md:grid-cols-3">
         {[['fb.suggestions', sub.improvement_suggestions], ['fb.linkingWords', sub.linking_words], ['fb.vocabulary', sub.vocabulary_suggestions]].map(([titleKey, items]) => (
           <section key={titleKey} className="card p-6">
             <h3 className="font-heading font-semibold">{t(titleKey)}</h3>
             <ul className="mt-3 space-y-2 text-sm text-gray-700">
-              {(items || []).length ? items.map((s, i) => <li key={i} className="flex gap-2"><span className="text-primary">•</span>{s}</li>) : <li className="text-gray-400">—</li>}
+              {/* A vocabulary suggestion is {phrase, meaning}; the other two
+                  lists are plain strings. Rendering the object straight into
+                  the <li> threw "Objects are not valid as a React child" and
+                  took the whole page down — so every graded answer whose
+                  grader returned the glossed shape, which is what it is asked
+                  for, had no feedback page at all. */}
+              {(items || []).length ? items.map((item, i) => {
+                const text = typeof item === 'string' ? item : item?.phrase;
+                const gloss = typeof item === 'string' ? '' : item?.meaning;
+                if (!text) return null;
+                return (
+                  <li key={i} className="flex gap-2">
+                    <span className="text-primary">•</span>
+                    <span>
+                      {text}
+                      {gloss && <span className="text-gray-400"> · {gloss}</span>}
+                    </span>
+                  </li>
+                );
+              }) : <li className="text-gray-400">—</li>}
             </ul>
           </section>
         ))}

@@ -228,6 +228,43 @@ export const LEVEL_COLUMNS = ['A1', 'A2', 'B1', 'B2', 'C1/C2'];
 export const levelColumn = (level) =>
   (level === 'C1' || level === 'C2' ? 4 : LEVEL_COLUMNS.indexOf(level));
 
+/* ---------------------------------------------------------------------------
+ * Compréhension écrite and orale: the 699-point scale, and the CLB it reads as.
+ *
+ * These two papers are not marked out of 39. The official TCF weights every
+ * item by its difficulty — the four easiest are worth 3 points each and the
+ * four hardest 33 — and the paper totals 699. "28/39" and a weighted 512 are
+ * not the same statement about a candidate: twenty easy answers and twenty
+ * hard ones are the same count and nowhere near the same result.
+ *
+ * The weighting is done on the server, where the answer key is (see
+ * tcf_comprehension_score in backend/server.py); what is here is the published
+ * conversion from that score to the NCLC/CLB level, which is what the exam
+ * reports and what an immigration file is read on.
+ *
+ * The two skills have their own bands — listening is slightly more generous
+ * in the middle — so they are separate tables rather than one shared ladder.
+ * Floors, highest first. Below the last floor the official chart publishes
+ * nothing, so neither does this.
+ */
+export const TCF_COMPREHENSION_TOTAL = 699;
+
+const COMPREHENSION_CLB = {
+  reading: [[549, '10+'], [524, '9'], [499, '8'], [453, '7'],
+            [406, '6'], [375, '5'], [342, '4']],
+  listening: [[549, '10+'], [523, '9'], [503, '8'], [458, '7'],
+              [398, '6'], [369, '5'], [331, '4']],
+};
+
+export function clbFromComprehension(score, skill) {
+  const table = COMPREHENSION_CLB[skill];
+  if (!table) return null;
+  const n = score === null || score === undefined || score === '' ? NaN : Number(score);
+  if (!Number.isFinite(n)) return null;
+  const band = table.find(([floor]) => n >= floor);
+  return band ? band[1] : null;
+}
+
 /* The NCLC/CLB level a mark out of 20 converts to, or null below the table. */
 export function nclcFromMark(mark) {
   if (!Number.isFinite(mark)) return null;

@@ -945,6 +945,14 @@ class ReadingAttempt(Base):
     answers: Mapped[Any] = mapped_column(JSONB, default=dict)
     score: Mapped[int] = mapped_column(Integer, default=0)
     total: Mapped[int] = mapped_column(Integer, default=0)
+    # The paper's own score out of 699, weighted by item difficulty.
+    #
+    # `score` is the count of right answers, which is what the review screen
+    # needs and what nobody is reported. See tcf_comprehension_score: the real
+    # paper weights each item by where it sits, and the CLB level is read off
+    # that 699-point scale, not off a count out of 39. NULL only on an attempt
+    # whose answers could not be rescored.
+    tcf_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     time_used_seconds: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), index=True)
@@ -963,6 +971,14 @@ class ListeningAttempt(Base):
     answers: Mapped[Any] = mapped_column(JSONB, default=dict)
     score: Mapped[int] = mapped_column(Integer, default=0)
     total: Mapped[int] = mapped_column(Integer, default=0)
+    # The paper's own score out of 699, weighted by item difficulty.
+    #
+    # `score` is the count of right answers, which is what the review screen
+    # needs and what nobody is reported. See tcf_comprehension_score: the real
+    # paper weights each item by where it sits, and the CLB level is read off
+    # that 699-point scale, not off a count out of 39. NULL only on an attempt
+    # whose answers could not be rescored.
+    tcf_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     time_used_seconds: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), index=True)
@@ -6170,6 +6186,35 @@ MIGRATIONS = [
     "UPDATE users SET password_set = TRUE WHERE password_set IS NULL",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS level VARCHAR(16) DEFAULT ''",
 
+    # ---- comprehension papers, on the scale the exam reports --------------
+    # See ReadingAttempt.tcf_score.
+    "ALTER TABLE reading_attempts ADD COLUMN IF NOT EXISTS tcf_score INTEGER",
+    # Rescored from the answers each attempt already stores, so a paper sat
+    # before this is reported on the same scale as one sat after it. Runs
+    # once: the WHERE clause makes it a no-op on every later boot.
+    "UPDATE reading_attempts a SET tcf_score = ("
+    " SELECT COALESCE(SUM(CASE"
+    "   WHEN q.position <= 4 THEN 3 WHEN q.position <= 10 THEN 9"
+    "   WHEN q.position <= 19 THEN 15 WHEN q.position <= 29 THEN 21"
+    "   WHEN q.position <= 35 THEN 26 ELSE 33 END), 0)"
+    " FROM reading_questions q"
+    " WHERE q.test_number = a.test_number"
+    "   AND a.answers ->> q.reading_question_id = q.correct_answer)"
+    " WHERE a.tcf_score IS NULL",
+    "ALTER TABLE listening_attempts ADD COLUMN IF NOT EXISTS tcf_score INTEGER",
+    # Rescored from the answers each attempt already stores, so a paper sat
+    # before this is reported on the same scale as one sat after it. Runs
+    # once: the WHERE clause makes it a no-op on every later boot.
+    "UPDATE listening_attempts a SET tcf_score = ("
+    " SELECT COALESCE(SUM(CASE"
+    "   WHEN q.position <= 4 THEN 3 WHEN q.position <= 10 THEN 9"
+    "   WHEN q.position <= 19 THEN 15 WHEN q.position <= 29 THEN 21"
+    "   WHEN q.position <= 35 THEN 26 ELSE 33 END), 0)"
+    " FROM listening_questions q"
+    " WHERE q.test_number = a.test_number"
+    "   AND a.answers ->> q.listening_question_id = q.correct_answer)"
+    " WHERE a.tcf_score IS NULL",
+
     # ---- which numbered writing paper a simulator sitting was -------------
     # See ExamAttempt.set_number. No backfill: the link was never recorded,
     # and guessing it would put a candidate's mark on a paper they never sat.
@@ -8210,12 +8255,57 @@ async def mistakes_summary(user: User = Depends(get_current_user),
     weak = sorted(((c, n) for c, n in per_cat.items() if n > 0),
                   key=lambda x: -x[1])[:3]
 
+    """The learner's actual corrections, newest first.
+
+    The dashboard used to summarise these into three category names and a
+    stock tip — "Conjugaison · 53", "drill the big irregulars" — which is a
+    description of the learner rather than anything they said. The corrections
+    themselves are what every result page shows, and they are in the database
+    already; this is them, in one list across everything written and spoken.
+
+    Read out of the submission's stored errors rather than off the mistakes
+    table, because only the JSON carries severity, kind and the remembered
+    rule — the three fields the corrections table's last columns are made of.
+    Simulator sittings keep their errors inside exam_attempts and are not
+    joined here; they still feed the recurring list below, which is read from
+    the mistakes table and does cover them.
+
+    One row per distinct correction. The same mistake made in four essays is
+    four rows in the database and one thing to learn, and a list that showed
+    it four times would spend its five visible rows saying it once — which is
+    also precisely what the recurring list below exists to say, with a count.
+    The newest wording of each wins, because it is the one the learner was
+    most recently shown.
+    """
+    corrections, seen = [], set()
+    rows = await db.execute(sa_text(
+        "SELECT e.val AS correction "
+        "FROM submissions s, "
+        "     LATERAL jsonb_array_elements(coalesce(s.errors, '[]'::jsonb)) AS e(val) "
+        "WHERE s.user_id = :uid "
+        "ORDER BY s.created_at DESC "
+        "LIMIT 200"), uid)
+    for (value,) in rows.all():
+        if not isinstance(value, dict):
+            continue
+        said = str(value.get("error", "")).strip()
+        if not said:
+            continue
+        key = (said.casefold(), str(value.get("correction", "")).strip().casefold())
+        if key in seen:
+            continue
+        seen.add(key)
+        corrections.append(value)
+        if len(corrections) >= 20:
+            break
+
     return {
         "per_category": per_cat,
         "status_counts": status_counts,
         "trend": trend,
         "monthly_trend": trend,
         "repeat_leaders": [_row_to_dict(m) for m in repeat_leaders],
+        "recent_corrections": corrections,
         "weak_points": [{"category": c, "count": n,
                          "label": CATEGORY_LABELS_FR.get(c, c),
                          "tip": CATEGORY_TIPS.get(c, "")} for c, n in weak],
@@ -8843,6 +8933,40 @@ def _by_level(corrections: List[dict]) -> dict:
     return out
 
 
+# Compréhension écrite and orale are not marked out of 39.
+#
+# The official TCF paper weights every item by its difficulty: the four
+# easiest questions are worth 3 points each and the four hardest 33, and the
+# paper totals 699. A candidate who answers twenty easy questions and nothing
+# else has not performed like one who answered twenty hard ones, and "20/39"
+# says they have. The bank is already built in that order — position 1-4 are
+# the A1 items, 36-39 the C2 ones — so the position IS the weight.
+#
+# The bands are the published ones, by position rather than by CEFR level:
+# the paper's own table reads the same for both skills, and our listening
+# bank splits its levels at slightly different places than its reading bank.
+TCF_ITEM_POINTS = ((4, 3), (10, 9), (19, 15), (29, 21), (35, 26), (39, 33))
+TCF_COMPREHENSION_TOTAL = 699
+
+
+def tcf_item_points(position: int) -> int:
+    """What one item is worth, from where it sits in the paper."""
+    for last, points in TCF_ITEM_POINTS:
+        if position <= last:
+            return points
+    return TCF_ITEM_POINTS[-1][1]
+
+
+def tcf_comprehension_score(corrections) -> int:
+    """The paper's score out of 699, from the items answered correctly.
+
+    `corrections` is any iterable of mappings carrying `position` and
+    `is_correct` — the shape both submit endpoints already build.
+    """
+    return sum(tcf_item_points(int(c["position"]))
+               for c in corrections if c.get("is_correct"))
+
+
 def _reading_correction(q: ReadingQuestion, picked: Optional[str]) -> dict:
     """The full teaching payload, returned only once an answer is in.
 
@@ -9020,17 +9144,20 @@ async def reading_submit(test_number: int, body: ReadingSubmitIn,
     corrections = [_reading_correction(q, body.answers.get(q.reading_question_id))
                    for q in questions]
     score = sum(1 for c in corrections if c["is_correct"])
+    tcf_score = tcf_comprehension_score(corrections)
     by_level = _by_level(corrections)
 
     attempt = ReadingAttempt(
         reading_attempt_id=new_id("rda"), user_id=user.user_id,
         test_number=test_number, answers=body.answers, score=score,
-        total=len(questions), time_used_seconds=body.time_used_seconds,
+        total=len(questions), tcf_score=tcf_score,
+        time_used_seconds=body.time_used_seconds,
         created_at=now_utc())
     db.add(attempt)
     await db.commit()
     streak = await update_streak(db, user.user_id)
     return {"score": score, "total": len(questions), "by_level": by_level,
+            "tcf_score": tcf_score, "tcf_total": TCF_COMPREHENSION_TOTAL,
             "corrections": corrections, "streak": streak}
 
 
@@ -9255,17 +9382,20 @@ async def listening_submit(test_number: int, body: ListeningSubmitIn,
         _listening_correction(q, body.answers.get(q.listening_question_id))
         for q in questions]
     score = sum(1 for c in corrections if c["is_correct"])
+    tcf_score = tcf_comprehension_score(corrections)
     by_level = _by_level(corrections)
 
     attempt = ListeningAttempt(
         listening_attempt_id=new_id("lda"), user_id=user.user_id,
         test_number=test_number, answers=body.answers, score=score,
-        total=len(questions), time_used_seconds=body.time_used_seconds,
+        total=len(questions), tcf_score=tcf_score,
+        time_used_seconds=body.time_used_seconds,
         created_at=now_utc())
     db.add(attempt)
     await db.commit()
     streak = await update_streak(db, user.user_id)
     return {"score": score, "total": len(questions), "by_level": by_level,
+            "tcf_score": tcf_score, "tcf_total": TCF_COMPREHENSION_TOTAL,
             "corrections": corrections, "streak": streak}
 
 

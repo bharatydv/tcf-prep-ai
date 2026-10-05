@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { formatDateTime, useT } from '../i18n';
+import { clbFromComprehension, TCF_COMPREHENSION_TOTAL } from '../lib/tcf';
 import { BackLink, useConfirm } from '../components/shared';
 import AttemptHistory, { useAttempts } from '../components/AttemptHistory';
 import { trackPracticeStart, trackPracticeComplete } from '../lib/analytics';
@@ -250,6 +251,7 @@ export default function ListeningTest() {
       setCorrections(map);
       setAnswers(data.attempt?.answers || {});
       setResult({ score: data.attempt?.score, total: data.attempt?.total,
+                  tcf_score: data.attempt?.tcf_score,
                   by_level: data.by_level });
       setPastAttempt(row);
       setIndex(0);
@@ -340,11 +342,34 @@ export default function ListeningTest() {
               <p className="text-xs font-bold uppercase tracking-wide text-white/80">
                 {t('listenTest.testN', { n: testNumber })}
               </p>
-              <p className="mt-1 font-heading text-4xl font-extrabold">
-                {result.score}<span className="text-2xl text-white/70">/{result.total}</span>
+              {/* The paper's own score, which is what the exam reports and
+                  what the CLB level is read off — each item weighted by its
+                  difficulty, 699 for a perfect paper. The count of right
+                  answers stays underneath: it is what the review below is
+                  organised by, and "28 of 39" is still how it feels. */}
+              <p className="mt-1 flex flex-wrap items-baseline gap-x-3 font-heading text-4xl font-extrabold">
+                {typeof result.tcf_score === 'number' ? (
+                  <>
+                    {result.tcf_score}
+                    <span className="text-2xl text-white/70">
+                      /{result.tcf_total || TCF_COMPREHENSION_TOTAL}
+                    </span>
+                    <span className="rounded-full bg-white/20 px-3 py-1 text-sm font-bold"
+                      data-testid="listening-clb">
+                      {clbFromComprehension(result.tcf_score, 'listening')
+                        ? t('sexam.clb', {
+                          level: clbFromComprehension(result.tcf_score, 'listening') })
+                        : t('dash.levelBelow')}
+                    </span>
+                  </>
+                ) : (
+                  <>{result.score}<span className="text-2xl text-white/70">/{result.total}</span></>
+                )}
               </p>
               <p className="mt-1 text-sm text-white/90">
-                {t('listenTest.scorePct', { p: Math.round((result.score / result.total) * 100) })}
+                {typeof result.tcf_score === 'number'
+                  ? t('listenTest.scoreOf', { score: result.score, total: result.total })
+                  : t('listenTest.scorePct', { p: Math.round((result.score / result.total) * 100) })}
               </p>
               {pastAttempt && (
                 <p className="mt-2 inline-block rounded-full bg-white/20 px-3 py-1 text-xs font-semibold"
