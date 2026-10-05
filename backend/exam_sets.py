@@ -10,15 +10,16 @@ SPEAKING_EXAM_SETS entries are (tache1, tache2, tache3):
   tache2 — {"theme", "situation", "hints"} : the roleplay the candidate leads.
   tache3 — {"theme", "question"} : the opinion the candidate defends.
 
-The bank is in two parts. The twenty sets written here first are the general
-practice series; after them come the monthly exam series of 2026 (September,
-August, July), transcribed in speaking_series_2026.py. Set numbers are
-positional and run across both parts, because a candidate's attempts are filed
-under that number in the database — so nothing here is ever reordered or
-removed, only appended.
+Both banks are in two parts: the general practice sets written here first, and
+after them the monthly exam series of 2026 (September, August, July) —
+speaking_series_2026.py and writing_series_2026.py. Set numbers are positional
+and run across both parts, because a candidate's attempts are filed under that
+number in the database — so nothing here is ever reordered or removed, only
+appended.
 """
 
 from speaking_series_2026 import SPEAKING_SERIES_2026
+from writing_series_2026 import WRITING_SERIES_2026, WRITING_T3_CONSIGNE
 
 SPEAKING_PRACTICE_SETS = [
     # 01
@@ -193,11 +194,11 @@ def speaking_set_list() -> list:
 
 T3_QUESTION = "Comparez les deux points de vue et donnez votre opinion."
 
-# WRITING_EXAM_SETS entries are (tache1, tache2, {doc_1, doc_2}).
+# WRITING_PRACTICE_SETS entries are (tache1, tache2, {doc_1, doc_2}).
 # Transcribed as supplied. Tâche 1 is the "écrivez…" consigne as the paper words
 # it; tâche 2 is worded as a brief rather than a consigne, kept verbatim on the
 # author's instruction. The page states the format and word range beside each.
-WRITING_EXAM_SETS = [
+WRITING_PRACTICE_SETS = [
     ("Vous allez déménager dans un nouvel appartement. Écrivez à un ami pour lui demander de l’aide et précisez la date et les tâches à faire.",
      "Vous souhaitez vous inscrire à une activité sportive dans votre quartier. Vous téléphonez au centre sportif pour obtenir des informations sur les activités proposées, les horaires, les tarifs, l'inscription et le matériel nécessaire.",
      {"doc_1": "De plus en plus d'entreprises permettent à leurs employés de travailler depuis chez eux. Pour beaucoup de salariés, cette organisation améliore considérablement la qualité de vie. Ils n'ont plus besoin de passer plusieurs heures dans les transports et peuvent consacrer davantage de temps à leur famille ou à leurs activités personnelles. Le télétravail permet également de travailler dans un environnement plus calme et d'organiser sa journée avec davantage de liberté. Selon certains employés, ils sont même plus concentrés et plus efficaces lorsqu'ils travaillent à distance.",
@@ -300,19 +301,59 @@ WRITING_EXAM_SETS = [
 ]
 
 
+# The monthly series, in the tuple shape the rest of this module reads. Their
+# tâche 3 carries a title and the paper's own instruction, which the general
+# practice sets do not have — writing_set() below falls back for those.
+_WRITING_SERIES_SETS = [(x["tache1"], x["tache2"], x["tache3"])
+                        for x in WRITING_SERIES_2026]
+
+WRITING_EXAM_SETS = WRITING_PRACTICE_SETS + _WRITING_SERIES_SETS
+
+# Which month each writing set belongs to, aligned with WRITING_EXAM_SETS by
+# position. `month` is None for the general practice series; `index` is the
+# number the page prints — the set's place within its own group, not the
+# global number. Same shape as SPEAKING_SET_META, and read the same way.
+WRITING_SET_META = (
+    [{"month": None, "month_label": None, "index": n}
+     for n in range(1, len(WRITING_PRACTICE_SETS) + 1)]
+    + [{"month": x["month"], "month_label": x["month_label"], "index": x["index"]}
+       for x in WRITING_SERIES_2026]
+)
+
+
+def writing_set_list() -> list:
+    """The chooser's rows: number and group, and nothing of the paper itself.
+
+    The subjects stay behind the set number until the paper is opened — a
+    candidate who can read twenty tâche 3 documents will sit the one they
+    already have opinions about, which is the opposite of what a fixed set is
+    for. /api/simulator/start serves them with the clock.
+    """
+    return [{"set_number": n, **meta}
+            for n, meta in enumerate(WRITING_SET_META, start=1)]
+
+
 def writing_set(number: int) -> dict:
     """One numbered writing sitting, shaped for the simulator.
 
     task3 carries its two documents separately from the question, so the page
     can lay them out as the paper does and the word counter never mistakes the
     documents for the candidate's own text.
+
+    The monthly series name their tâche 3 ("Voyager seul ou en groupe ?") and
+    carry the official instruction; the general practice sets have neither, so
+    they keep the house wording and no title.
     """
     t1, t2, t3 = WRITING_EXAM_SETS[number - 1]
+    title = t3.get("title", "")
     return {
         "set_number": number,
+        **WRITING_SET_META[number - 1],
         "task1": {"task_type": 1, "text": t1},
         "task2": {"task_type": 2, "text": t2},
-        "task3": {"task_type": 3, "text": T3_QUESTION,
+        "task3": {"task_type": 3,
+                  "text": WRITING_T3_CONSIGNE if title else T3_QUESTION,
+                  "title": title,
                   "doc_1": t3["doc_1"], "doc_2": t3["doc_2"]},
     }
 
@@ -356,6 +397,8 @@ def validate() -> list:
         # would leave nothing to compare, which is the whole task.
         if t3.get("doc_1") == t3.get("doc_2"):
             problems.append(f"writing set {i}: tâche 3 documents are identical")
+    if len(WRITING_SET_META) != len(WRITING_EXAM_SETS):
+        problems.append("writing sets: metadata and bank differ in length")
     if len(SPEAKING_SET_META) != len(SPEAKING_EXAM_SETS):
         problems.append("speaking sets: metadata and bank differ in length")
     for i, entry in enumerate(SPEAKING_EXAM_SETS, start=1):

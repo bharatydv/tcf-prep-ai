@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Timer, WarningCircle, SignOut } from '@phosphor-icons/react';
+import { Timer, WarningCircle, SignOut, PenNib } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, errMsg, CATEGORY_META } from '../lib/api';
-import { WRITING_TASKS, WRITING_TOTAL_SECONDS, displayMark } from '../lib/tcf';
+import { WRITING_TASKS, WRITING_TOTAL_SECONDS, displayMark, nclcFromMark } from '../lib/tcf';
+import { monthLabel } from '../lib/speakingExam';
+import ExamSetRow from '../components/ExamSetRow';
 import { useAuth } from '../context/AuthContext';
 import { formatDateTime, useT } from '../i18n';
 import { Seo } from '../lib/seo';
@@ -113,11 +115,57 @@ export default function ExamSimulator() {
     }));
   }, [phase, texts, current, setNumber]);
 
-  /* Every simulator sitting this candidate has handed in. Not per set: an
-     attempt records the three tâches it graded, not which paper they came
-     from, so the honest list is all of them newest first. */
+  /* Every simulator sitting this candidate has handed in, newest first. */
   const { attempts, reload: reloadAttempts } = useAttempts(
     '/api/simulator/attempts', { enabled: Boolean(user) });
+
+  /* Where this candidate stands on each numbered paper, for the cards.
+     Newest first, so the first attempt found for a set is where that set now
+     stands and the earlier ones are behind it in the list above. A writing
+     paper is graded in one go, so there is no part-way state: it has either
+     been handed in or it has not. Attempts from before the set was recorded,
+     and the random-prompt sitting, carry no set_number and place nowhere —
+     which is honest, since nobody can say which paper they were. */
+  /* Set number -> the row the chooser holds for it, so an attempt can be
+     named by its paper rather than by its date alone. */
+  const setsByNumber = useMemo(() => Object.fromEntries(
+    (sets || []).map((x) => [x.set_number, x])), [sets]);
+
+  const paperName = (n) => {
+    const x = setsByNumber[n];
+    if (!x) return null;
+    return x.month
+      ? `${monthLabel(x.month)} · ${t('sim.testN', { n: x.index })}`
+      : t('sim.setN', { n: x.index || x.set_number });
+  };
+
+  const cardResults = useMemo(() => {
+    const out = {};
+    (attempts || []).forEach((a) => {
+      if (!a.set_number || out[a.set_number]) return;
+      const mark = displayMark(a.combined_score, a.tcf_level);
+      out[a.set_number] = { state: 'done', mark, nclc: nclcFromMark(mark) };
+    });
+    return out;
+  }, [attempts]);
+
+  /* The bank, by group: the official series of each month, newest month
+     first, and the general practice sets after them. The server sends a flat
+     list carrying each set's month, so the order of the page is decided here
+     and a fourth month appears on its own the day the bank gains one. The
+     same shape, and the same reasoning, as the speaking chooser. */
+  const groups = useMemo(() => {
+    const byMonth = new Map();
+    const general = [];
+    (sets || []).forEach((x) => {
+      if (!x.month) { general.push(x); return; }
+      if (!byMonth.has(x.month)) byMonth.set(x.month, []);
+      byMonth.get(x.month).push(x);
+    });
+    const months = [...byMonth.keys()].sort().reverse()
+      .map((m) => ({ key: m, month: m, sets: byMonth.get(m) }));
+    return general.length ? [...months, { key: 'general', month: null, sets: general }] : months;
+  }, [sets]);
 
   const openAttempt = async (row) => {
     setOpeningId(row.id);
@@ -145,6 +193,9 @@ export default function ExamSimulator() {
         task1: { prompt: tasks.task1?.text || '', text: texts[1] },
         task2: { prompt: tasks.task2?.text || '', text: texts[2] },
         task3: { prompt: tasks.task3?.text || '', text: texts[3] },
+        // Which numbered paper this was, so the chooser can show where this
+        // candidate stands on it. The attempt never recorded it before.
+        set_number: setNumber || undefined,
         time_used_seconds: timeUsed,
       });
       setAttempt(data.attempt);
@@ -338,32 +389,39 @@ export default function ExamSimulator() {
           attempts={attempts.map((a) => ({
             id: a.attempt_id,
             label: `${a.tcf_level} · ${displayMark(a.combined_score, a.tcf_level) ?? '—'}/20`,
+            // Which paper it was, for the sittings that recorded one.
+            note: (a.set_number && paperName(a.set_number)) || undefined,
             created_at: a.created_at,
           }))}
           opening={openingId}
           onOpen={openAttempt} />
 
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {sets.map((x) => (
-            <button key={x.set_number} onClick={() => setSetNumber(x.set_number)}
-              data-testid={`sim-set-${x.set_number}`}
-              className="group flex flex-col overflow-hidden rounded-3xl border border-violet-100 bg-white text-left shadow-soft transition hover:-translate-y-1 hover:shadow-xl hover:shadow-violet-200/50">
-              <div className="h-1.5 w-full bg-gradient-to-r from-primary to-fuchsia-600" />
-              <div className="flex flex-1 flex-col p-6">
-                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-100 font-heading text-lg font-extrabold text-primary">
-                  {x.set_number}
-                </span>
-                {/* A number and a name. The tâche 3 document used to be
-                    previewed here, which let a candidate read twenty papers
-                    and choose the one they were readiest for — the opposite
-                    of what a fixed set is for. */}
-                <h3 className="mt-4 flex-1 font-heading text-base font-bold text-gray-900">
-                  {t('sim.setN', { n: x.set_number })}
-                </h3>
-              </div>
-            </button>
-          ))}
-        </div>
+        {/* One panel per group, the same chooser the speaking Test Mode uses.
+            A flat grid of every paper was fine at twenty and is not at
+            thirty-eight: the months are what a candidate is looking for, and
+            under one heading they were a wall of identical cards with the
+            newest subjects at the bottom. Each panel slides, and "View all"
+            opens it.
+
+            Still a number and a name on each card, and nothing of the paper
+            itself — a tâche 3 subject read from the chooser is a paper
+            chosen for the opinions the candidate already has. */}
+        {groups.map((g) => (
+          <ExamSetRow key={g.key} testid={`writing-group-${g.key}`}
+            testidPrefix="sim-set"
+            icon={PenNib}
+            metaKey="sim.cardMeta"
+            title={g.month ? monthLabel(g.month) : t('sim.general')}
+            subtitle={g.month
+              ? t('sim.monthSub', { month: monthLabel(g.month) })
+              : t('sim.generalSub')}
+            sets={g.sets}
+            cardTitle={(x) => (g.month
+              ? t('sim.testN', { n: x.index })
+              : t('sim.setN', { n: x.index || x.set_number }))}
+            results={cardResults}
+            onOpen={setSetNumber} />
+        ))}
       </main>
     );
   }
@@ -448,6 +506,19 @@ export default function ExamSimulator() {
 
         <div className="card mt-5 p-5">
           <h2 className="font-heading font-semibold">{g.name}</h2>
+          {/* The monthly series name their tâche 3 — "Voyager seul ou en
+              groupe ?" — and the paper prints that title over the two
+              documents. The general practice sets have no title and show
+              nothing here. */}
+          {task?.title && (
+            <div className="mt-3 rounded-2xl border border-violet-100 bg-violet-50/40 p-3.5"
+              data-testid="sim-subject">
+              <p className="text-xs font-bold uppercase tracking-wide text-primary">
+                {t('sim.t3Subject')}
+              </p>
+              <p className="mt-1 font-heading text-sm font-bold text-gray-900">{task.title}</p>
+            </div>
+          )}
           {task?.doc_1 && (
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               {[task.doc_1, task.doc_2].map((doc, i) => (
