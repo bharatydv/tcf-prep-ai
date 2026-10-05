@@ -1,5 +1,8 @@
 /* One group of exam sets on the Test Mode chooser: a month of the official
- * series, or the general practice sets.
+ * series, or the general practice sets. Expression orale and expression
+ * écrite both have a bank in that shape, so both use this; what differs is
+ * only the icon and the one-line meta under an unsat set — a writing paper
+ * is not a microphone and not twelve minutes — so those are props.
  *
  * Each group is a tinted panel. Closed, it is a single row that shows five
  * sets and slides — the arrows on the right move it a screen at a time, and
@@ -30,7 +33,7 @@ const ACCENT = {
 
 /* The line under the title. A finished paper shows its CLB level and its mark
    out of 20 — the two numbers the real Expression orale result gives. */
-function CardStatus({ result }) {
+function CardStatus({ result, icon: Icon, metaKey }) {
   const t = useT();
   if (result?.state === 'done') {
     return (
@@ -60,8 +63,8 @@ function CardStatus({ result }) {
      have opinions about. */
   return (
     <span className="mt-0.5 flex items-center gap-1.5 text-xs font-medium text-gray-400">
-      <Microphone size={12} weight="fill" className="text-pink-500" />
-      <span className="truncate">{t('sexam.cardMeta')}</span>
+      <Icon size={12} weight="fill" className="text-pink-500" />
+      <span className="truncate">{t(metaKey)}</span>
     </span>
   );
 }
@@ -69,11 +72,14 @@ function CardStatus({ result }) {
 /* One set. The whole card is the button: the accent bar and the filled arrow
    say so at rest, and on hover the arrow goes solid and the card lifts.
    `result` is where this candidate stands on the set, when they have sat it. */
-export function ExamSetCard({ set, title, onOpen, result = null }) {
+export function ExamSetCard({
+  set, title, onOpen, result = null,
+  icon = Microphone, metaKey = 'sexam.cardMeta', testidPrefix = 'speaking-set',
+}) {
   const state = result?.state || 'none';
   return (
     <button onClick={() => onOpen(set.set_number)}
-      data-testid={`speaking-set-${set.set_number}`}
+      data-testid={`${testidPrefix}-${set.set_number}`}
       data-state={state}
       className="group relative flex h-full w-full items-center gap-3 overflow-hidden rounded-2xl border border-white bg-white py-3.5 pl-5 pr-4 text-left shadow-sm transition
         hover:-translate-y-0.5 hover:border-pink-200 hover:shadow-lg hover:shadow-pink-200/40
@@ -81,7 +87,7 @@ export function ExamSetCard({ set, title, onOpen, result = null }) {
       <span className={`absolute inset-y-0 left-0 w-1.5 ${ACCENT[state]}`} />
       <span className="min-w-0 flex-1">
         <h3 className="truncate font-heading text-[15px] font-extrabold text-gray-900">{title}</h3>
-        <CardStatus result={result} />
+        <CardStatus result={result} icon={icon} metaKey={metaKey} />
       </span>
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pink-50 text-pink-600 transition group-hover:bg-pink-600 group-hover:text-white">
         <CaretRight size={14} weight="bold" />
@@ -105,6 +111,7 @@ export function sittingResult(sitting, paperMark) {
 
 export default function ExamSetRow({
   title, subtitle, sets, cardTitle, onOpen, testid, results = {},
+  icon = Microphone, metaKey = 'sexam.cardMeta', testidPrefix = 'speaking-set',
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -176,7 +183,8 @@ export default function ExamSetRow({
         <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5" data-testid={`${testid}-grid`}>
           {sets.map((s) => (
             <ExamSetCard key={s.set_number} set={s} title={cardTitle(s)} onOpen={onOpen}
-              result={results[s.set_number] || null} />
+              result={results[s.set_number] || null}
+              icon={icon} metaKey={metaKey} testidPrefix={testidPrefix} />
           ))}
         </div>
       ) : (
@@ -190,7 +198,8 @@ export default function ExamSetRow({
             <div key={s.set_number}
               className="w-[70%] shrink-0 snap-start sm:w-[calc(50%-0.375rem)] md:w-[calc(33.333%-0.5rem)] lg:w-[calc(20%-0.6rem)]">
               <ExamSetCard set={s} title={cardTitle(s)} onOpen={onOpen}
-                result={results[s.set_number] || null} />
+                result={results[s.set_number] || null}
+                icon={icon} metaKey={metaKey} testidPrefix={testidPrefix} />
             </div>
           ))}
         </div>

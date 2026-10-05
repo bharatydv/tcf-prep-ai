@@ -813,6 +813,16 @@ class ExamAttempt(Base):
     # Float: the combined score is the mean of three task scores, e.g. 72.3.
     combined_score: Mapped[float] = mapped_column(Float)
     tcf_level: Mapped[str] = mapped_column(String(8))
+    # Which numbered writing paper this sitting was, when it was one.
+    #
+    # The chooser can say where a candidate stands on every set only if the
+    # attempt remembers which set it answered, and nothing recorded it: the
+    # simulator sent the three texts and the paper they came from was lost at
+    # the door. NULL for every attempt graded before this column existed, and
+    # for the random-prompt sitting /api/simulator/start still serves without
+    # a set_number — neither belongs to a numbered paper.
+    set_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True,
+                                                      index=True)
     time_used_seconds: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
@@ -5270,6 +5280,9 @@ class SimulatorSubmitIn(BaseModel):
     task1: SimulatorTask
     task2: SimulatorTask
     task3: SimulatorTask
+    # The numbered paper these three tâches came from, so the chooser can say
+    # where this candidate stands on it. Absent for the random-prompt sitting.
+    set_number: Optional[int] = Field(default=None, ge=1)
     time_used_seconds: int = 0
 
 
@@ -6156,6 +6169,13 @@ MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_set BOOLEAN DEFAULT TRUE",
     "UPDATE users SET password_set = TRUE WHERE password_set IS NULL",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS level VARCHAR(16) DEFAULT ''",
+
+    # ---- which numbered writing paper a simulator sitting was -------------
+    # See ExamAttempt.set_number. No backfill: the link was never recorded,
+    # and guessing it would put a candidate's mark on a paper they never sat.
+    "ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS set_number INTEGER",
+    "CREATE INDEX IF NOT EXISTS ix_exam_attempts_user_set "
+    "ON exam_attempts (user_id, set_number)",
 
     # ---- which theme question a spoken practice answer belongs to -------
     # See Submission.question_id. No backfill: the link was never recorded,
@@ -7803,9 +7823,13 @@ async def simulator_sets():
     Sixty minutes to write three texts is only a measurement if the subjects
     arrive with the clock. They are served by /api/simulator/start when the
     paper is opened.
+
+    Each row now also carries the month its set belongs to, so the chooser can
+    group the bank the way the speaking one does: the official series of each
+    month, newest first, and the general practice sets after them. `month` is
+    null for those, and `index` is the number to print within the group.
     """
-    return {"sets": [{"set_number": n}
-                     for n in range(1, len(exam_sets.WRITING_EXAM_SETS) + 1)]}
+    return {"sets": exam_sets.writing_set_list()}
 
 
 @app.get("/api/simulator/start")
@@ -7916,6 +7940,10 @@ async def simulator_submit(body: SimulatorSubmitIn,
         task1=tasks_out["task1"], task2=tasks_out["task2"],
         task3=tasks_out["task3"],
         combined_score=combined, tcf_level=tcf_level,
+        set_number=(body.set_number
+                    if body.set_number
+                    and body.set_number <= len(exam_sets.WRITING_EXAM_SETS)
+                    else None),
         time_used_seconds=body.time_used_seconds, created_at=now_utc(),
     )
     db.add(attempt)
