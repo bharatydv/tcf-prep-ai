@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Timer, WarningCircle, SignOut, PenNib } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import { api, errMsg } from '../lib/api';
@@ -28,6 +28,7 @@ export default function ExamSimulator() {
   const t = useT();
   const [confirm, confirmDialog] = useConfirm();
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
   const [tasks, setTasks] = useState(null);
   const [sets, setSets] = useState([]);
   const [setNumber, setSetNumber] = useState(null);
@@ -173,7 +174,10 @@ export default function ExamSimulator() {
     try {
       const { data } = await api.get(`/api/simulator/attempts/${row.id}`);
       setAttempt(data);
-      setPastAttempt(row);
+      // The row the history list holds carries the date; one arriving by
+      // ?attempt= is just an id, so the banner reads the date off the sitting
+      // itself rather than printing "Reviewing Invalid Date".
+      setPastAttempt({ ...row, created_at: row.created_at || data.created_at });
       setPhase('results');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
@@ -182,6 +186,26 @@ export default function ExamSimulator() {
       setOpeningId(null);
     }
   };
+
+  /* Opened straight onto one sitting's report, by ?attempt=<id>.
+   *
+   * The dashboard lists written papers beside spoken ones now, and a row that
+   * only got the candidate as far as this page's set chooser is not a result
+   * they can read — the sitting they clicked was in a history list they would
+   * then have to find again. The parameter is dropped once the report is up,
+   * so the back button leaves the review rather than reopening it and a
+   * reload does not fight the chooser for the page. */
+  const deepLinked = params.get('attempt');
+  const openedRef = useRef(null);
+  useEffect(() => {
+    if (!deepLinked || !user || openedRef.current === deepLinked) return;
+    openedRef.current = deepLinked;
+    setParams({}, { replace: true });
+    openAttempt({ id: deepLinked });
+    // openAttempt is redefined on every render and setParams is stable; this
+    // runs once per id, which is what openedRef enforces.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinked, user]);
 
   const submit = useCallback(async (timeUsed) => {
     // The paper is what gets graded; without it there is nothing to submit.

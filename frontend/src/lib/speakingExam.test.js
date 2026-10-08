@@ -1,7 +1,9 @@
 /* The sitting is the only thing holding tâches 1 and 2 while the candidate is
    away on the recorder's route grading tâche 3. If it drops them, the paper
    silently becomes a one-tâche result. */
-import { readSitting, writeSitting, saveTask, sittingComplete } from './speakingExam';
+import {
+  readSitting, writeSitting, saveTask, sittingComplete, submissionSkill,
+} from './speakingExam';
 
 beforeEach(() => sessionStorage.clear());
 
@@ -55,5 +57,38 @@ describe('sittingComplete', () => {
   it('reads a sitting that has been through storage, where keys are strings', () => {
     writeSitting(7, { 1: {}, 2: {}, 3: {} });
     expect(sittingComplete(readSitting(7))).toBe(true);
+  });
+});
+
+/* The bug this function exists to end: the dashboard decided which paper an
+   answer belonged to from a hand-written list of source names, the list had
+   never heard of the `speaking_exam` that Test Mode writes, and so every
+   spoken answer given in a speaking paper was filed as WRITING — oral marks
+   in the written level, and "Speaking: not practised yet" over a candidate's
+   whole test history. */
+describe('submissionSkill', () => {
+  it('believes the row when the server has said which skill it is', () => {
+    expect(submissionSkill({ skill: 'speaking', source: 'practice' })).toBe('speaking');
+    expect(submissionSkill({ skill: 'writing', source: 'speaking' })).toBe('writing');
+  });
+
+  it('counts every spoken source as speaking when it has to guess', () => {
+    for (const source of ['speaking', 'speaking_exam', 'conversation']) {
+      expect(submissionSkill({ source })).toBe('speaking');
+    }
+  });
+
+  it('counts a written source as writing', () => {
+    expect(submissionSkill({ source: 'practice' })).toBe('writing');
+    expect(submissionSkill({ source: 'paste' })).toBe('writing');
+  });
+
+  /* A source nobody has taught it about is writing rather than a crash or a
+     blank: three of the four papers are not graded this way at all, and the
+     only other thing a graded submission can be is a text. */
+  it('is writing, not nothing, for a row it cannot place', () => {
+    expect(submissionSkill({})).toBe('writing');
+    expect(submissionSkill(null)).toBe('writing');
+    expect(submissionSkill({ skill: 'reading' })).toBe('writing');
   });
 });
