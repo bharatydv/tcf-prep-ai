@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Timer, WarningCircle, SignOut, PenNib } from '@phosphor-icons/react';
 import { toast } from 'sonner';
@@ -328,37 +328,65 @@ export default function ExamSimulator() {
           <div><p className="text-sm text-gray-500">{t('sim.cefr')}</p><p className="font-heading text-4xl font-bold sm:text-5xl">{attempt.tcf_level}</p></div>
           <div><p className="text-sm text-gray-500">{t('sim.timeUsed')}</p><p className="font-heading text-2xl font-bold sm:text-3xl">{t('sim.minutes', { n: Math.floor(attempt.time_used_seconds / 60) })}</p></div>
         </div>
+        {/* ONE TÂCHE AT A TIME: what was written, then what was wrong with
+            it, then the next tâche.
+
+            The three texts used to be shown in a row and every correction
+            from the sitting pooled into one table underneath, ranked by
+            impact across the whole paper. Ranking the paper as one is the
+            wrong unit of work: a candidate reads their tâche 3 argument,
+            scrolls past two more texts, and then meets a table in which
+            their tâche 1 preposition slip and their tâche 3 tense error sit
+            together with nothing saying which belonged to which. Three
+            tâches are three separate pieces of writing, marked separately
+            and improved separately.
+
+            The ranking survives, applied per tâche, which is where it was
+            always useful: the worst mistake in THIS text, first. */}
         {[1, 2, 3].map((i) => {
           const task = attempt[`task${i}`];
           if (!task) return null;
+          const errors = task.analysis?.errors || [];
           return (
-            <section key={i} className="card mt-6 p-6">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="font-heading text-xl font-semibold">{GUIDE[i].name}</h2>
-                <span className="pill bg-violet-50 text-primary">{t('sim.scorePill', { score: displayMark(task.analysis.overall_score, task.analysis.tcf_level) ?? '—', level: task.analysis.tcf_level })}</span>
-              </div>
-              <p className="mt-1 text-sm italic text-gray-500">{task.prompt}</p>
-              <div className="mt-4 rounded-xl bg-gray-50 p-5">
-                <ErrorHighlightedText text={task.text || t('sim.empty')} errors={task.analysis.errors} />
-              </div>
-            </section>
+            <Fragment key={i}>
+              <section className="card mt-8 p-6" data-testid={`sim-task-${i}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="font-heading text-xl font-semibold">{GUIDE[i].name}</h2>
+                  <span className="pill bg-violet-50 text-primary">{t('sim.scorePill', { score: displayMark(task.analysis.overall_score, task.analysis.tcf_level) ?? '—', level: task.analysis.tcf_level })}</span>
+                </div>
+                <p className="mt-1 text-sm italic text-gray-500">{task.prompt}</p>
+                <div className="mt-4 rounded-xl bg-gray-50 p-5">
+                  <ErrorHighlightedText text={task.text || t('sim.empty')} errors={errors} />
+                </div>
+                {/* A clean tâche gets a sentence saying so. The table below
+                    renders nothing at all when there is nothing to put in
+                    it, and silence after a text reads as a page that failed
+                    to load rather than as a text with no mistakes. */}
+                {!errors.length && (
+                  <p className="mt-4 rounded-xl bg-green-50 px-4 py-3 text-sm font-medium text-green-800"
+                    data-testid={`sim-task-clean-${i}`}>
+                    {t('sim.taskNoErrors')}
+                  </p>
+                )}
+              </section>
+
+              {/* The same table the speaking result and the dashboard use —
+                  see CorrectionsTable — but one per tâche, titled with the
+                  tâche it belongs to. Tight under its text rather than a
+                  section's distance away, because the two are one thing.
+
+                  `idPrefix` keeps the three tables' row ids apart: they key
+                  the play buttons, and three tables sharing them would mean
+                  pressing one stopped another. */}
+              <CorrectionsTable
+                className="mt-3"
+                testid={`sim-corrections-${i}`}
+                idPrefix={`sim-t${i}`}
+                title={t('sim.taskCorrections', { n: i })}
+                errors={errors} />
+            </Fragment>
           );
         })}
-        {/* Every correction of the sitting, in the table the speaking result
-            uses — see CorrectionsTable.
-
-            It was a list grouped by category: the mistake, the fix and the
-            explanation, in three bare columns, with the same correction
-            looking different here and on the speaking page an hour later.
-            Grouping by category also buried the ranking that matters — a
-            major error and a stylistic upgrade sat side by side under one
-            heading, in the order they were written. The table says which is
-            which, puts the worst first, and carries the rule to remember. */}
-        <CorrectionsTable
-          className="mt-6"
-          testid="sim-corrections"
-          title={t('sim.allErrors')}
-          errors={[1, 2, 3].flatMap((i) => attempt[`task${i}`]?.analysis?.errors || [])} />
         <div className="mt-8 flex flex-wrap gap-3">
           <Link to="/review" className="btn-primary">{t('sim.reviewErrors')}</Link>
           <Link to="/dashboard" className="btn-outline">{t('common.dashboard')}</Link>
