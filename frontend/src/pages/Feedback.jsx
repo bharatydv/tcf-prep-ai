@@ -8,12 +8,10 @@ import { useSpeak } from '../lib/speak';
 import { useT } from '../i18n';
 import { displayMark } from '../lib/tcf';
 import { Seo } from '../lib/seo';
+import { submissionSkill } from '../lib/speakingExam';
 import { trackResultView } from '../lib/analytics';
 import RateCorrection from '../components/RateCorrection';
 import CorrectionsTable from '../components/CorrectionsTable';
-
-/* Same two sources the dashboard counts as speaking. */
-const SPEAKING_SOURCES = new Set(['speaking', 'conversation']);
 
 export default function Feedback() {
   const { submissionId } = useParams();
@@ -36,7 +34,7 @@ export default function Feedback() {
            recording or the submission id. */
         const row = data.submission || {};
         trackResultView({
-          skill: SPEAKING_SOURCES.has(row.source || '') ? 'speaking' : 'writing',
+          skill: submissionSkill(row),
           exam: 'tcf',
           level: row.tcf_level,
           source: row.source,
@@ -51,9 +49,15 @@ export default function Feedback() {
   const byCat = {};
   sub.errors.forEach((e) => { (byCat[e.category] = byCat[e.category] || []).push(e); });
   const caps = sub.caps_applied || [];
-  // Spoken work reads its "text" back as a transcript, and may have the
-  // recording behind it. Written work never does.
-  const spoken = SPEAKING_SOURCES.has(sub.source || '');
+  /* Spoken work reads its "text" back as a transcript, and may have the
+     recording behind it. Written work never does.
+
+     This used to test the source name against a list written out in this
+     file, and the list had never heard of the `speaking_exam` that Test Mode
+     writes — so a tâche recorded in a speaking paper came back as an essay,
+     with no transcript and no way to play back what had been said. The row
+     says which skill it is now. */
+  const spoken = submissionSkill(sub) === 'speaking';
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-10">

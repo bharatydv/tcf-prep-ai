@@ -68,6 +68,25 @@ export function monthLabel(month) {
 /* t is the page's translator; `set` is a row from /api/speaking/exam-sets or
    the sitting itself. Falls back to the plain set number for rows that carry
    no group — older API shapes, or a general set. */
+/* Which of the four papers a graded submission belongs to.
+ *
+ * The row says so itself — /api/submissions returns `skill` — and reading it
+ * is the whole point: this used to be decided on the client from a set of
+ * source names written out in two separate pages, and when the backend added
+ * `speaking_exam` for Test Mode neither page heard about it. Every spoken
+ * answer given in a speaking paper was filed as writing.
+ *
+ * The fallback is for a response cached by a browser from before the field
+ * existed, and mirrors ALL_SPEAKING_SOURCES in backend/server.py. It is not
+ * the answer, only the last resort: the server's is.
+ */
+const SPOKEN_SOURCES = new Set(['speaking', 'speaking_exam', 'conversation']);
+
+export function submissionSkill(row) {
+  if (row?.skill === 'speaking' || row?.skill === 'writing') return row.skill;
+  return SPOKEN_SOURCES.has(row?.source || '') ? 'speaking' : 'writing';
+}
+
 export function setLabel(t, set) {
   if (!set) return '';
   if (set.month) return `${monthLabel(set.month)} · ${t('sexam.testN', { n: set.index })}`;

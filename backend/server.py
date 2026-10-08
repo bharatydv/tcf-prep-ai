@@ -3251,8 +3251,33 @@ async def attempt_progress(db: AsyncSession, user_id: str,
 
 # Which submission rows count as "the same kind of practice" for the arrow
 # above. Speaking is practised loose and in a full sitting, and both are the
-# same skill being measured.
+# same skill being measured. Free conversation is deliberately not here: it
+# answers no tâche and is compared only against itself.
 SPEAKING_SOURCES = ("speaking", "speaking_exam")
+
+# EVERY source that is a spoken answer, which is a different question from the
+# one above: "what should this attempt be compared with" versus "which of the
+# four papers was this". Free conversation belongs here — a candidate who only
+# ever used it has practised speaking, whatever it is compared against.
+#
+# The answer used to be worked out on the client, by a set of source names
+# written out in two pages, and `speaking_exam` was added to the backend
+# without reaching either of them. Every Test Mode spoken answer therefore
+# counted as WRITING on the dashboard: it inflated the written level with
+# marks from the oral paper, and a candidate who had only sat speaking tests
+# was told they had not practised speaking at all. The rows now carry the
+# answer, so there is nothing left to keep in step.
+ALL_SPEAKING_SOURCES = SPEAKING_SOURCES + ("conversation",)
+
+
+def submission_skill(source: Optional[str]) -> str:
+    """Which paper a graded submission belongs to: "speaking" or "writing".
+
+    Those are the only two, because only those two are graded from something
+    the candidate produced. Compréhension écrite and orale are marked against
+    an answer key and live in their own tables entirely.
+    """
+    return "speaking" if (source or "") in ALL_SPEAKING_SOURCES else "writing"
 
 
 async def learning_history(db: AsyncSession, user_id: str,
@@ -3320,8 +3345,13 @@ async def persist_submission(db: AsyncSession, user: User, text: str,
         question_id=(question_id or "")[:64],
         exam_set=exam_set,
         task_type=task_type,
+        # Spoken work keeps its full grade: the criteria grid, the strengths,
+        # the transcript and the word timings the player seeks by. The list
+        # used to be written out here and had never heard of `speaking_exam`,
+        # so a Test Mode answer was stored as though it were an essay and its
+        # result page lost everything the columns do not hold.
         analysis=(stored_analysis(analysis)
-                  if source in ("speaking", "conversation") else None),
+                  if source in ALL_SPEAKING_SOURCES else None),
         created_at=now_utc(),
     )
     db.add(sub)
@@ -6973,8 +7003,7 @@ async def recent_activity(response: Response,
     raw = []
     for uid, name, at, source in await latest(
             Submission, Submission.created_at, (Submission.source,)):
-        spoken = source in ("speaking", "speaking_exam", "conversation")
-        raw.append((at, uid, name, "test", "speaking" if spoken else "writing", ""))
+        raw.append((at, uid, name, "test", submission_skill(source), ""))
     for model, what in ((ExamAttempt, "writing_exam"),
                         (ReadingAttempt, "reading"),
                         (ListeningAttempt, "listening"),
@@ -7610,7 +7639,13 @@ async def analyze_stream(body: AnalyzeIn,
                 # a proxy does not drop a connection whose work is already done.
                 save = asyncio.create_task(persist_submission(
                     sdb, user, body.text, body.prompt_id, analysis,
-                    source=source, consume=False, theme_id=body.theme_id))
+                    source=source, consume=False, theme_id=body.theme_id,
+                    # Which tâche this answered, so the dashboard can list a
+                    # written answer the way it lists a spoken one — "Tâche 2",
+                    # not a bare CEFR level. It was passed to the grader to
+                    # apply the official word range and then thrown away, which
+                    # left every written answer unattributable to a tâche.
+                    task_type=body.task_type))
                 while True:
                     try:
                         sub = await asyncio.wait_for(asyncio.shield(save),
@@ -7670,7 +7705,8 @@ async def create_submission(body: AnalyzeIn,
         raise HTTPException(status_code=503, detail=ai_error_detail(analysis))
     return await persist_submission(db, user, body.text, body.prompt_id,
                                     analysis, source=source, consume=False,
-                                    theme_id=body.theme_id)
+                                    theme_id=body.theme_id,
+                                    task_type=body.task_type)
 
 
 # ----------------------------------------------------------------------------
@@ -7752,8 +7788,57 @@ async def list_submissions(user: User = Depends(get_current_user),
     return {"submissions": [
         {"submission_id": sid, "created_at": created, "tcf_level": level,
          "overall_score": score, "word_count": words, "source": source,
+         # Which of the four papers this was. Named here rather than inferred
+         # from `source` by every caller — see submission_skill.
+         "skill": submission_skill(source),
          "error_count": int(n or 0), "has_audio": bool(has_audio)}
         for sid, created, level, score, words, source, n, has_audio in rows]}
+
+
+@app.get("/api/writing/practice/attempts")
+async def writing_practice_attempts(task_type: Optional[int] = None,
+                                    user: User = Depends(get_current_user),
+                                    db: AsyncSession = Depends(get_db)):
+    """Every text written in Practice mode, newest first.
+
+    The mirror of /api/speaking/practice/attempts, field for field and with
+    the same filter reasoning, so the dashboard can list a written answer and
+    a spoken one through one component rather than two layouts that drift
+    apart. Expression écrite was reaching that page only as an undifferentiated
+    row of the history table, named by its CEFR level alone.
+
+    Practice is everything outside a Test Mode sitting. A written sitting is
+    an exam_attempts row rather than three submissions, so `exam_set IS NULL`
+    is already true of every row here; the filter that does the work is on
+    `source`, which keeps spoken answers out — they have their own list.
+
+    `task_type` is null for an answer written before it was recorded, and for
+    free writing, which answers no tâche at all. Those rows are still listed:
+    the work was really done, and the page names them "Free writing" rather
+    than inventing a tâche for them.
+
+    The corrections are not repeated here. /api/submissions/{id} already
+    serves one in full, and the row is opened before it is needed.
+    """
+    stmt = (select(Submission.submission_id, Submission.task_type,
+                   Submission.theme_id, Submission.prompt_id,
+                   Submission.tcf_level, Submission.overall_score,
+                   Submission.word_count, Submission.source,
+                   Submission.created_at,
+                   func.coalesce(func.jsonb_array_length(Submission.errors), 0))
+            .where(Submission.user_id == user.user_id,
+                   Submission.source.not_in(ALL_SPEAKING_SOURCES)))
+    if task_type in (1, 2, 3):
+        stmt = stmt.where(Submission.task_type == task_type)
+    rows = (await db.execute(
+        stmt.order_by(Submission.created_at.desc()).limit(200))).all()
+    return {"attempts": [
+        {"submission_id": sid, "task_type": task, "theme_id": theme or "",
+         "prompt_id": prompt or "", "tcf_level": level, "overall_score": score,
+         "word_count": int(words or 0), "source": source,
+         "created_at": created, "error_count": int(n or 0)}
+        for sid, task, theme, prompt, level, score, words, source, created, n
+        in rows]}
 
 
 @app.get("/api/submissions/{submission_id}")
@@ -7776,8 +7861,11 @@ async def get_submission(submission_id: str,
         out.setdefault(key, value)
     # Graded before the analysis was kept: the transcript was always stored,
     # only under the name the writing flow gave it.
-    if sub.source in ("speaking", "conversation") and not out.get("transcript"):
+    if sub.source in ALL_SPEAKING_SOURCES and not out.get("transcript"):
         out["transcript"] = sub.original_text or ""
+    # Which paper this was, so the result page does not have to work it out
+    # from the source name — the mistake this whole family of bugs came from.
+    out["skill"] = submission_skill(sub.source)
     return {"submission": out}
 
 
@@ -8024,6 +8112,94 @@ async def simulator_attempt(attempt_id: str,
     # it; the candidate who wrote it has no use for that.
     row = _row_to_dict(a)
     return row if user.role == "admin" else public_attempt(row)
+
+
+@app.get("/api/simulator/sittings")
+async def simulator_sittings(user: User = Depends(get_current_user),
+                             db: AsyncSession = Depends(get_db)):
+    """Where every writing paper this candidate has handed in now stands.
+
+    The mirror of /api/speaking/exam-sets/attempts, in the same shape, so
+    Expression écrite reaches the dashboard the way Expression orale does.
+    /api/simulator/attempts already lists these, but it carries every sitting
+    in full — three essays and three error arrays apiece — which is most of a
+    megabyte to print a column of marks, so a dashboard built on it would
+    download fifty complete reports to show fifty dates.
+
+    One row per ATTEMPT, not per set. A written paper is graded in one go, so
+    an attempt IS a sitting, and a candidate who sat set 7 twice has two
+    results that are both worth seeing. The speaking endpoint groups by set
+    because there a sitting is assembled from three separately graded tâches.
+
+    The combined mark is deliberately not computed here, for the same reason
+    it is not computed there: displayMark() in frontend/src/lib/tcf.js holds
+    the one conversion from the grader's 0-100 to the mark out of 20 and the
+    NCLC band it reads as, and a second implementation in Python is a second
+    thing to keep in step with the official table.
+
+    A tâche left blank is scored zero by the grader and flagged
+    `not_attempted`; it is left out of `tasks` entirely, so the paper reports
+    "2 of 3 tâches written" rather than an unqualified mark that three
+    sentences and a blank page earned between them.
+    """
+    from sqlalchemy import text as sa_text
+
+    # The three tâches are extracted in Postgres rather than loaded and parsed
+    # here, which is the whole point of this endpoint existing beside
+    # /api/simulator/attempts. Built in a loop so the three cannot drift, and
+    # every cast is guarded by jsonb_typeof: an attempt graded before a key
+    # existed has it missing rather than null, and ('' )::float raises.
+    cols = ", ".join(
+        f"task{n}->'analysis'->>'tcf_level' AS t{n}_level, "
+        f"CASE WHEN jsonb_typeof(task{n}->'analysis'->'overall_score') = 'number' "
+        f"THEN (task{n}->'analysis'->>'overall_score')::float END AS t{n}_score, "
+        f"CASE WHEN jsonb_typeof(task{n}->'analysis'->'errors') = 'array' "
+        f"THEN jsonb_array_length(task{n}->'analysis'->'errors') ELSE 0 "
+        f"END AS t{n}_errors, "
+        f"CASE WHEN jsonb_typeof(task{n}->'word_count') = 'number' "
+        f"THEN (task{n}->>'word_count')::int ELSE 0 END AS t{n}_words, "
+        f"COALESCE(task{n}->'analysis'->>'not_attempted', 'false') = 'true' "
+        f"AS t{n}_blank"
+        for n in (1, 2, 3))
+
+    rows = (await db.execute(sa_text(
+        "SELECT attempt_id, set_number, combined_score, tcf_level, "
+        "       time_used_seconds, created_at, " + cols + " "
+        "FROM exam_attempts WHERE user_id = :uid "
+        "ORDER BY created_at DESC LIMIT 50"),
+        {"uid": user.user_id})).mappings().all()
+
+    out = []
+    for r in rows:
+        number = r["set_number"]
+        # The group the set belongs to, so the dashboard names it the way the
+        # chooser does ("September 2026 · Test 3"). A sitting from before the
+        # set number was recorded, or one drawn at random, belongs to no
+        # numbered paper and says so by carrying no month and no index.
+        meta = (exam_sets.WRITING_SET_META[number - 1]
+                if number and 1 <= number <= len(exam_sets.WRITING_SET_META)
+                else {"month": None, "month_label": None, "index": None})
+        tasks = {}
+        for n in (1, 2, 3):
+            if r[f"t{n}_blank"] or r[f"t{n}_level"] is None:
+                continue
+            tasks[str(n)] = {
+                "tcf_level": r[f"t{n}_level"],
+                "overall_score": r[f"t{n}_score"],
+                "error_count": int(r[f"t{n}_errors"] or 0),
+                "word_count": int(r[f"t{n}_words"] or 0),
+            }
+        out.append({
+            "attempt_id": r["attempt_id"],
+            "set_number": number, **meta,
+            "combined_score": r["combined_score"],
+            "tcf_level": r["tcf_level"],
+            "time_used_seconds": int(r["time_used_seconds"] or 0),
+            "created_at": r["created_at"],
+            "tasks": tasks,
+            "complete": len(tasks) == 3,
+        })
+    return {"sittings": out}
 
 
 # ----------------------------------------------------------------------------
@@ -12642,8 +12818,9 @@ async def admin_test_ai_providers(admin: User = Depends(get_admin_user)):
 
 # Spoken work and written work live in one submissions table because the
 # analysis they produce is the same shape. Nobody uses the product that way,
-# so the admin view has to tell them apart again.
-SPOKEN_SOURCES = ("speaking", "conversation")
+# so the admin view has to tell them apart again — through the one list that
+# knows every spoken source, rather than a fourth copy of it that does not.
+SPOKEN_SOURCES = ALL_SPEAKING_SOURCES
 
 # The five things a learner can have done, in the order the exam lists the
 # papers. Kept as one tuple so a new one cannot be added to the counts and
@@ -13475,9 +13652,9 @@ async def theme_attempts(skill: Optional[str] = None,
         Submission.user_id == user.user_id,
         func.coalesce(Submission.theme_id, "") != "")
     if skill == "speaking":
-        stmt = stmt.where(Submission.source.in_(("speaking", "conversation")))
+        stmt = stmt.where(Submission.source.in_(ALL_SPEAKING_SOURCES))
     elif skill == "writing":
-        stmt = stmt.where(Submission.source.notin_(("speaking", "conversation")))
+        stmt = stmt.where(Submission.source.notin_(ALL_SPEAKING_SOURCES))
     # Newest per theme, and the count beside it, the same shape and for the
     # same reason as _papers_sat above.
     latest = (await db.execute(
@@ -13489,10 +13666,10 @@ async def theme_attempts(skill: Optional[str] = None,
         func.coalesce(Submission.theme_id, "") != "")
     if skill == "speaking":
         counted = counted.where(
-            Submission.source.in_(("speaking", "conversation")))
+            Submission.source.in_(ALL_SPEAKING_SOURCES))
     elif skill == "writing":
         counted = counted.where(
-            Submission.source.notin_(("speaking", "conversation")))
+            Submission.source.notin_(ALL_SPEAKING_SOURCES))
     counts = dict((await db.execute(
         counted.group_by(Submission.theme_id))).all())
 

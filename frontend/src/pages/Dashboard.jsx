@@ -8,13 +8,14 @@ import { api, errMsg } from '../lib/api';
 import { RecordingPlayer } from '../components/RecordingPlayer';
 import CorrectionsTable from '../components/CorrectionsTable';
 import { PracticeCta } from '../components/speakingReport';
+import { ResultRow, ResultSection, taskLine } from '../components/resultRows';
 import { useT } from '../i18n';
 import { Seo } from '../lib/seo';
 import {
   displayMark, markFromCorrect, nclcFromMark, speakingPaperMark,
   clbFromComprehension, TCF_COMPREHENSION_TOTAL,
 } from '../lib/tcf';
-import { setLabel } from '../lib/speakingExam';
+import { setLabel, submissionSkill } from '../lib/speakingExam';
 
 /* The four papers, each with a hue of its own so the current selection is
    readable at a glance rather than only from which pill is filled. The hues
@@ -38,7 +39,6 @@ const RANGE_KEY = { 7: 'dash.range7', 30: 'dash.range30', 90: 'dash.range90', 0:
    marked against a key — a right answer has no "category of mistake". */
 const AI_GRADED = new Set(['all', 'writing', 'speaking']);
 
-const SPEAKING_SOURCES = new Set(['speaking', 'conversation']);
 
 /* Declared at module scope, not inside Dashboard(). A component defined in a
    render body is a NEW component type on every render, so React unmounts and
@@ -51,6 +51,15 @@ function Head({ title, note }) {
       {note && <span className="text-xs font-medium text-gray-400">{note}</span>}
     </div>
   );
+}
+
+/* One graded answer as a result row reads it: the mark out of 20 the exam
+   reports, and the NCLC band that mark converts to. The grader's working
+   0-100 never reaches a screen. The same for a spoken answer and a written
+   one, which is the point — they are listed by the same component. */
+function withMark(a) {
+  const mark = displayMark(a.overall_score, a.tcf_level);
+  return { ...a, mark, band: nclcFromMark(mark) };
 }
 
 /* Reading and listening are marked against an answer key, so the three cards
@@ -91,8 +100,13 @@ export default function Dashboard() {
      "how is my tâche 3 going" was a question the dashboard held the answer to
      and could not be asked. */
   const [practice, setPractice] = useState([]);
-  // Only the newest few, until asked. Twenty tâches is a ledger, not a glance.
-  const [allPractice, setAllPractice] = useState(false);
+  /* And the same two lists for Expression écrite, which this page had neither
+     of. A written paper arrived as one row of the history table named by its
+     CEFR level, and a written practice answer as another exactly like it, so
+     the skill that half the product is about was the only one with no result
+     of its own anywhere on the dashboard. */
+  const [writingPapers, setWritingPapers] = useState([]);
+  const [writingPractice, setWritingPractice] = useState([]);
   const [params, setParams] = useSearchParams();
   // Set by the exam when it sends somebody here to wait out the marking.
   const marking = params.get('marking') === 'speaking';
@@ -115,6 +129,10 @@ export default function Dashboard() {
       .then(({ data }) => setSittings(data.sittings || [])).catch(() => {});
     api.get('/api/speaking/practice/attempts')
       .then(({ data }) => setPractice(data.attempts || [])).catch(() => {});
+    api.get('/api/simulator/sittings')
+      .then(({ data }) => setWritingPapers(data.sittings || [])).catch(() => {});
+    api.get('/api/writing/practice/attempts')
+      .then(({ data }) => setWritingPractice(data.attempts || [])).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -158,7 +176,13 @@ export default function Dashboard() {
     const fromSubs = (subs || []).map((s) => ({
       id: s.submission_id,
       at: s.created_at,
-      skill: SPEAKING_SOURCES.has(s.source || '') ? 'speaking' : 'writing',
+      /* Which paper this was, as the server says it was.
+         It used to be worked out here from a set of source names, and the
+         set had never heard of `speaking_exam` — so every answer given in
+         speaking Test Mode was filed as WRITING. That put oral marks into
+         the written level and left a candidate who had only sat speaking
+         tests being told they had not practised speaking at all. */
+      skill: submissionSkill(s),
       score: typeof s.overall_score === 'number'
         ? displayMark(s.overall_score, s.tcf_level) : null,
       label: s.tcf_level || '—',
@@ -185,11 +209,28 @@ export default function Dashboard() {
       errors: Math.max(0, (r.total || 0) - (r.score || 0)),
       href: null,
     }));
-    return [...fromSubs,
+    /* And the hour-long Expression écrite sittings, which reached none of
+       this. A simulator paper is an exam_attempts row rather than three
+       submissions, so it was in no list this page read: it counted towards
+       the writing level not at all, and a candidate whose only written work
+       was Test Mode saw "Writing — not practised yet" over three essays they
+       had spent an hour on. */
+    const fromWritingPapers = (writingPapers || []).map((paper) => ({
+      id: paper.attempt_id,
+      at: paper.created_at,
+      skill: 'writing',
+      hasAudio: false,
+      score: displayMark(paper.combined_score, paper.tcf_level),
+      label: paper.tcf_level || '—',
+      errors: [1, 2, 3].reduce(
+        (n, k) => n + (paper.tasks?.[String(k)]?.error_count || 0), 0),
+      href: `/practice/simulator?attempt=${paper.attempt_id}`,
+    }));
+    return [...fromSubs, ...fromWritingPapers,
       ...fromPapers(reading, 'reading', 'reading_attempt_id'),
       ...fromPapers(listening, 'listening', 'listening_attempt_id')]
       .sort((a, b) => new Date(b.at) - new Date(a.at));
-  }, [subs, reading, listening, t]);
+  }, [subs, writingPapers, reading, listening, t]);
 
   const filtered = useMemo(() => {
     const cutoff = days ? Date.now() - days * 86400000 : null;
@@ -275,6 +316,54 @@ export default function Dashboard() {
              attempts: done.reduce((n, x) => n + x.attempts, 0),
              even: done.every((x) => rank(x.nclc) === rank(weakest.nclc)) };
   }, [perSkill]);
+
+  /* WHICH RESULTS THE FILTER BAR IS ASKING FOR.
+   *
+   * The date window, as a predicate the four result lists share. The skill
+   * filter picks whole sections rather than rows: under "Speaking" the two
+   * writing lists are not a narrower answer to the question, they are the
+   * wrong one, and an empty "Writing tests" card under it says nothing true.
+   */
+  const inWindow = useCallback((at) => (
+    !days || new Date(at).getTime() >= Date.now() - days * 86400000
+  ), [days]);
+
+  const showSpeaking = skill === 'all' || skill === 'speaking';
+  const showWriting = skill === 'all' || skill === 'writing';
+
+  /* Each speaking paper with its three tâches lined up and the number
+     answered, so the row itself has nothing left to work out. */
+  const speakingPapers = useMemo(() => sittings
+    .filter((s) => inWindow(s.last_activity))
+    .map((s) => {
+      const taskList = [1, 2, 3].map((n) => s.tasks[String(n)] || null);
+      return { ...s, taskList, answered: taskList.filter(Boolean).length };
+    }), [sittings, inWindow]);
+
+  /* A written paper is graded in one go, so its mark comes off the sitting
+     rather than being averaged from the tâches. `tasks` holds only the ones
+     actually written — the grader flags a blank page and the endpoint leaves
+     it out — so a short paper reports "2 of 3 tâches" instead of a mark that
+     counted a blank as a zero. */
+  const writingSittings = useMemo(() => writingPapers
+    .filter((s) => inWindow(s.created_at))
+    .map((s) => {
+      const mark = displayMark(s.combined_score, s.tcf_level);
+      return { ...s, answered: Object.keys(s.tasks || {}).length,
+               mark, band: nclcFromMark(mark) };
+    }), [writingPapers, inWindow]);
+
+  const speakingAnswers = useMemo(() => practice
+    .filter((a) => inWindow(a.created_at)).map(withMark), [practice, inWindow]);
+
+  const writtenAnswers = useMemo(() => writingPractice
+    .filter((a) => inWindow(a.created_at)).map(withMark),
+  [writingPractice, inWindow]);
+
+  /* The line under a practice answer's title: when it was given, and how much
+     was wrong with it. One sentence, the same for both skills. */
+  const answerMeta = (a) => `${(a.created_at || '').slice(0, 10)} · ${
+    a.error_count ? t('hist.errors', { n: a.error_count }) : t('hist.noErrors')}`;
 
   if (error && !stats) {
     return (
@@ -516,121 +605,130 @@ export default function Dashboard() {
         </section>
       )}
 
-      {/* SPEAKING PAPERS — three tâches read as one result, which is the way
-          the exam reports Expression orale and the only way this page ever
-          shows a combined mark. */}
-      {(sittings.length > 0 || marking) && (
-        <section className="card mt-5 p-4 sm:p-6" data-testid="dash-speaking-tests">
-          <Head title={t('dash.speakingTests')} note={t('dash.speakingTestsNote')} />
-          {marking && !sittings[0]?.complete && (
+      {/* THE RESULTS THEMSELVES — four lists, one row shape.
+       *
+       * Each skill that is graded by the AI gets its finished papers and then
+       * the answers practised one at a time, and all four read identically
+       * because they are the same component. Writing had neither list: a
+       * sitting the candidate spent an hour on reached this page as one line
+       * of the history table named by its CEFR level, which is less than the
+       * speaking tâche they recorded in four minutes got.
+       *
+       * The filter bar above applies. With four sections it has to — under
+       * "Speaking" the two writing lists are not a narrower answer, they are
+       * the wrong one — and the date window applies with it, because the bar
+       * answers one question and it is "which attempts am I looking at".
+       */}
+
+      {showSpeaking && (
+        <ResultSection
+          testid="dash-speaking-tests"
+          title={t('dash.speakingTests')}
+          note={t('dash.speakingTestsNote')}
+          notice={marking && !sittings[0]?.complete ? (
             <p className="mb-3 flex items-center gap-2 rounded-xl bg-violet-50 px-3 py-2 text-xs text-primary"
               data-testid="dash-marking">
               <span className="h-3 w-3 animate-spin rounded-full border-2 border-violet-200 border-t-primary" />
               {t('dash.markingNow')}
             </p>
-          )}
-          <div className="space-y-2">
-            {sittings.map((sit) => {
-              const tasks = [1, 2, 3].map((n) => sit.tasks[String(n)] || null);
-              // The same arithmetic the exam page does, from the same helper —
-              // there is one conversion table and it lives in lib/tcf.js.
-              const paper = sit.complete ? speakingPaperMark(tasks) : null;
-              const answered = tasks.filter(Boolean).length;
-              return (
-                <Link key={sit.set_number} to={`/speaking/test?set=${sit.set_number}`}
-                  data-testid={`dash-sitting-${sit.set_number}`}
-                  className="flex flex-wrap items-center gap-3 rounded-2xl border border-gray-100 px-4 py-3 transition hover:border-violet-200 hover:bg-violet-50/40">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-pink-100 font-heading text-sm font-extrabold text-pink-700">
-                    {sit.index || sit.set_number}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block font-heading text-sm font-bold text-gray-900">
-                      {t('dash.speakingSet', { n: setLabel(t, sit) })}
-                    </span>
-                    <span className="block text-xs text-gray-500">
-                      {tasks.map((task, i) => (
-                        <span key={i} className="mr-2">
-                          {t('hist.tache', { n: i + 1 })} {task ? task.tcf_level : '—'}
-                        </span>
-                      ))}
-                    </span>
-                  </span>
-                  {paper ? (
-                    <span className="flex items-center gap-2">
-                      <span className="font-heading text-lg font-extrabold text-gray-900">
-                        {paper.mark}<span className="text-xs text-gray-400">/20</span>
-                      </span>
-                      {paper.nclc && (
-                        <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-bold text-green-700">
-                          {t('sexam.clb', { level: paper.nclc })}
-                        </span>
-                      )}
-                    </span>
-                  ) : (
-                    <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-700">
-                      {t('dash.speakingPartial', { done: answered, total: 3 })}
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
-          </div>
-        </section>
+          ) : null}
+          rows={speakingPapers.map((sit) => {
+            // The same arithmetic the exam page does, from the same helper —
+            // there is one conversion table and it lives in lib/tcf.js.
+            const paper = sit.complete ? speakingPaperMark(sit.taskList) : null;
+            return (
+              <ResultRow key={sit.set_number} skill="speaking" as={Link}
+                testid={`dash-sitting-${sit.set_number}`}
+                href={`/speaking/test?set=${sit.set_number}`}
+                badge={sit.index || sit.set_number}
+                title={t('dash.speakingSet', { n: setLabel(t, sit) })}
+                meta={taskLine(t, sit.tasks)}
+                complete={Boolean(paper)}
+                mark={paper ? paper.mark : null}
+                band={paper ? paper.nclc : null}
+                pending={paper ? null : t('dash.speakingPartial', {
+                  done: sit.answered, total: 3 })} />
+            );
+          })} />
       )}
 
-      {/* SPEAKING PRACTICE — the tâches practised one at a time, which is
-          where most of the speaking in this app actually happens. Each row is
-          one answer, with the mark out of 20 and the CLB band that mark
-          converts to, so a practice tâche is reported on exactly the scale a
-          sitting is. No combined mark: three tâches practised on three
-          different days are not a paper, and averaging them into one would
-          invent a sitting nobody sat. */}
-      {practice.length > 0 && (
-        <section className="card mt-5 p-4 sm:p-6" data-testid="dash-speaking-practice">
-          <Head title={t('dash.speakingPractice')} note={t('dash.speakingPracticeNote')} />
-          <div className="space-y-2">
-            {(allPractice ? practice : practice.slice(0, 5)).map((a) => {
-              const mark = displayMark(a.overall_score, a.tcf_level);
-              const clb = nclcFromMark(mark);
-              return (
-                <Link key={a.submission_id} to={`/feedback/${a.submission_id}`}
-                  data-testid={`dash-practice-${a.submission_id}`}
-                  className="flex flex-wrap items-center gap-3 rounded-2xl border border-gray-100 px-4 py-3 transition hover:border-violet-200 hover:bg-violet-50/40">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-100 font-heading text-sm font-extrabold text-primary">
-                    {a.task_type}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block font-heading text-sm font-bold text-gray-900">
-                      {t('dash.practiceTache', { n: a.task_type })}
-                    </span>
-                    <span className="block text-xs text-gray-500">
-                      {(a.created_at || '').slice(0, 10)}
-                      {' · '}
-                      {a.error_count
-                        ? t('hist.errors', { n: a.error_count })
-                        : t('hist.noErrors')}
-                    </span>
-                  </span>
-                  <span className="flex items-center gap-2">
-                    <span className="font-heading text-lg font-extrabold text-gray-900">
-                      {mark ?? '—'}<span className="text-xs text-gray-400">/20</span>
-                    </span>
-                    <span className="rounded-full bg-violet-100 px-2.5 py-1 text-xs font-bold text-primary">
-                      {clb ? t('sexam.clb', { level: clb }) : a.tcf_level}
-                    </span>
-                  </span>
-                </Link>
-              );
-            })}
-          </div>
-          {!allPractice && practice.length > 5 && (
-            <button type="button" onClick={() => setAllPractice(true)}
-              data-testid="dash-practice-more"
-              className="mt-3 text-xs font-semibold text-primary underline">
-              {t('dash.speakingPracticeMore', { n: practice.length - 5 })}
-            </button>
-          )}
-        </section>
+      {/* The tâches practised one at a time, which is where most of the
+          speaking in this app actually happens. No combined mark: three
+          tâches practised on three different days are not a paper, and
+          averaging them into one would invent a sitting nobody sat. */}
+      {showSpeaking && (
+        <ResultSection
+          testid="dash-speaking-practice"
+          title={t('dash.speakingPractice')}
+          note={t('dash.speakingPracticeNote')}
+          rows={speakingAnswers.map((a) => (
+            <ResultRow key={a.submission_id} skill="speaking" as={Link}
+              testid={`dash-practice-${a.submission_id}`}
+              href={`/feedback/${a.submission_id}`}
+              /* The tâche number, or the skill's own icon for an answer
+                 that belongs to no tâche — free speaking here, free writing
+                 below. An em dash in a filled badge reads as a missing
+                 number rather than as "this had none". */
+              badge={a.task_type || <Microphone size={15} weight="fill" />}
+              title={a.task_type
+                ? t('dash.practiceTache', { n: a.task_type })
+                : t('dash.freeAnswer')}
+              meta={answerMeta(a)}
+              mark={a.mark}
+              band={a.band || a.tcf_level} />
+          ))} />
+      )}
+
+      {/* WRITING PAPERS — the hour-long Expression écrite sitting, reported
+          the way the speaking paper above it is. One row per attempt rather
+          than per set: a written paper is graded in one go, so an attempt IS
+          a sitting, and somebody who sat set 7 twice has two results worth
+          seeing. */}
+      {showWriting && (
+        <ResultSection
+          testid="dash-writing-tests"
+          title={t('dash.writingTests')}
+          note={t('dash.writingTestsNote')}
+          rows={writingSittings.map((sit) => (
+            <ResultRow key={sit.attempt_id} skill="writing" as={Link}
+              testid={`dash-writing-sitting-${sit.attempt_id}`}
+              href={`/practice/simulator?attempt=${sit.attempt_id}`}
+              badge={sit.index || sit.set_number || <PenNib size={15} weight="fill" />}
+              /* Named like the speaking paper above, from the same helper.
+                 A sitting from before the set number was recorded, or one
+                 drawn at random, belongs to no numbered paper — so it is
+                 "Writing test" and not "Writing test · Set undefined". */
+              title={sit.set_number
+                ? t('dash.writingSet', { n: setLabel(t, sit) })
+                : t('dash.writingUnnumbered')}
+              meta={taskLine(t, sit.tasks)}
+              complete={sit.complete}
+              mark={sit.complete ? sit.mark : null}
+              band={sit.complete ? sit.band : null}
+              pending={sit.complete ? null : t('dash.writingPartial', {
+                done: sit.answered, total: 3 })} />
+          ))} />
+      )}
+
+      {/* WRITING PRACTICE — the texts written outside a sitting. Free writing
+          answers no tâche, so it says so rather than being given one. */}
+      {showWriting && (
+        <ResultSection
+          testid="dash-writing-practice"
+          title={t('dash.writingPractice')}
+          note={t('dash.writingPracticeNote')}
+          rows={writtenAnswers.map((a) => (
+            <ResultRow key={a.submission_id} skill="writing" as={Link}
+              testid={`dash-writing-practice-${a.submission_id}`}
+              href={`/feedback/${a.submission_id}`}
+              badge={a.task_type || <PenNib size={15} weight="fill" />}
+              title={a.task_type
+                ? t('dash.practiceTache', { n: a.task_type })
+                : t('dash.freeWriting')}
+              meta={answerMeta(a)}
+              mark={a.mark}
+              band={a.band || a.tcf_level} />
+          ))} />
       )}
 
       {/* HISTORY — now covers all four papers, so which paper an attempt was
