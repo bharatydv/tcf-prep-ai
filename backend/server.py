@@ -21,6 +21,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone, date
+from itertools import zip_longest
 from pathlib import Path
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, List, Dict, Any, Tuple
@@ -8359,8 +8360,186 @@ CATEGORY_LABELS_FR = {
 }
 
 
+# ----------------------------------------------------------------------------
+# Corrections from the two papers that are marked against an answer key
+# ----------------------------------------------------------------------------
+# Compréhension écrite and orale produce no grader output: a wrong answer is a
+# wrong answer, and there is nothing to tell the candidate until it is set
+# beside the right one. So the dashboard said so — "error analysis covers
+# writing and speaking only" — and two of the four papers had no corrections
+# anywhere on it.
+#
+# They do have corrections. The attempt stores the answer sheet and the bank
+# holds, for every item, what the right answer was, why each distractor fails,
+# and the line of the document that decides it. That is a correction in every
+# sense the table needs; it was simply never read back.
+#
+# The two banks are the same shape — ReadingQuestion is ListeningQuestion with
+# the document in place of the recording — so one query text serves both with
+# the table and id column substituted. Neither comes from user input.
+_COMPREHENSION = {
+    "reading": ("reading_attempts", "reading_questions", "reading_question_id"),
+    "listening": ("listening_attempts", "listening_questions",
+                  "listening_question_id"),
+}
+
+
+def _comprehension_category(skill: str) -> str:
+    """What the Type column says for a comprehension mistake.
+
+    The paper it came from, not a grammar category. A missed inference is not
+    a preposition error, and filing it under one would put it in a drill that
+    cannot teach it.
+    """
+    return skill
+
+
+def _comprehension_severity(position: int) -> str:
+    """How much one missed item actually cost, on the paper's own scale.
+
+    The official TCF weights every item by where it sits — three points for
+    the four easiest, thirty-three for the four hardest — so what a mistake
+    cost is not a judgement call here, it is arithmetic. See TCF_ITEM_POINTS.
+    """
+    points = tcf_item_points(int(position or 1))
+    if points >= 21:
+        return "major"
+    return "moderate" if points >= 9 else "minor"
+
+
+def _comprehension_row(skill: str, position, level, options, correct_answer,
+                       picked, explanation, key_line_fr, breakdown,
+                       times_repeated: int = 0) -> Optional[dict]:
+    """One wrong answer, in the shape the corrections table reads.
+
+    `error` is the option the candidate chose and `correction` the one that
+    was right — which is exactly what the table's first two columns mean, so
+    a comprehension mistake needs no column of its own to be readable beside
+    a grammar one.
+
+    The oral paper speaks the options on its first ten questions rather than
+    printing them, so `text` is legitimately empty there and the option letter
+    stands in. "You answered B" is true and useful; an empty cell is neither.
+    """
+    opts = {str(o.get("id")): o for o in (options or []) if isinstance(o, dict)}
+    right = opts.get(str(correct_answer))
+    chosen = opts.get(str(picked)) if picked else None
+    if not right:
+        return None
+    def label(option, fallback):
+        return (str(option.get("text") or "").strip()
+                or str(option.get("id") or fallback))
+
+    row = {
+        # Left unanswered rather than answered wrongly. The paper scores both
+        # as nil, and the candidate is owed the difference: running out of
+        # time is not the same mistake as picking the wrong option.
+        "error": label(chosen, "?") if chosen else "",
+        "correction": label(right, ""),
+        # The explanation of the option they actually picked says why THAT one
+        # fails, which the question's general explanation does not.
+        "explanation": (str((chosen or {}).get("explanation") or "").strip()
+                        or str(explanation or "").strip()
+                        or str(breakdown or "").strip()),
+        "category": _comprehension_category(skill),
+        "severity": _comprehension_severity(position),
+        "kind": "error",
+        # The line of the document, or of the transcript, that decides it —
+        # the nearest thing a comprehension item has to a rule to carry into
+        # the next paper.
+        "remember": str(key_line_fr or "").strip(),
+        "skill": skill,
+        "level": level or "",
+        "position": int(position or 0),
+    }
+    if times_repeated:
+        row["times_repeated"] = times_repeated
+    return row
+
+
+async def _comprehension_corrections(db: AsyncSession, uid: str, skill: str,
+                                     limit: int = 200) -> List[tuple]:
+    """Every item this candidate got wrong, newest sitting first.
+
+    Returned as (when, correction) so the caller can merge the four papers
+    into one list in time order. The join is done in Postgres over the stored
+    answer sheet: loading every attempt and every question bank row to compare
+    them in Python is the shape this endpoint was rewritten to stop doing.
+    """
+    from sqlalchemy import text as sa_text
+
+    attempts, questions, qid = _COMPREHENSION[skill]
+    rows = (await db.execute(sa_text(
+        f"SELECT a.created_at, q.position, q.level, q.options, "
+        f"       q.correct_answer, ans.value #>> '{{}}' AS picked, "
+        f"       q.explanation, q.key_line_fr, q.breakdown "
+        f"FROM {attempts} a "
+        f"CROSS JOIN LATERAL jsonb_each(COALESCE(a.answers, '{{}}'::jsonb)) "
+        f"     AS ans(qid, value) "
+        f"JOIN {questions} q ON q.{qid} = ans.qid "
+        f"WHERE a.user_id = :uid "
+        f"  AND (ans.value #>> '{{}}') IS DISTINCT FROM q.correct_answer "
+        f"ORDER BY a.created_at DESC LIMIT :lim"),
+        {"uid": uid, "lim": limit})).all()
+    out = []
+    for when, position, level, options, answer, picked, why, key, breakdown in rows:
+        row = _comprehension_row(skill, position, level, options, answer,
+                                 picked, why, key, breakdown)
+        if row:
+            out.append((when, row))
+    return out
+
+
+async def _comprehension_repeats(db: AsyncSession, uid: str, skill: str,
+                                 limit: int = 5) -> List[dict]:
+    """The items missed in more than one sitting, worst first.
+
+    The mistakes table holds nothing from these two papers — it is written by
+    the grader, and there is no grader here — so "keeps coming back" has to be
+    counted from the answer sheets. An item answered wrongly in three sittings
+    is the clearest signal this product has that something has not been
+    learned, and it was being thrown away.
+
+    `mode()` picks the answer most often given, so the row shows the mistake
+    actually being repeated rather than whichever wrong option came last.
+    """
+    from sqlalchemy import text as sa_text
+
+    attempts, questions, qid = _COMPREHENSION[skill]
+    rows = (await db.execute(sa_text(
+        f"SELECT q.position, q.level, q.options, q.correct_answer, "
+        f"       mode() WITHIN GROUP (ORDER BY ans.value #>> '{{}}') AS picked, "
+        f"       q.explanation, q.key_line_fr, q.breakdown, COUNT(*) AS times "
+        f"FROM {attempts} a "
+        f"CROSS JOIN LATERAL jsonb_each(COALESCE(a.answers, '{{}}'::jsonb)) "
+        f"     AS ans(qid, value) "
+        f"JOIN {questions} q ON q.{qid} = ans.qid "
+        f"WHERE a.user_id = :uid "
+        f"  AND (ans.value #>> '{{}}') IS DISTINCT FROM q.correct_answer "
+        f"GROUP BY q.{qid}, q.position, q.level, q.options, q.correct_answer, "
+        f"         q.explanation, q.key_line_fr, q.breakdown "
+        f"HAVING COUNT(*) > 1 "
+        f"ORDER BY times DESC, q.position ASC LIMIT :lim"),
+        {"uid": uid, "lim": limit})).all()
+    out = []
+    for position, level, options, answer, picked, why, key, breakdown, times in rows:
+        row = _comprehension_row(skill, position, level, options, answer,
+                                 picked, why, key, breakdown,
+                                 times_repeated=int(times or 0))
+        if row:
+            out.append(row)
+    return out
+
+
+# Which submission sources belong to each paper, for the `skill` filter below.
+# Reading and listening are not here on purpose: they produce no submissions
+# at all, and are read from their own attempt tables.
+_SKILL_PAPERS = ("writing", "speaking", "reading", "listening")
+
+
 @app.get("/api/mistakes/summary")
-async def mistakes_summary(user: User = Depends(get_current_user),
+async def mistakes_summary(skill: str = "all",
+                           user: User = Depends(get_current_user),
                            db: AsyncSession = Depends(get_db)):
     """Per-category totals, monthly error rate, and the worst repeat offenders.
 
@@ -8368,9 +8547,21 @@ async def mistakes_summary(user: User = Depends(get_current_user),
     entire mistakes table and their entire submissions table — full essay text
     included — into Python, and then loop over both. The learners with the most
     practice had the slowest dashboard.
+
+    `skill` narrows the two correction lists to one paper. The dashboard has a
+    filter bar over four papers and the corrections under it answered for two
+    of them regardless of which was selected, so picking "Reading" left a
+    table of writing mistakes on screen under a heading that said reading.
+    Anything else, including nothing, means all four.
+
+    Only the corrections are filtered. The category totals and the monthly
+    error rate are about written and spoken work by definition — they count
+    grader categories, which an answer key does not produce — and narrowing
+    them to a comprehension paper would report zeros rather than an answer.
     """
     from sqlalchemy import text as sa_text
 
+    skill = skill if skill in _SKILL_PAPERS else "all"
     uid = {"uid": user.user_id}
 
     # per_category counts repeats, not rows: a mistake made five times weighs
@@ -8423,10 +8614,37 @@ async def mistakes_summary(user: User = Depends(get_current_user),
             "errors_per_100_words": round(errors / words * 100, 2) if words else 0,
         })
 
-    repeat_leaders = (await db.execute(
-        select(Mistake).where(Mistake.user_id == user.user_id)
-        .order_by(func.coalesce(Mistake.times_repeated, 1).desc()).limit(5)
-    )).scalars().all()
+    """The mistakes made more than once, worst first — per paper.
+
+    The mistakes table is written by the grader, so it holds written and
+    spoken work only; `source` says which, and is the same set of names
+    submissions carry. The two comprehension papers keep no such table, and
+    their repeats are counted from the answer sheets instead — an item missed
+    in three sittings is the clearest signal in the product that something has
+    not been learned, and it was being thrown away.
+    """
+    if skill in _COMPREHENSION:
+        repeat_rows = []
+        repeat_comprehension = await _comprehension_repeats(
+            db, user.user_id, skill)
+    else:
+        q = select(Mistake).where(Mistake.user_id == user.user_id)
+        if skill == "speaking":
+            q = q.where(Mistake.source.in_(ALL_SPEAKING_SOURCES))
+        elif skill == "writing":
+            q = q.where(Mistake.source.not_in(ALL_SPEAKING_SOURCES))
+        repeat_rows = (await db.execute(
+            q.order_by(func.coalesce(Mistake.times_repeated, 1).desc())
+            .limit(5))).scalars().all()
+        # Under "All" the comprehension repeats belong in the list too, and
+        # they are ranked by the same count as everything else in it.
+        repeat_comprehension = (
+            [] if skill != "all" else
+            await _comprehension_repeats(db, user.user_id, "reading", limit=3)
+            + await _comprehension_repeats(db, user.user_id, "listening", limit=3))
+    repeat_leaders = sorted(
+        [_row_to_dict(m) for m in repeat_rows] + repeat_comprehension,
+        key=lambda m: int(m.get("times_repeated") or 1), reverse=True)[:5]
 
     weak = sorted(((c, n) for c, n in per_cat.items() if n > 0),
                   key=lambda x: -x[1])[:3]
@@ -8453,34 +8671,91 @@ async def mistakes_summary(user: User = Depends(get_current_user),
     The newest wording of each wins, because it is the one the learner was
     most recently shown.
     """
-    corrections, seen = [], set()
-    rows = await db.execute(sa_text(
-        "SELECT e.val AS correction "
-        "FROM submissions s, "
-        "     LATERAL jsonb_array_elements(coalesce(s.errors, '[]'::jsonb)) AS e(val) "
-        "WHERE s.user_id = :uid "
-        "ORDER BY s.created_at DESC "
-        "LIMIT 200"), uid)
-    for (value,) in rows.all():
-        if not isinstance(value, dict):
-            continue
-        said = str(value.get("error", "")).strip()
-        if not said:
-            continue
-        key = (said.casefold(), str(value.get("correction", "")).strip().casefold())
-        if key in seen:
-            continue
-        seen.add(key)
-        corrections.append(value)
-        if len(corrections) >= 20:
-            break
+    """One row per distinct correction, newest first within each paper.
+
+    The same mistake made in four essays is four rows in the database and one
+    thing to learn, and a list that showed it four times would spend its five
+    visible rows saying it once — which is also precisely what the recurring
+    list above exists to say, with a count. The newest wording of each wins,
+    because it is the one the learner was most recently shown.
+    """
+    def distinct(rows: List[tuple]) -> List[dict]:
+        rows.sort(key=lambda r: r[0] or datetime.min.replace(tzinfo=timezone.utc),
+                  reverse=True)
+        out, seen = [], set()
+        for _when, value in rows:
+            said = str(value.get("error", "")).strip()
+            right = str(value.get("correction", "")).strip()
+            # An item left unanswered has no "you said" and is still a
+            # correction worth reading, so a blank one is kept as long as
+            # there is a right answer to show beside it.
+            if not said and not right:
+                continue
+            key = (said.casefold(), right.casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(value)
+        return out
+
+    per_paper: Dict[str, List[dict]] = {}
+
+    if skill in ("all", "writing", "speaking"):
+        # The source filter, as a fragment rather than four near-identical
+        # query texts. ALL_SPEAKING_SOURCES is a tuple of literals this module
+        # owns; nothing from the request reaches it.
+        spoken = ", ".join(f"'{name}'" for name in ALL_SPEAKING_SOURCES)
+        where = {"all": "", "speaking": f" AND s.source IN ({spoken})",
+                 "writing": f" AND s.source NOT IN ({spoken})"}[skill]
+        rows = await db.execute(sa_text(
+            "SELECT e.val AS correction, s.created_at, s.source "
+            "FROM submissions s, "
+            "     LATERAL jsonb_array_elements(coalesce(s.errors, '[]'::jsonb)) AS e(val) "
+            "WHERE s.user_id = :uid" + where + " "
+            "ORDER BY s.created_at DESC "
+            "LIMIT 200"), uid)
+        graded: Dict[str, List[tuple]] = {"writing": [], "speaking": []}
+        for value, when, source in rows.all():
+            if isinstance(value, dict):
+                paper = submission_skill(source)
+                graded[paper].append((when, {**value, "skill": paper}))
+        for paper, rows_for in graded.items():
+            if rows_for:
+                per_paper[paper] = distinct(rows_for)
+
+    for paper in ("reading", "listening"):
+        if skill in ("all", paper):
+            found = await _comprehension_corrections(db, user.user_id, paper)
+            if found:
+                per_paper[paper] = distinct(found)
+
+    if skill == "all":
+        """Every paper gets a turn before any paper gets a second row.
+
+        Sorting the four together by date and taking the first twenty looks
+        like the obvious answer and is the wrong one: whichever paper the
+        candidate sat most recently fills all twenty rows, and the heading
+        over them says "your most important corrections" while the table
+        quietly means "your most recent speaking ones". Round robin keeps each
+        paper's own newest-first order and guarantees that a paper practised
+        at all is represented — which is what "all" is being asked for.
+
+        The table re-ranks what it is given by impact, so a major error still
+        reaches the top of the twenty; this decides which twenty.
+        """
+        pools = [per_paper[p] for p in _SKILL_PAPERS if per_paper.get(p)]
+        corrections = [c for turn in zip_longest(*pools) for c in turn
+                       if c is not None][:20]
+    else:
+        corrections = per_paper.get(skill, [])[:20]
 
     return {
+        "skill": skill,
         "per_category": per_cat,
         "status_counts": status_counts,
         "trend": trend,
         "monthly_trend": trend,
-        "repeat_leaders": [_row_to_dict(m) for m in repeat_leaders],
+        "repeat_leaders": repeat_leaders,
         "recent_corrections": corrections,
         "weak_points": [{"category": c, "count": n,
                          "label": CATEGORY_LABELS_FR.get(c, c),

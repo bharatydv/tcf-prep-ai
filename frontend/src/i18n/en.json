@@ -360,7 +360,9 @@
     "gender_number": "Gender & number agreement",
     "improvement": "C1 improvements",
     "prepositions": "Prepositions",
-    "spelling": "Spelling"
+    "spelling": "Spelling",
+    "listening": "Listening",
+    "reading": "Reading"
   },
   "check": {
     "analyse": "Analyse",
@@ -496,7 +498,6 @@
   },
   "dash": {
     "activity": "Recent activity",
-    "aiGradedOnly": "Error analysis covers writing and speaking only — {{skill}} papers are marked against an answer key, so there are no mistake categories to break down.",
     "allTime": "All time",
     "basedOn": "based on your mistake history",
     "colDate": "Date",
@@ -529,6 +530,11 @@
     "recurring": "Mistakes that keep coming back",
     "recurringSub": "Made more than once, across everything you have written and said. The count is how many times.",
     "topCorrections": "Your most important corrections",
+    "topCorrectionsSkill": "Your most important {{skill}} corrections",
+    "noErrorsSkill": "No {{skill}} mistakes recorded yet — sit a paper and they appear here.",
+    "redoPaper": "Practise {{skill}} again",
+    "redoPaperBody": "These came from papers marked against an answer key, so there is no drill to generate from them — the way to fix them is another paper.",
+    "redoPaperCta": "Go to {{skill}}",
     "topCorrectionsSub": "The highest-impact mistakes from your recent work come first. \"Remember\" turns each one into a rule you can reuse.",
     "retry": "Try again",
     "reviewCategory": "Review this category",
@@ -1622,7 +1628,8 @@
     "p5": "If a payment succeeded and the paid features are still locked, sign out and back in first — that refreshes what your browser knows about the account. If it is still locked, email {{email}} with the date and amount of the payment and we will unlock it, usually the same business day. If we cannot deliver it at all, we refund it in full."
   },
   "sim": {
-    "allErrors": "Your most important corrections",
+    "taskCorrections": "Tâche {{n}} — your corrections",
+    "taskNoErrors": "No mistakes found in this tâche — well written.",
     "backToPractice": "Back to practice",
     "cefr": "CEFR level",
     "combined": "Combined score /20",

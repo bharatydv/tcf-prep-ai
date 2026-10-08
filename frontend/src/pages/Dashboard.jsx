@@ -34,10 +34,12 @@ const TONE = Object.fromEntries(SKILLS.map((s) => [s.id, s.tone]));
 const RANGES = [7, 30, 90, 0];
 const RANGE_KEY = { 7: 'dash.range7', 30: 'dash.range30', 90: 'dash.range90', 0: 'dash.rangeAll' };
 
-/* Only writing and speaking are graded by the AI, so only they carry error
-   categories, weak points and recurring mistakes. Reading and listening are
-   marked against a key — a right answer has no "category of mistake". */
-const AI_GRADED = new Set(['all', 'writing', 'speaking']);
+/* Which skills the review drill can build an exercise from.
+   It is generated from the grader's categories — a conjugation error becomes
+   a conjugation drill — and a comprehension item has none, so the CTA under
+   the corrections is offered for the papers it can actually serve. The
+   corrections themselves now cover all four. */
+const DRILLABLE = new Set(['all', 'writing', 'speaking']);
 
 
 /* Declared at module scope, not inside Dashboard(). A component defined in a
@@ -60,18 +62,6 @@ function Head({ title, note }) {
 function withMark(a) {
   const mark = displayMark(a.overall_score, a.tcf_level);
   return { ...a, mark, band: nclcFromMark(mark) };
-}
-
-/* Reading and listening are marked against an answer key, so the three cards
-   built on AI error analysis have nothing to say about them. Saying so is the
-   point: the alternative is showing writing figures under a reading filter,
-   which is not an empty state but a wrong answer. */
-function NotForSkill({ children }) {
-  return (
-    <p className="rounded-xl bg-gray-50 px-4 py-6 text-center text-sm leading-relaxed text-gray-500">
-      {children}
-    </p>
-  );
 }
 
 export default function Dashboard() {
@@ -118,7 +108,6 @@ export default function Dashboard() {
     api.get('/api/dashboard/stats')
       .then(({ data }) => setStats(data))
       .catch((e) => setError(errMsg(e, t('dash.loadError'))));
-    api.get('/api/mistakes/summary').then(({ data }) => setMistakes(data)).catch(() => {});
     api.get('/api/submissions').then(({ data }) => setSubs(data.submissions || [])).catch(() => {});
     // Reading and listening live in their own tables, not in submissions, so a
     // dashboard that read only /api/submissions could never show two of the
@@ -137,6 +126,25 @@ export default function Dashboard() {
   }, []);
 
   useEffect(load, [load]);
+
+  /* The corrections, for the paper the filter bar is set to.
+   *
+   * Fetched here rather than in `load` because it is the one call whose
+   * answer depends on the filter: the other lists are filtered in the browser
+   * from data already held, but a correction belongs to a paper and the
+   * server is what knows which. Picking "Reading" used to leave a table of
+   * writing mistakes on screen under a heading that said reading.
+   *
+   * `null` while the next one is in flight, so the table shows nothing rather
+   * than the previous skill's corrections for the length of the request. */
+  useEffect(() => {
+    let live = true;
+    setMistakes(null);
+    api.get(`/api/mistakes/summary?skill=${skill}`)
+      .then(({ data }) => { if (live) setMistakes(data); })
+      .catch(() => { if (live) setMistakes(null); });
+    return () => { live = false; };
+  }, [skill]);
 
   /* Waiting out a marking that is still running somewhere else.
    *
@@ -399,7 +407,9 @@ export default function Dashboard() {
   }
 
   const skillName = t(SKILLS.find((s) => s.id === skill).key);
-  const aiGraded = AI_GRADED.has(skill);
+  const drillable = DRILLABLE.has(skill);
+  const hasCorrections = Boolean(
+    mistakes?.recent_corrections?.length || recurring.length);
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-6 sm:py-10">
@@ -560,12 +570,12 @@ export default function Dashboard() {
           showing anything they actually wrote, and neither looked like the
           corrections they had just read on the result page an hour earlier.
           One table, read the same way everywhere. */}
-      {aiGraded ? (
-        <>
+      <>
           <CorrectionsTable
             className="mt-5"
             testid="dash-corrections"
-            title={t('dash.topCorrections')}
+            title={skill === 'all' ? t('dash.topCorrections')
+              : t('dash.topCorrectionsSkill', { skill: skillName })}
             desc={t('dash.topCorrectionsSub')}
             errors={mistakes?.recent_corrections} />
 
@@ -586,24 +596,39 @@ export default function Dashboard() {
               three categories. The categories are gone, so one way in
               remains — it leads to the same drill, built from the same
               mistakes, and it is the action both tables above are for. */}
-          {(mistakes?.recent_corrections?.length || recurring.length) ? (
+          {hasCorrections && drillable && (
             <PracticeCta practiceHref="/review" className="mt-5" />
-          ) : null}
+          )}
 
-          {!mistakes?.recent_corrections?.length && !recurring.length && (
+          {/* The drill is built from the grader's categories, which a
+              comprehension item has none of — so under reading or listening
+              the way back in is the paper itself, not an exercise that cannot
+              be generated. */}
+          {hasCorrections && !drillable && (
+            <section className="card mt-5 p-4 sm:p-6" data-testid="dash-redo-paper">
+              <Head title={t('dash.redoPaper', { skill: skillName })} />
+              <p className="text-sm leading-relaxed text-gray-500">
+                {t('dash.redoPaperBody', { skill: skillName.toLowerCase() })}
+              </p>
+              <Link to={SKILLS.find((x) => x.id === skill).href}
+                className="btn-primary mt-4 inline-flex">
+                {t('dash.redoPaperCta', { skill: skillName.toLowerCase() })}
+              </Link>
+            </section>
+          )}
+
+          {/* `null` is "still loading", which is not the same statement as an
+              empty list and must not print "no mistakes yet". */}
+          {mistakes && !hasCorrections && (
             <section className="card mt-5 p-4 sm:p-6">
-              <p className="rounded-xl bg-gray-50 px-4 py-8 text-center text-sm text-gray-500">
-                {t('dash.noErrors')}
+              <p className="rounded-xl bg-gray-50 px-4 py-8 text-center text-sm text-gray-500"
+                data-testid="dash-no-errors">
+                {skill === 'all' ? t('dash.noErrors')
+                  : t('dash.noErrorsSkill', { skill: skillName.toLowerCase() })}
               </p>
             </section>
           )}
         </>
-      ) : (
-        <section className="card mt-5 p-4 sm:p-6">
-          <Head title={t('dash.topCorrections')} note={t('dash.basedOn')} />
-          <NotForSkill>{t('dash.aiGradedOnly', { skill: skillName })}</NotForSkill>
-        </section>
-      )}
 
       {/* THE RESULTS THEMSELVES — four lists, one row shape.
        *
