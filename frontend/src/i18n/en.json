@@ -270,6 +270,7 @@
     "activeUntil": "Your subscription is active until {{date}}.",
     "cancelledBody": "You stopped before paying, so nothing was charged and your plan has not changed. Pick up where you left off whenever you are ready.",
     "cancelledTitle": "Payment cancelled",
+    "cancelledToast": "Payment cancelled — nothing was charged.",
     "declinedBody": "The payment did not go through and you have not been charged. This is usually the card or the bank rather than anything you did — another card, or the same one in a minute, normally works.",
     "declinedTitle": "That payment did not go through",
     "checking": "Confirming your payment…",

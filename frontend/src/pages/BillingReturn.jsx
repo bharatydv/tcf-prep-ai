@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { toast } from 'sonner';
 import { CheckCircle, Warning, SpinnerGap, XCircle, ArrowCounterClockwise } from '@phosphor-icons/react';
 import { api } from '../lib/api';
+import { CHECKOUT_ORIGIN } from '../lib/checkout';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 
@@ -19,7 +21,14 @@ import { useT } from '../i18n';
  * payment…" before telling them their bank has not replied is a lie about
  * something they just did themselves. The webhook reads PayU's own reason —
  * cancelled is reported as a failure there, the difference being in
- * `unmappedstatus` — and passes it in ?status, so those two land finished. */
+ * `unmappedstatus` — and passes it in ?status, so those two land finished.
+ *
+ * A cancel does not even stop here. Pressing Cancel is not a thing anybody
+ * wants reported back to them on a page of its own; they were part way
+ * through something and want that page again. So the path they left from is
+ * kept for the length of the checkout and they are put back on it, with a
+ * toast to say nothing was charged. Only when it is missing — a new tab,
+ * blocked storage, a bookmarked return URL — does the screen below show. */
 const POLL_MS = 2000;
 const MAX_POLLS = 10;
 
@@ -32,11 +41,32 @@ export default function BillingReturn() {
      is every Cashfree return and any PayU reply that failed to parse — falls
      through to the poll, because then the server is the only one who knows. */
   const reported = params.get('status');
+  const navigate = useNavigate();
+  /* Read once, before the first paint, so a cancel that is going straight
+     back never flashes the screen it is not going to stay on. Taken out of
+     storage as it is read: it belongs to this checkout and not the next. */
+  const [backTo] = useState(() => {
+    if (reported !== 'cancelled') return null;
+    let path = null;
+    try {
+      path = sessionStorage.getItem(CHECKOUT_ORIGIN);
+      sessionStorage.removeItem(CHECKOUT_ORIGIN);
+    } catch { return null; }
+    // Our own paths only. '//evil.com' is a URL to a browser, not a path.
+    return path && path.startsWith('/') && !path.startsWith('//') ? path : null;
+  });
   const [state, setState] = useState(   // checking | active | pending | cancelled | failed
     reported === 'cancelled' || reported === 'failed' ? reported : 'checking');
   const [until, setUntil] = useState(null);
   const pollsRef = useRef(0);
   const settled = state === 'cancelled' || state === 'failed';
+
+  useEffect(() => {
+    if (!backTo) return;
+    // replace: Back must not walk into the return page they just left.
+    toast(t('billing.cancelledToast'));
+    navigate(backTo, { replace: true });
+  }, [backTo, navigate, t]);
 
   useEffect(() => {
     if (settled) return undefined;
@@ -67,6 +97,10 @@ export default function BillingReturn() {
     // refreshUser is stable enough; re-running would restart the poll.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settled]);
+
+  // Going back: render nothing rather than a screen with a lifetime of one
+  // frame. The toast carries the message to the page they land on.
+  if (backTo) return null;
 
   return (
     <main className="mx-auto max-w-lg px-4 py-20 text-center" data-testid="billing-return">
