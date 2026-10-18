@@ -4921,6 +4921,22 @@ def _payu_paid_amount(fields: dict):
     return float(paid)
 
 
+# PayU reports a cancelled payment as an ordinary failure: `status` is
+# "failure" whether the card was declined or the customer pressed Cancel,
+# and the difference lives in `unmappedstatus`. Worth separating, because
+# the page they land on should not tell someone who deliberately stopped
+# that we are waiting on their bank.
+_PAYU_CANCELLED = {"usercancelled", "cancelled", "dropped", "bounced"}
+
+
+def payu_return_outcome(fields: dict) -> str:
+    """What to tell the browser: "success", "cancelled" or "failed"."""
+    if _payu_text(fields.get("status")).lower() == "success":
+        return "success"
+    unmapped = _payu_text(fields.get("unmappedstatus")).lower()
+    return "cancelled" if unmapped in _PAYU_CANCELLED else "failed"
+
+
 def _parse_payu_response(fields: dict) -> dict:
     """Flatten a verified PayU callback to the billing event contract."""
     txnid = _payu_text(fields.get("txnid"))
@@ -12790,10 +12806,18 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     is_payu = request.headers.get("content-type", "").split(";", 1)[0].lower() \
         in {"application/x-www-form-urlencoded", "multipart/form-data"}
 
+    # Filled in once PayU's reply has been read. finish() runs on every
+    # exit path, including the ones that never reach the parse, so it
+    # starts empty - and an empty outcome is the old behaviour, a page
+    # that polls because it does not know any better.
+    outcome = {"status": ""}
+
     def finish(payload):
         if is_payu:
-            return RedirectResponse(url=f"{ALLOWED_ORIGINS[0]}/billing/return",
-                                    status_code=303)
+            url = f"{ALLOWED_ORIGINS[0]}/billing/return"
+            if outcome["status"]:
+                url += f"?status={outcome['status']}"
+            return RedirectResponse(url=url, status_code=303)
         return payload
 
     raw = await request.body()
@@ -12824,6 +12848,10 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     paid_amount = None
     if is_payu:
         parsed = _parse_payu_response(event)
+        # Before any of the early returns below: a cancelled payment
+        # matches no subscription row to update and leaves through one of
+        # them, and it is exactly the case the browser needs told.
+        outcome["status"] = payu_return_outcome(event)
         event_type = parsed["event_type"]
         status = parsed["status"]
         marker = parsed["marker"]

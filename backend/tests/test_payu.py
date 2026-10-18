@@ -167,3 +167,16 @@ def test_an_unreadable_charge_does_not_lose_the_payment():
               "mihpayid": "pay_1", "additionalCharges": "CC:0.30"}
 
     assert m._parse_payu_response(fields)["amount"] == 10.00
+
+
+def test_a_cancel_is_told_apart_from_a_decline():
+    """PayU calls both a failure; only unmappedstatus says which."""
+    assert m.payu_return_outcome({"status": "success"}) == "success"
+    assert m.payu_return_outcome(
+        {"status": "failure", "unmappedstatus": "usercancelled"}) == "cancelled"
+    assert m.payu_return_outcome(
+        {"status": "failure", "unmappedstatus": "dropped"}) == "cancelled"
+    # A real decline, and a failure PayU gave no reason for, both read as one.
+    assert m.payu_return_outcome(
+        {"status": "failure", "unmappedstatus": "failed"}) == "failed"
+    assert m.payu_return_outcome({"status": "failure"}) == "failed"
