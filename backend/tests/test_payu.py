@@ -73,10 +73,29 @@ class _User:
     user_id = "u_1"
 
 
-def test_form_sends_the_plan_price_and_the_fee_beside_it(monkeypatch):
+def test_the_whole_total_is_charged_by_default(monkeypatch):
+    """The fee is collected even where PayU drops an itemised charge.
+
+    PayU does not refuse a charge it will not honour - it bills the `amount`
+    and ignores the rest - so a split that is not honoured is a discount
+    nobody authorised.
+    """
+    monkeypatch.setattr(m, "PAYU_KEY", "merchant-key")
+    monkeypatch.setattr(m, "PAYU_SALT", "merchant-salt")
+    monkeypatch.setattr(m, "PAYU_SPLIT_CHARGES", False)
+    bill = {"base_amount": 10.0, "total": 10.30}
+
+    fields = m._payu_form("sub_1", "week", bill, _User())
+
+    assert fields["amount"] == "10.30"
+    assert "additional_charges" not in fields
+
+
+def test_the_split_puts_the_fee_beside_the_price(monkeypatch):
     """PayU can only itemise what arrives as two fields, not one total."""
     monkeypatch.setattr(m, "PAYU_KEY", "merchant-key")
     monkeypatch.setattr(m, "PAYU_SALT", "merchant-salt")
+    monkeypatch.setattr(m, "PAYU_SPLIT_CHARGES", True)
     monkeypatch.setattr(m, "PAYU_CHARGE_METHODS", ["CC", "DC", "UPI"])
     bill = {"base_amount": 10.0, "total": 10.30}
 
@@ -85,11 +104,16 @@ def test_form_sends_the_plan_price_and_the_fee_beside_it(monkeypatch):
     # Not 10.30: the page would have nothing left to break out.
     assert fields["amount"] == "10.00"
     assert fields["additional_charges"] == "CC:0.30,DC:0.30,UPI:0.30"
+    # Split or not, the customer pays the same.
+    assert (float(fields["amount"])
+            + float(fields["additional_charges"].split(":")[1].split(",")[0])
+            == 10.30)
 
 
 def test_no_fee_leaves_the_form_as_it_was(monkeypatch):
     monkeypatch.setattr(m, "PAYU_KEY", "merchant-key")
     monkeypatch.setattr(m, "PAYU_SALT", "merchant-salt")
+    monkeypatch.setattr(m, "PAYU_SPLIT_CHARGES", True)
     bill = {"base_amount": 10.0, "total": 10.0}
 
     fields = m._payu_form("sub_1", "week", bill, _User())
