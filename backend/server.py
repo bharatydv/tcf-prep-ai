@@ -4657,6 +4657,18 @@ PAYU_BASE_URL = os.environ.get(
 PAYU_CHARGE_METHODS = [c.strip() for c in os.environ.get(
     "PAYU_CHARGE_METHODS",
     "CC,DC,NB,UPI,EMI,CASH,WALLET,AMEX,DINR").split(",") if c.strip()]
+# OFF, because being wrong here costs money rather than looks.
+#
+# Sending the plan price with the fee beside it lets PayU itemise the two
+# on its page. When PayU does not honour the field it does not refuse the
+# order - it charges the `amount` it was given and drops the rest, so the
+# fee is simply not collected and every sale is quietly discounted. That
+# is what happened on this account (2026-10-18), hence the default.
+#
+# Turn it on only after a real checkout shows the charge on PayU's own
+# page AND the amount debited matches the total the pricing page quotes.
+PAYU_SPLIT_CHARGES = os.environ.get(
+    "PAYU_SPLIT_CHARGES", "").strip().lower() in {"1", "true", "yes"}
 
 # Razorpay has one host for both test and live; which one you are on is decided
 # by the key, not the URL - a key beginning rzp_test_ cannot touch live money.
@@ -10742,19 +10754,22 @@ async def _razorpay_open_order(sub_id: str, plan_key: str, charged: float,
 def _payu_form(sub_id: str, plan_key: str, bill: dict, user: User) -> dict:
     """Build the fields for PayU's hosted checkout form POST.
 
-    `amount` is the plan price, and the fee rides beside it in
-    `additional_charges` rather than the two being added up here. PayU
-    bills the sum either way; the difference is that its page can then
-    show what the extra is, instead of one "Total Payable" that is larger
-    than the price the customer agreed to and says nothing about why. With
-    no fee configured the field is absent and the form is what it was.
+    `amount` is the whole total, fee included, unless PAYU_SPLIT_CHARGES
+    says otherwise. Split, the plan price goes in `amount` and the fee
+    beside it in `additional_charges`, which is the only way PayU's page
+    can show what the extra is rather than one unexplained "Total
+    Payable" - but only if PayU honours the field. When it does not, it
+    charges the `amount` it was handed and silently drops the fee, so the
+    safe default is to hand it everything.
     """
     name = (user.name or "Learner").strip().split()
-    added = money(bill["total"]) - money(bill["base_amount"])
+    charged = (money(bill["base_amount"]) if PAYU_SPLIT_CHARGES
+               else money(bill["total"]))
+    added = money(bill["total"]) - charged
     fields = {
         "key": PAYU_KEY,
         "txnid": sub_id,
-        "amount": f"{money(bill['base_amount']):.2f}",
+        "amount": f"{charged:.2f}",
         "productinfo": (BILLING_PLANS.get(plan_key) or {}).get("name", plan_key),
         "firstname": name[0] if name else "Learner",
         "email": user.email,
