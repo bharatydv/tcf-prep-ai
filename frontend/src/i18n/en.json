@@ -1154,7 +1154,6 @@
     "whatToExpect": "What to expect"
   },
   "pricing": {
-    "bonus": "{{n}} bonus AI attempts",
     "comingSoon": "Coming soon",
     "createAccount": "Create my free account",
     "ctaTitle": "3 writing + 3 speaking corrections free — no credit card",
@@ -1193,7 +1192,8 @@
     "subscribe": "Subscribe",
     "subtitle": "Short, intensive plans built around your TEF/TCF Canada exam date.",
     "title": "Plans",
-    "total": "Total"
+    "total": "Total",
+    "unlimitedAi": "Unlimited AI corrections"
   },
   "privacy": {
     "h": "Privacy policy",

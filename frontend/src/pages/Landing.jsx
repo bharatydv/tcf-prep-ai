@@ -778,7 +778,7 @@ export default function Landing() {
                   )}
                   <p className="mt-1 text-xs font-semibold text-gray-400">/ {p.durationKey ? t(p.durationKey) : p.name}</p>
                   <ul className="mt-6 flex-1 space-y-3 text-left text-[13px] font-semibold text-gray-700">
-                    <li className="flex items-center gap-2.5"><CheckCircle size={17} weight="fill" className="shrink-0 text-primary" /> {t('pricing.bonus', { n: p.bonus })}</li>
+                    <li className="flex items-center gap-2.5"><CheckCircle size={17} weight="fill" className="shrink-0 text-primary" /> {t('pricing.unlimitedAi')}</li>
                     {planFeatures.map((f) => (
                       <li key={f} className="flex items-center gap-2.5"><CheckCircle size={17} weight="fill" className="shrink-0 text-primary" /> {t(f)}</li>
                     ))}

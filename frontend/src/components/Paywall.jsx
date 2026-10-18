@@ -113,7 +113,7 @@ function PaywallDialog({ block, onClose }) {
                       already guards it the same way. */}
                   <p className="text-xs text-gray-500">
                     {plan.durationKey ? t(plan.durationKey) : plan.name}
-                    {' · '}{t('pricing.bonus', { n: plan.bonus })}
+                    {' · '}{t('pricing.unlimitedAi')}
                   </p>
                 </div>
                 <span className="shrink-0 text-right">
