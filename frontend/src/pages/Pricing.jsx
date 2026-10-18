@@ -130,7 +130,7 @@ export default function Pricing() {
                   {t('pricing.firstTime')}
                 </p>
               )}
-              <p className="mt-1 text-sm font-semibold text-white/90">+ {t('pricing.bonus', { n: p.bonus })}</p>
+              <p className="mt-1 text-sm font-semibold text-white/90">{t('pricing.unlimitedAi')}</p>
             </div>
             <ul className="space-y-3 p-6 text-sm">
               {FEATURE_KEYS.map((k) => (

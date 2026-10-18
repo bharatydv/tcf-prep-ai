@@ -94,9 +94,9 @@ export function feeBreakdown(base, feePercent = FALLBACK_FEE_PERCENT) {
    pricing page with three empty cards is worse than one showing last known
    prices. `configured` stays false for these, so nothing is buyable from them. */
 export const PLANS = [
-  { id: 'week', name: '1 Week', amount: 1299, first_amount: 1299, price: '₹1,299', wasPrice: null, bonus: 3, checkout: feeBreakdown(1299), ...PLAN_STYLE.week },
-  { id: 'month', name: '1 Month', amount: 4999, first_amount: 4999, price: '₹4,999', wasPrice: null, bonus: 8, checkout: feeBreakdown(4999), ...PLAN_STYLE.month },
-  { id: 'quarter', name: '3 Months', amount: 14999, first_amount: 14999, price: '₹14,999', wasPrice: null, bonus: 15, checkout: feeBreakdown(14999), ...PLAN_STYLE.quarter },
+  { id: 'week', name: '1 Week', amount: 10, first_amount: 10, price: '$10', wasPrice: null, bonus: 3, checkout: feeBreakdown(10), ...PLAN_STYLE.week },
+  { id: 'month', name: '1 Month', amount: 50, first_amount: 50, price: '$50', wasPrice: null, bonus: 8, checkout: feeBreakdown(50), ...PLAN_STYLE.month },
+  { id: 'quarter', name: '3 Months', amount: 130, first_amount: 130, price: '$130', wasPrice: null, bonus: 15, checkout: feeBreakdown(130), ...PLAN_STYLE.quarter },
 ];
 
 /* The live catalogue.
@@ -137,7 +137,7 @@ async function fetchCatalogue() {
 
 export function useBillingPlans() {
   const [state, setState] = useState({
-    plans: PLANS, currency: 'INR', configured: false, firstTime: true, loading: true,
+    plans: PLANS, currency: 'USD', configured: false, firstTime: true, loading: true,
   });
 
   useEffect(() => {
