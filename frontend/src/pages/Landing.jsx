@@ -12,7 +12,6 @@ import { useT } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
 import { track } from '../lib/api';
 import { useBillingPlans, formatPrice } from '../lib/plans';
-import { useCheckout } from '../lib/checkout';
 import ReviewsSection from '../components/ReviewsSection';
 
 /* ===================================================================== page */
@@ -50,12 +49,11 @@ export default function Landing() {
   const [simTopic, setSimTopic] = useState('');
   const [simAnswer, setSimAnswer] = useState('');
   const trialTo = user ? '/dashboard' : '/register';
-  /* A plan card is purchase intent, so it opens the real checkout here rather
-     than linking to /pricing.
-     Clicking "1 Month" and being shown a page that asks which plan you want is
-     a step that sells nothing — the visitor already said. The hook handles the
-     signed-out case itself, carrying the chosen plan through registration. */
-  const { subscribe, busy, promptDialog } = useCheckout();
+  /* A plan card is purchase intent, so it opens that plan's checkout rather
+     than linking to /pricing. Clicking "1 Month" and being shown a page that
+     asks which plan you want is a step that sells nothing — the visitor
+     already said. /checkout/:planId handles the signed-out case itself,
+     carrying the chosen plan through registration. */
 
   // The top of the funnel. Everything else is measured against this number.
   useEffect(() => { track('landing_view'); }, []);
@@ -112,7 +110,6 @@ export default function Landing() {
     <main className="overflow-x-clip bg-white">
       {/* The phone prompt renders through this; without it, a Cashfree
           checkout that needs a number would stall with nothing on screen. */}
-      {promptDialog}
       <Seo
         titleKey="seo.home.title"
         descKey="seo.home.desc"
@@ -787,9 +784,9 @@ export default function Landing() {
                       specific plan is asking to buy it, and every screen
                       between that click and the card form costs conversions. */}
                   <button type="button" data-testid={`plan-${p.id}`}
-                    onClick={() => subscribe(p.id)} disabled={Boolean(busy)}
+                    onClick={() => navigate(`/checkout/${p.id}`)}
                     className={`mt-7 ${p.popular ? 'btn-primary !bg-gradient-to-r !from-primary !to-fuchsia-600 w-full justify-center' : 'btn-outline w-full justify-center'}`}>
-                    {busy === p.id ? t('billing.redirecting') : t('land.getStarted')}
+                    {t('land.getStarted')}
                   </button>
                 </div>
               </div>
