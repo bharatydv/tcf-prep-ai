@@ -180,3 +180,21 @@ def test_a_cancel_is_told_apart_from_a_decline():
     assert m.payu_return_outcome(
         {"status": "failure", "unmappedstatus": "failed"}) == "failed"
     assert m.payu_return_outcome({"status": "failure"}) == "failed"
+
+
+def test_debug_fields_say_what_arrived_without_saying_who():
+    form = {"status": "failure", "unmappedstatus": "usercancelled",
+            "error_Message": "cancelled by user", "txnid": "sub_1",
+            "firstname": "Marie", "email": "marie@example.com",
+            "phone": "9999999999", "hash": ""}
+
+    out = m.payu_debug_fields(form)
+
+    assert out["status"] == "failure"
+    assert out["unmappedstatus"] == "usercancelled"
+    # Whether PayU signed it at all is the first thing worth knowing.
+    assert out["has_hash"] is False
+    assert "email" in out["fields_present"]        # that it was sent,
+    assert "marie@example.com" not in str(out)     # never what it said.
+    assert "9999999999" not in str(out)
+    assert "Marie" not in str(out)

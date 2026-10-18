@@ -4929,6 +4929,22 @@ def _payu_paid_amount(fields: dict):
 _PAYU_CANCELLED = {"usercancelled", "cancelled", "dropped", "bounced"}
 
 
+def payu_debug_fields(form: dict) -> dict:
+    """Enough of a callback to tell what PayU sent, without the PII.
+
+    An unverifiable callback is the one case where the body cannot be
+    trusted and also cannot be ignored: something is wrong and these are
+    the only fields that say what. Names, emails and phone numbers are not
+    among them, so a log full of these is not a log full of customers.
+    """
+    keep = ("status", "unmappedstatus", "error", "error_Message", "mode",
+            "txnid", "mihpayid", "amount", "additionalCharges", "key")
+    out = {k: form.get(k) for k in keep if form.get(k) not in (None, "")}
+    out["fields_present"] = sorted(form.keys())
+    out["has_hash"] = bool(form.get("hash"))
+    return out
+
+
 def payu_return_outcome(fields: dict) -> str:
     """What to tell the browser: "success", "cancelled" or "failed"."""
     if _payu_text(fields.get("status")).lower() == "success":
@@ -12893,6 +12909,22 @@ async def billing_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     if not ok:
         log.warning("Rejected a %s webhook with an invalid signature",
                     "PayU" if is_payu else "Razorpay" if is_razorpay else "Cashfree")
+        if is_payu:
+            # PayU posts the BROWSER here - surl and furl are this URL - so
+            # raising 401 renders {"detail":"Invalid signature"} at the
+            # customer, which is what someone who pressed Cancel was shown.
+            #
+            # Redirecting instead gives up nothing. This path grants no
+            # premium, writes no BillingEvent and touches no subscription
+            # row: everything below it is unreachable from here, and only a
+            # verified success ever reaches grant_premium. The outcome is
+            # read off an unverified body on purpose - it chooses which
+            # sentence is displayed and nothing else, and the page it lands
+            # on asks the server for the truth anyway.
+            log.warning("PayU callback did not verify: %s",
+                        payu_debug_fields(form))
+            outcome["status"] = payu_return_outcome(form)
+            return finish(None)
         raise HTTPException(status_code=401, detail="Invalid signature")
 
     if is_payu:
