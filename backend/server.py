@@ -11583,6 +11583,40 @@ def retention_row(cohort_size, returned):
     return out
 
 
+# The events whose whole meaning is "somebody was on a page": they name a
+# viewing, not a thing done, so on their own they cannot say where a visit
+# ended. These carry the page; every other event already names its own action.
+PAGE_EVENTS = {"page_view", "landing_view", "tcf_canada_view", "pricing_view"}
+
+
+def step_label(event, path, max_page=60):
+    """One step of a path, with the page for the steps that need it.
+
+    A bare `page_view` repeated across a visit says somebody browsed and never
+    says where they stopped, which is the one thing the path view is read for.
+    So a view event is labelled with its page and two different pages stop
+    collapsing into one step.
+
+    The query string goes, campaign parameters included: /pricing?utm=x and
+    /pricing are the same page to anybody asking where people drop, and keeping
+    them apart would split one row into twenty.
+    """
+    name = (event or "").strip()
+    if not name or name not in PAGE_EVENTS:
+        return name
+    page = (path or "").split("?")[0].split("#")[0].strip()
+    if not page:
+        return name
+    page = ("/" + page.strip("/"))[:max_page]
+    return f"{name} {page}"
+
+
+def step_page(label):
+    """The page out of a label, or None for a step that carries none."""
+    event, _, page = label.partition(" ")
+    return page if event in PAGE_EVENTS and page else None
+
+
 def collapse_path(events, max_steps=10):
     """One session's events as a readable path.
 
@@ -12451,6 +12485,11 @@ async def admin_analytics_paths(
     otherwise every path is a unique snowflake with a count of one and the view
     says nothing. Only sessions with at least two distinct steps are counted.
 
+    View events carry their page (see step_label), so the last step of a path
+    names the page the visit ended on instead of saying only "page_view". The
+    same last page, counted across every session, is returned as `exits`: the
+    direct answer to where people drop.
+
     Built from session_id, so it covers everything recorded since sessions
     existed and nothing before it.
     """
@@ -12458,9 +12497,11 @@ async def admin_analytics_paths(
     since, until = analytics_range(preset, start, end)
 
     # Aggregated per session in Postgres; only the collapsed sequences come
-    # back, capped, so the whole table is never in memory here.
+    # back, capped, so the whole table is never in memory here. The pages are
+    # aggregated in the same order as the events so the two line up pairwise.
     res = await db.execute(sa_text(
-        "SELECT session_id, array_agg(event ORDER BY created_at, id) AS steps "
+        "SELECT session_id, array_agg(event ORDER BY created_at, id) AS steps, "
+        "       array_agg(COALESCE(path, '') ORDER BY created_at, id) AS pages "
         "FROM usage_events "
         "WHERE created_at >= :since AND created_at < :until "
         "  AND session_id IS NOT NULL "
@@ -12469,19 +12510,36 @@ async def admin_analytics_paths(
         "LIMIT 20000"), {"since": since, "until": until})
 
     counts = {}
-    for _sid, steps in res.fetchall():
-        path = collapse_path(list(steps or []))
+    exits = {}
+    for _sid, steps, pages in res.fetchall():
+        events = list(steps or [])
+        places = list(pages or [])
+        places += [""] * (len(events) - len(places))
+        labelled = [step_label(e, p) for e, p in zip(events, places)]
+
+        # The exit page is taken from the WHOLE session, not from the path
+        # below: the path is cut at ten steps, so its last step is often not
+        # where the visitor actually stopped.
+        last_page = next(
+            (page for page in (step_page(x) for x in reversed(labelled)) if page),
+            None)
+
+        path = collapse_path(labelled)
         if len(path) < 2:
             continue
         key = " > ".join(path)
         counts[key] = counts.get(key, 0) + 1
+        if last_page:
+            exits[last_page] = exits.get(last_page, 0) + 1
 
     ordered = sorted(counts.items(), key=lambda kv: -kv[1])[:limit]
+    top_exits = sorted(exits.items(), key=lambda kv: -kv[1])[:limit]
     return {"range": {"preset": preset, "since": since.isoformat(),
                       "until": until.isoformat()},
             "sessions_considered": sum(counts.values()),
             "paths": [{"path": k, "steps": k.split(" > "), "sessions": v}
-                      for k, v in ordered]}
+                      for k, v in ordered],
+            "exits": [{"page": k, "sessions": v} for k, v in top_exits]}
 
 
 # ----------------------------------------------------------------------------
