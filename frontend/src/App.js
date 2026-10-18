@@ -41,7 +41,6 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 
 const Pricing = lazy(() => import("./pages/Pricing"));
-const Checkout = lazy(() => import("./pages/Checkout"));
 const Reviews = lazy(() => import("./pages/Reviews"));
 const VerifyAccount = lazy(() => import("./pages/VerifyAccount"));
 const Practice = lazy(() => import("./pages/Practice"));
@@ -116,7 +115,6 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/pricing" element={<Pricing />} />
-          <Route path="/checkout/:planId" element={<Checkout />} />
           <Route path="/reviews" element={<Reviews />} />
           <Route path="/practice" element={<Practice />} />
           {/* Specific /practice routes MUST come before /practice/:promptId */}

@@ -373,14 +373,6 @@
     "textPlaceholder": "Paste your French text here…",
     "title": "Check my writing"
   },
-  "checkout": {
-    "close": "Close checkout",
-    "loading": "Loading your order…",
-    "note": "You will be taken to our payment provider to finish the payment. Your card details are never sent to prepfrancais.",
-    "pay": "Pay {{amount}}",
-    "secure": "Secure payment",
-    "title": "Checkout"
-  },
   "combo": {
     "heroA": "Recent",
     "heroB": "Topics",

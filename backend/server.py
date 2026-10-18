@@ -4649,6 +4649,14 @@ PAYU_KEY = os.environ.get("PAYU_KEY", "")
 PAYU_SALT = os.environ.get("PAYU_SALT", "")
 PAYU_BASE_URL = os.environ.get(
     "PAYU_BASE_URL", "https://secure.payu.in/_payment")
+# PayU itemises a charge per payment mode, keyed by bankcode, and a mode
+# left out of the string is offered the bare `amount` instead - so a short
+# list here does not fail loudly, it quietly sells at cost on whichever
+# mode is missing. These are the modes the hosted page shows; it is an env
+# var so a code PayU adds later is config, not a deploy.
+PAYU_CHARGE_METHODS = [c.strip() for c in os.environ.get(
+    "PAYU_CHARGE_METHODS",
+    "CC,DC,NB,UPI,EMI,CASH,WALLET,AMEX,DINR").split(",") if c.strip()]
 
 # Razorpay has one host for both test and live; which one you are on is decided
 # by the key, not the URL - a key beginning rzp_test_ cannot touch live money.
@@ -4822,8 +4830,25 @@ def _payu_text(value: Any) -> str:
     return "" if value is None else str(value)
 
 
+def payu_additional_charges(amount) -> str:
+    """PayU's charge string: the fee quoted against every payment mode.
+
+    `"CC:0.30,DC:0.30,..."`. One rate covers every mode here, the
+    catalogue having a single fee percentage, but PayU's field is keyed by
+    bankcode either way - so the same figure is repeated across the list.
+    """
+    value = f"{money(amount):.2f}"
+    return ",".join(f"{code}:{value}" for code in PAYU_CHARGE_METHODS)
+
+
 def payu_request_hash(fields: dict) -> str:
-    """SHA-512 hash for PayU's hosted-checkout form."""
+    """SHA-512 hash for PayU's hosted-checkout form.
+
+    `additional_charges` is appended AFTER the salt rather than taking a
+    column of its own. Sending the field with the plain hash is exactly how
+    it gets ignored: PayU drops the charge and renders one undivided total,
+    which looks from the outside like the field being unsupported.
+    """
     values = [
         PAYU_KEY, fields.get("txnid", ""), fields.get("amount", ""),
         fields.get("productinfo", ""), fields.get("firstname", ""),
@@ -4831,24 +4856,69 @@ def payu_request_hash(fields: dict) -> str:
         fields.get("udf3", ""), fields.get("udf4", ""), fields.get("udf5", ""),
         "", "", "", "", "", PAYU_SALT,
     ]
+    if fields.get("additional_charges"):
+        values.append(fields["additional_charges"])
     return hashlib.sha512("|".join(_payu_text(v) for v in values).encode()).hexdigest()
 
 
 def verify_payu_response(fields: dict) -> bool:
-    """Verify PayU's reverse response hash before trusting its status."""
+    """Verify PayU's reverse response hash before trusting its status.
+
+    PayU prefixes the sequence with the charge when it posts one back and
+    drops the column when it does not - and its own documentation does not
+    say which way an empty charge goes. Both candidates are built, and
+    either may match. That is not a weaker check: each is still the
+    salt-signed digest of this exact response, and the salt never leaves
+    this process. Picking one convention is the dangerous option, because a
+    success callback rejected here is money taken and premium never
+    granted.
+    """
     if not (PAYU_KEY and PAYU_SALT and fields.get("hash")
             and hmac.compare_digest(_payu_text(fields.get("key")), PAYU_KEY)):
         return False
-    values = [
-        fields.get("additionalCharges", fields.get("additional_charges", "")),
+    tail = [
         PAYU_SALT, fields.get("status", ""), "", "", "", "", "", "", "",
         "", "", "", fields.get("email", ""), fields.get("firstname", ""),
         fields.get("productinfo", ""), fields.get("amount", ""),
         fields.get("txnid", ""), fields.get("key", ""),
     ]
-    expected = hashlib.sha512(
-        "|".join(_payu_text(v) for v in values).encode()).hexdigest()
-    return hmac.compare_digest(expected, _payu_text(fields.get("hash")))
+    charges = fields.get("additionalCharges",
+                         fields.get("additional_charges", ""))
+    given = _payu_text(fields.get("hash"))
+    for values in ([charges] + tail, tail):
+        expected = hashlib.sha512(
+            "|".join(_payu_text(v) for v in values).encode()).hexdigest()
+        if hmac.compare_digest(expected, given):
+            return True
+    return False
+
+
+def _payu_paid_amount(fields: dict):
+    """What PayU actually debited: the plan price plus the charge it added.
+
+    `amount` comes back as the transaction amount we posted - the plan
+    price - and the charge applied to the mode the customer chose rides
+    beside it in `additionalCharges`. Reading `amount` alone would log an
+    AMOUNT MISMATCH against the plan total on every successful payment,
+    which is how a real mismatch stops being worth reading.
+    """
+    if fields.get("amount") in (None, ""):
+        return None
+    try:
+        paid = money(fields["amount"])
+    except Exception:  # noqa: BLE001
+        return None
+    extra = fields.get("additionalCharges",
+                       fields.get("additional_charges"))
+    if extra not in (None, ""):
+        try:
+            paid += money(extra)
+        except Exception:  # noqa: BLE001
+            # Never fatal: the charge is a detail of the receipt, the
+            # payment itself is already made.
+            log.warning("PayU reported an unreadable additionalCharges %r "
+                        "on %s", extra, fields.get("txnid"))
+    return float(paid)
 
 
 def _parse_payu_response(fields: dict) -> dict:
@@ -4864,8 +4934,7 @@ def _parse_payu_response(fields: dict) -> dict:
         "our_id": txnid,
         "gateway_order_id": txnid,
         "marker": mihpayid or txnid,
-        "amount": (float(money(fields["amount"]))
-                   if fields.get("amount") not in (None, "") else None),
+        "amount": _payu_paid_amount(fields),
         "event_key": (f"payu:paid:{txnid}" if success and txnid else
                       f"payu:{status}:{mihpayid or txnid}"),
     }
@@ -10638,13 +10707,22 @@ async def _razorpay_open_order(sub_id: str, plan_key: str, charged: float,
     }
 
 
-def _payu_form(sub_id: str, plan_key: str, charged: float, user: User) -> dict:
-    """Build the fields for PayU's hosted checkout form POST."""
+def _payu_form(sub_id: str, plan_key: str, bill: dict, user: User) -> dict:
+    """Build the fields for PayU's hosted checkout form POST.
+
+    `amount` is the plan price, and the fee rides beside it in
+    `additional_charges` rather than the two being added up here. PayU
+    bills the sum either way; the difference is that its page can then
+    show what the extra is, instead of one "Total Payable" that is larger
+    than the price the customer agreed to and says nothing about why. With
+    no fee configured the field is absent and the form is what it was.
+    """
     name = (user.name or "Learner").strip().split()
+    added = money(bill["total"]) - money(bill["base_amount"])
     fields = {
         "key": PAYU_KEY,
         "txnid": sub_id,
-        "amount": f"{money(charged):.2f}",
+        "amount": f"{money(bill['base_amount']):.2f}",
         "productinfo": (BILLING_PLANS.get(plan_key) or {}).get("name", plan_key),
         "firstname": name[0] if name else "Learner",
         "email": user.email,
@@ -10653,6 +10731,8 @@ def _payu_form(sub_id: str, plan_key: str, charged: float, user: User) -> dict:
         "furl": f"{ALLOWED_ORIGINS[0]}/api/billing/webhook",
         "udf1": sub_id,
     }
+    if added > 0:
+        fields["additional_charges"] = payu_additional_charges(added)
     fields["hash"] = payu_request_hash(fields)
     return fields
 
@@ -10710,7 +10790,7 @@ async def billing_subscribe(body: SubscribeIn,
                 "gateway_order_id": sub_id,
                 "session_id": None,
                 "checkout": {"action": PAYU_BASE_URL,
-                              "fields": _payu_form(sub_id, plan_key, charged, user)},
+                              "fields": _payu_form(sub_id, plan_key, bill, user)},
             }
         else:
             opened = await _cashfree_open_order(sub_id, charged, user)

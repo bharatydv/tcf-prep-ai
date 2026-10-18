@@ -1,10 +1,11 @@
 import { useEffect, useMemo } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { CheckCircle } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 import { useT } from '../i18n';
 import { Seo, SITE_URL } from '../lib/seo';
 import { useBillingPlans } from '../lib/plans';
+import { useCheckout } from '../lib/checkout';
 import { trackViewPricing } from '../lib/analytics';
 import ReviewsSection from '../components/ReviewsSection';
 
@@ -23,10 +24,9 @@ export default function Pricing() {
   // be the catalogue's rather than a guess — the whole point of the schema is
   // that it agrees with what the page charges.
   const { plans, currency, configured, loading } = useBillingPlans();
-  /* The plan buttons open /checkout/:planId rather than the gateway. The
-     order summary, the itemised total and the phone prompt all live there
-     now, so this page carries no checkout state at all. */
-  const navigate = useNavigate();
+  /* Checkout lives in lib/checkout.js so the landing page can open the same
+     one. This page is now a caller like any other. */
+  const { subscribe, busy, promptDialog } = useCheckout();
 
   // Reaching the pricing page is the step before checkout, and the gap
   // between the two is the most useful number in the funnel.
@@ -88,6 +88,7 @@ export default function Pricing() {
           collapsed FAQ item underneath them. Now driven by whether the server
           actually holds payment credentials, rather than a hardcoded flag that
           someone has to remember to flip. */}
+      {promptDialog}
       {!loading && !configured && (
         <div className="mx-auto mt-6 max-w-2xl rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-center"
           data-testid="pricing-unavailable-notice">
@@ -143,10 +144,10 @@ export default function Pricing() {
                 PayU asks for. See INTERNATIONAL_CARD_FEE_PERCENT. */}
             <div className="px-6 pb-6">
               {configured ? (
-                <button onClick={() => navigate(`/checkout/${p.id}`)}
+                <button onClick={() => subscribe(p.id)} disabled={Boolean(busy)}
                   className="btn-primary w-full justify-center !bg-gradient-to-r !from-primary !to-fuchsia-600 disabled:opacity-60"
                   data-testid={`plan-cta-${p.name.toLowerCase()}`}>
-                  {t('pricing.subscribe')}
+                  {busy === p.id ? t('billing.redirecting') : t('pricing.subscribe')}
                 </button>
               ) : (
                 <button disabled
