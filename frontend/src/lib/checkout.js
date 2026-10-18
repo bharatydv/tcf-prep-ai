@@ -55,6 +55,20 @@ function loadGatewayScript(src, globalName) {
   });
 }
 
+/* Where the learner was standing when they decided to buy.
+ *
+ * The gateway takes the whole tab and posts the browser back to
+ * /billing/return, a page that knows nothing about what came before it.
+ * Somebody who pressed Cancel wants the page they left — the plan cards, or
+ * the paywall they hit mid-exercise — not a page about having cancelled.
+ *
+ * sessionStorage rather than localStorage: it is scoped to this tab and dies
+ * with it, which is exactly the life of one checkout. It survives the round
+ * trip through the gateway because that is a navigation, not a new tab. And
+ * it is a path on our own site, never a URL, so nothing read back out of it
+ * can send anyone off-site. */
+export const CHECKOUT_ORIGIN = 'pf.checkoutFrom';
+
 export function useCheckout() {
   const { user, refreshUser } = useAuth();
   const t = useT();
@@ -227,6 +241,10 @@ export function useCheckout() {
     }
     if (busy) return false;
     setBusy(planId);
+    try {
+      sessionStorage.setItem(CHECKOUT_ORIGIN,
+                             window.location.pathname + window.location.search);
+    } catch { /* storage blocked — the return page keeps its own screen */ }
     /* One call, two systems: GA4 gets checkout_start and the backend funnel
        keeps the checkout_start it already had. See lib/analytics.js. */
     trackCheckoutStart({ plan: planId });

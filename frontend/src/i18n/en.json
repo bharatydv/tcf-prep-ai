@@ -268,6 +268,11 @@
     "activeBody": "Your subscription is active. Every premium feature is unlocked.",
     "activeTitle": "Payment confirmed",
     "activeUntil": "Your subscription is active until {{date}}.",
+    "cancelledBody": "You stopped before paying, so nothing was charged and your plan has not changed. Pick up where you left off whenever you are ready.",
+    "cancelledTitle": "Payment cancelled",
+    "cancelledToast": "Payment cancelled — nothing was charged.",
+    "declinedBody": "The payment did not go through and you have not been charged. This is usually the card or the bank rather than anything you did — another card, or the same one in a minute, normally works.",
+    "declinedTitle": "That payment did not go through",
     "checking": "Confirming your payment…",
     "checkingBody": "This takes a few seconds. Please do not close this page.",
     "failed": "The payment could not be started. Please try again.",
@@ -279,7 +284,8 @@
     "phoneTitle": "One more thing",
     "phoneWhy": "Your card issuer needs a phone number to authorise a subscription. It is used for this payment only.",
     "redirecting": "Redirecting…",
-    "toDashboard": "Go to my dashboard"
+    "toDashboard": "Go to my dashboard",
+    "tryAgain": "Try again"
   },
   "blog": {
     "allArticles": "All articles",
@@ -372,14 +378,6 @@
     "subtitle": "Paste any French text you wrote elsewhere — homework, an old essay, something a tutor corrected. It runs through the same AI grading, and every error joins your personal mistake history.",
     "textPlaceholder": "Paste your French text here…",
     "title": "Check my writing"
-  },
-  "checkout": {
-    "close": "Close checkout",
-    "loading": "Loading your order…",
-    "note": "You will be taken to our payment provider to finish the payment. Your card details are never sent to prepfrancais.",
-    "pay": "Pay {{amount}}",
-    "secure": "Secure payment",
-    "title": "Checkout"
   },
   "combo": {
     "heroA": "Recent",
